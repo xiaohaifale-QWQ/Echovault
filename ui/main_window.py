@@ -16,7 +16,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QSplitter, QMenuBar, QMenu, QStatusBar,
     QMessageBox, QFileDialog, QLabel, QWidget, QVBoxLayout,
-    QTabWidget, QPushButton,
+    QTabWidget, QPushButton, QProgressBar,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
@@ -151,6 +151,12 @@ class MainWindow(QMainWindow):
         
         self.status_label = QLabel("就绪")
         self.statusbar.addWidget(self.status_label)
+        
+        self.trans_progress = QProgressBar()
+        self.trans_progress.setMaximumWidth(250)
+        self.trans_progress.setMaximumHeight(16)
+        self.trans_progress.setVisible(False)
+        self.statusbar.addWidget(self.trans_progress)
         
         self.count_label = QLabel("")
         self.statusbar.addPermanentWidget(self.count_label)
@@ -293,20 +299,22 @@ class MainWindow(QMainWindow):
         self.worker.finished.connect(self._on_transcribe_finished)
         self.worker.song_done.connect(self._on_song_done)
         
+        self.trans_progress.setVisible(True)
+        self.trans_progress.setMaximum(len(files))
+        self.trans_progress.setValue(0)
         self.status_label.setText(f"识别中... 0/{len(files)}")
         self.worker.start()
     
     def _on_transcribe_progress(self, current: int, total: int, filename: str):
-        """识别进度更新"""
-        self.status_label.setText(f"识别中... {current}/{total} — {filename}")
+        self.trans_progress.setValue(current)
+        self.status_label.setText(f"识别中... {current}/{total} - {filename}")
     
     def _on_song_done(self, file_path: str, lrc_path: str, success: bool):
-        """单首歌识别完成"""
         self.song_list_panel.update_song_status(file_path, success)
         self._refresh_statusbar()
     
     def _on_transcribe_finished(self, results: dict):
-        """全部识别完成"""
+        self.trans_progress.setVisible(False)
         success = sum(1 for v in results.values() if v["success"])
         failed = len(results) - success
         self.status_label.setText(f"识别完成: 成功 {success}, 失败 {failed}")
