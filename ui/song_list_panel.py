@@ -1,12 +1,12 @@
-"""Song list panel with filter + format column"""
+"""Song list with filters + inline rename"""
+import os
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
-    QLabel, QLineEdit, QHBoxLayout, QAbstractItemView, QComboBox)
+    QLabel, QLineEdit, QHBoxLayout, QAbstractItemView, QComboBox, QInputDialog, QMessageBox)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush
 
 COLOR_HAS_LRC = QColor(76, 175, 80)
-
 def _fmt_size(b): return f"{b/1024:.0f}KB" if b>1024 else f"{b}B"
 
 class SongListPanel(QWidget):
@@ -17,7 +17,7 @@ class SongListPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._songs = []; self._filter_type = "no_lrc"; self._setup_ui()
-        self.filter_combo.setCurrentIndex(2)  # 默认"无歌词"
+        self.filter_combo.setCurrentIndex(2)
 
     def _setup_ui(self):
         l = QVBoxLayout(self); l.setContentsMargins(4,4,4,4)
@@ -25,10 +25,10 @@ class SongListPanel(QWidget):
         t = QLabel("歌曲列表"); t.setStyleSheet("font-weight:bold;font-size:13px;padding:4px")
         h.addWidget(t); h.addStretch()
         self.search_box = QLineEdit(); self.search_box.setPlaceholderText("搜索...")
-        self.search_box.setClearButtonEnabled(True); self.search_box.setMaximumWidth(150)
+        self.search_box.setClearButtonEnabled(True); self.search_box.setMaximumWidth(130)
         self.search_box.textChanged.connect(self._do_refresh); h.addWidget(self.search_box)
-        self.filter_combo = QComboBox(); self.filter_combo.addItems(["全部","有歌词","无歌词"])
-        self.filter_combo.setMaximumWidth(80); self.filter_combo.currentIndexChanged.connect(self._on_filter); h.addWidget(self.filter_combo)
+        self.filter_combo = QComboBox(); self.filter_combo.setMaximumWidth(90)
+        self.filter_combo.currentIndexChanged.connect(self._on_filter); h.addWidget(self.filter_combo)
         l.addLayout(h)
         self.table = QTableWidget(); self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(["歌曲名称","格式","状态","大小","文件夹","路径"])
@@ -41,9 +41,22 @@ class SongListPanel(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True); self.table.verticalHeader().setVisible(False); self.table.setShowGrid(False)
-        self.table.itemSelectionChanged.connect(self._on_sel); l.addWidget(self.table)
+        self.table.itemSelectionChanged.connect(self._on_sel)
+        self.table.cellDoubleClicked.connect(self._on_double_click)
+        l.addWidget(self.table)
 
-    def load_songs(self, songs): self._songs = songs; self._do_refresh()
+    def _build_filter_items(self):
+        formats = sorted(set(Path(s["name"]).suffix.upper() for s in self._songs))
+        self.filter_combo.blockSignals(True)
+        cur = self.filter_combo.currentText()
+        self.filter_combo.clear()
+        self.filter_combo.addItems(["全部","有歌词","无歌词"] + formats)
+        idx = self.filter_combo.findText(cur)
+        self.filter_combo.setCurrentIndex(idx if idx >= 0 else 2)
+        self.filter_combo.blockSignals(False)
+
+    def load_songs(self, songs):
+        self._songs = songs; self._build_filter_items(); self._do_refresh()
 
     def _do_refresh(self, *a):
         self.table.setRowCount(0); f = self._songs
@@ -51,6 +64,9 @@ class SongListPanel(QWidget):
         if t: f = [s for s in f if t in s["name"].lower()]
         if self._filter_type == "has_lrc": f = [s for s in f if s.get("has_lrc")]
         elif self._filter_type == "no_lrc": f = [s for s in f if not s.get("has_lrc")]
+        elif self._filter_type.startswith("."):
+            fmt = self._filter_type.lstrip(".").upper()
+            f = [s for s in f if Path(s["name"]).suffix.upper() == fmt]
         self.table.setRowCount(len(f))
         for i, s in enumerate(f):
             n = QTableWidgetItem(s["name"]); n.setData(Qt.ItemDataRole.UserRole, s); self.table.setItem(i, 0, n)
@@ -67,14 +83,46 @@ class SongListPanel(QWidget):
         self.model_updated.emit()
 
     def _on_filter(self, idx):
-        types = ["all","has_lrc","no_lrc"]; self._filter_type = types[idx] if idx < len(types) else "all"; self._do_refresh()
+        txt = self.filter_combo.currentText()
+        if txt == "全部": self._filter_type = "all"
+        elif txt == "有歌词": self._filter_type = "has_lrc"
+        elif txt == "无歌词": self._filter_type = "no_lrc"
+        else: self._filter_type = txt.lower()
+        self._do_refresh()
 
     def _on_sel(self):
         sel = self.get_selected_songs()
         if sel: self.song_selected.emit(sel[0])
 
+    def _on_double_click(self, row, col):
+        """双击改名"""
+        if col != self.COL_NAME: return
+        item = self.table.item(row, 0)
+        if not item: return
+        song = item.data(Qt.ItemDataRole.UserRole)
+        if not song: return
+        old_path = Path(song["path"])
+        old_name = old_path.name
+        
+        new_name, ok = QInputDialog.getText(self, "重命名", "新文件名:", text=old_name)
+        if not ok or not new_name.strip() or new_name.strip() == old_name: return
+        new_name = new_name.strip()
+        new_path = old_path.parent / new_name
+        
+        try:
+            os.rename(str(old_path), str(new_path))
+            song["path"] = str(new_path); song["name"] = new_name
+            old_lrc = old_path.with_suffix(".lrc")
+            new_lrc = new_path.with_suffix(".lrc")
+            if old_lrc.exists():
+                os.rename(str(old_lrc), str(new_lrc))
+                song["lrc_path"] = str(new_lrc)
+            self._build_filter_items(); self._do_refresh()
+        except Exception as e:
+            QMessageBox.critical(self, "重命名失败", str(e))
+
     def get_selected_songs(self):
-        s = []; 
+        s = []
         for i in self.table.selectedItems():
             d = i.data(Qt.ItemDataRole.UserRole)
             if d and d not in s: s.append(d)
@@ -89,7 +137,6 @@ class SongListPanel(QWidget):
                 if ok: s["lrc_path"] = str(Path(fp).with_suffix(".lrc"))
                 break
         self._do_refresh()
-        # 重新选中并触发预览刷新
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 0)
             if item and item.data(Qt.ItemDataRole.UserRole).get("path") == fp:
