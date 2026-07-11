@@ -302,7 +302,7 @@ class MainWindow(QMainWindow):
     
     def _on_song_done(self, file_path: str, lrc_path: str, success: bool):
         """单首歌识别完成"""
-        self.song_list_panel.update_song_status(file_path, has_lrc=success)
+        self.song_list_panel.update_song_status(file_path, success)
         self._refresh_statusbar()
     
     def _on_transcribe_finished(self, results: dict):
@@ -328,7 +328,7 @@ class MainWindow(QMainWindow):
         
         # 编辑器关闭后刷新状态
         has_lrc = os.path.exists(lrc_path)
-        self.song_list_panel.update_song_status(file_path, has_lrc=has_lrc)
+        self.song_list_panel.update_song_status(file_path, has_lrc)
         self._refresh_statusbar()
     
     def _on_settings(self):
