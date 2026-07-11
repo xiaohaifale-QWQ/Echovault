@@ -104,12 +104,18 @@ class SongListPanel(QWidget):
         old_stem = old_path.stem
         old_ext = old_path.suffix
         
-        new_stem, ok = QInputDialog.getText(self, "重命名", "新文件名:", text=old_stem)
-        if not ok or not new_stem.strip() or new_stem.strip() == old_stem: return
-        new_stem = new_stem.strip()
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout as VL, QDialogButtonBox as DBB
+        dlg = QDialog(self); dlg.setWindowTitle("重命名")
+        ll = VL(dlg)
+        le = QLineEdit(old_stem); ll.addWidget(le)
+        bb = DBB(DBB.StandardButton.Ok | DBB.StandardButton.Cancel); bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        ll.addWidget(bb)
+        if not dlg.exec(): return
+        new_stem = le.text().strip()
+        if not new_stem or new_stem == old_stem: return
+        
         new_name = new_stem + old_ext
         new_path = old_path.parent / new_name
-        
         try:
             os.rename(str(old_path), str(new_path))
             song["path"] = str(new_path); song["name"] = new_name
@@ -118,15 +124,15 @@ class SongListPanel(QWidget):
             if old_lrc.exists():
                 os.rename(str(old_lrc), str(new_lrc))
                 song["lrc_path"] = str(new_lrc)
-            self._build_filter_items(); self._do_refresh()
-            for r in range(self.table.rowCount()):
-                it = self.table.item(r, 0)
-                if it and it.data(Qt.ItemDataRole.UserRole).get("path") == song["path"]:
-                    self.table.selectRow(r)
-                    self.song_selected.emit(it.data(Qt.ItemDataRole.UserRole))
-                    break
         except Exception as e:
             QMessageBox.critical(self, "重命名失败", str(e))
+            return
+        self._build_filter_items(); self._do_refresh()
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, 0)
+            if it and it.data(Qt.ItemDataRole.UserRole).get("path") == song["path"]:
+                self.table.selectRow(r); self.song_selected.emit(it.data(Qt.ItemDataRole.UserRole))
+                break
 
     def get_selected_songs(self):
         s = []
