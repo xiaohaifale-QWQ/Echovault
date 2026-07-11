@@ -1,29 +1,30 @@
-"""Song list panel with filter + format column"""
+"""Song list panel with filter + format column + library toggle"""
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
-    QLabel, QLineEdit, QHBoxLayout, QAbstractItemView, QComboBox)
+    QLabel, QLineEdit, QHBoxLayout, QAbstractItemView, QComboBox, QPushButton)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush
 
 COLOR_HAS_LRC = QColor(76, 175, 80)
-COLOR_NO_LRC = QColor(158, 158, 158)
 
 def _fmt_size(b): return f"{b/1024:.0f}KB" if b>1024 else f"{b}B"
 
 class SongListPanel(QWidget):
     song_selected = pyqtSignal(dict)
     model_updated = pyqtSignal()
+    toggle_library = pyqtSignal()
     COL_NAME, COL_FORMAT, COL_STATUS, COL_SIZE, COL_FOLDER, COL_PATH = 0, 1, 2, 3, 4, 5
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._songs = []
-        self._filter_type = "all"
-        self._setup_ui()
+        self._songs = []; self._filter_type = "all"; self._setup_ui()
 
     def _setup_ui(self):
         l = QVBoxLayout(self); l.setContentsMargins(4,4,4,4)
         h = QHBoxLayout()
+        self.btn_lib = QPushButton("\u2630"); self.btn_lib.setFixedSize(24,24)
+        self.btn_lib.setToolTip("显示/隐藏音乐库"); self.btn_lib.setStyleSheet("QPushButton{border:none;font-size:14px;color:#888}QPushButton:hover{color:#333}")
+        self.btn_lib.clicked.connect(self.toggle_library.emit); h.addWidget(self.btn_lib)
         t = QLabel("歌曲列表"); t.setStyleSheet("font-weight:bold;font-size:13px;padding:4px")
         h.addWidget(t); h.addStretch()
         self.search_box = QLineEdit(); self.search_box.setPlaceholderText("搜索...")
@@ -32,7 +33,6 @@ class SongListPanel(QWidget):
         self.filter_combo = QComboBox(); self.filter_combo.addItems(["全部","有歌词","无歌词"])
         self.filter_combo.setMaximumWidth(80); self.filter_combo.currentIndexChanged.connect(self._on_filter); h.addWidget(self.filter_combo)
         l.addLayout(h)
-
         self.table = QTableWidget(); self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(["歌曲名称","格式","状态","大小","文件夹","路径"])
         self.table.setColumnHidden(self.COL_PATH, True)
@@ -44,14 +44,12 @@ class SongListPanel(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True); self.table.verticalHeader().setVisible(False); self.table.setShowGrid(False)
-        self.table.itemSelectionChanged.connect(self._on_sel)
-        l.addWidget(self.table)
+        self.table.itemSelectionChanged.connect(self._on_sel); l.addWidget(self.table)
 
     def load_songs(self, songs): self._songs = songs; self._do_refresh()
 
     def _do_refresh(self, *a):
-        self.table.setRowCount(0)
-        f = self._songs
+        self.table.setRowCount(0); f = self._songs
         t = self.search_box.text().lower()
         if t: f = [s for s in f if t in s["name"].lower()]
         if self._filter_type == "has_lrc": f = [s for s in f if s.get("has_lrc")]
@@ -79,7 +77,7 @@ class SongListPanel(QWidget):
         if sel: self.song_selected.emit(sel[0])
 
     def get_selected_songs(self):
-        s = []
+        s = []; 
         for i in self.table.selectedItems():
             d = i.data(Qt.ItemDataRole.UserRole)
             if d and d not in s: s.append(d)

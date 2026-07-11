@@ -188,6 +188,15 @@ class MainWindow(QMainWindow):
         
         # 刷新计数
         self.song_list_panel.model_updated.connect(self._refresh_statusbar)
+        
+        # 折叠音乐库
+        self.song_list_panel.toggle_library.connect(self._toggle_library)
+        self._library_visible = True
+    
+    def _toggle_library(self):
+        self._library_visible = not self._library_visible
+        self.library_panel.setVisible(self._library_visible)
+        self.song_list_panel.btn_lib.setText("\u2630" if self._library_visible else "\u00D7")
     
     # ─── 事件处理 ─────────────────────────────
     
