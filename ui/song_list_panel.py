@@ -68,7 +68,7 @@ class SongListPanel(QWidget):
         elif self._filter_type == "no_lrc": f = [s for s in f if not s.get("has_lrc")]
         else:
             fmt = self._filter_type.upper().lstrip(".")
-            f = [s for s in f if Path(s["name"]).suffix.upper() == fmt]
+            f = [s for s in f if Path(s["name"]).suffix.upper().lstrip(".") == fmt]
         self.table.setRowCount(len(f))
         for i, s in enumerate(f):
             n = QTableWidgetItem(Path(s["name"]).stem); n.setData(Qt.ItemDataRole.UserRole, s); self.table.setItem(i, 0, n)
