@@ -10,7 +10,7 @@ from core.config import AppConfig, config_manager
 
 
 # Whisper 模型下载 URL (OpenAI 官方 + 各镜像)
-_GH_RELEASE = "https://github.com/xiaohaifale-QWQ/whisper-models/releases/download/v1.0"
+_GH_RELEASE = "https://github.com/xiaohaifale-QWQ/MusicSync/releases/download/models"
 
 class _DownloadWorker(QThread):
     progress = pyqtSignal(int, str)
