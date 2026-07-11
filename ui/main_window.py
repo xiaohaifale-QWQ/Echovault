@@ -301,6 +301,18 @@ class MainWindow(QMainWindow):
     
     def _on_song_done(self, file_path: str, lrc_path: str, success: bool):
         self.song_list_panel.update_song_status(file_path, success)
+        # 自动检测纯音乐：歌词太短（<20字）可能是纯音乐
+        if success and lrc_path and os.path.exists(lrc_path):
+            try:
+                text = Path(lrc_path).read_text(encoding="utf-8")
+                # 提取所有歌词文本（去掉时间戳和元数据）
+                import re
+                lyric_text = "".join(re.findall(r'\](\S.*)', text))
+                chars = len(lyric_text.replace(" ", ""))
+                if chars < 20:
+                    self.song_list_panel.mark_instrumental(file_path, auto=True)
+                    self.status_label.setText(f"检测到疑似纯音乐: {Path(file_path).name} ({chars}字)")
+            except: pass
         self._refresh_statusbar()
     
     def _on_transcribe_finished(self, results: dict):

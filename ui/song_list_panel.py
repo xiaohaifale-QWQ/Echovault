@@ -19,7 +19,7 @@ class SongListPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._songs = []; self._instrumental = set(); self._inst_file = None
+        self._songs = []; self._instrumental = set(); self._auto_inst = set(); self._inst_file = None
         self._setup_ui()
         self.lyric_filter.setCurrentIndex(2)  # default "no lyrics"
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -105,7 +105,8 @@ class SongListPanel(QWidget):
             n = QTableWidgetItem(Path(s["name"]).stem); n.setData(Qt.ItemDataRole.UserRole, s); self.table.setItem(i, 0, n)
             fmt = Path(s["name"]).suffix.lstrip(".").upper()
             fi = QTableWidgetItem(fmt); fi.setTextAlignment(Qt.AlignmentFlag.AlignCenter); self.table.setItem(i, 1, fi)
-            if s.get("instrumental"): st = "纯"; c = COLOR_INST
+            if s.get("instrumental_auto"): st = "纯?"; c = COLOR_INST
+            elif s.get("instrumental"): st = "纯"; c = COLOR_INST
             elif s.get("has_lrc"): st = "OK"; c = COLOR_HAS_LRC
             else: st = "--"; c = QColor(158,158,158)
             si = QTableWidgetItem(st); si.setTextAlignment(Qt.AlignmentFlag.AlignCenter); si.setForeground(QBrush(c))
@@ -137,11 +138,25 @@ class SongListPanel(QWidget):
         menu.addAction(act)
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
+    def mark_instrumental(self, fp, auto=False):
+        """标记为纯音乐（auto=True 表示自动检测）"""
+        if auto:
+            self._auto_inst.add(fp)
+        self._instrumental.add(fp)
+        for s in self._songs:
+            if s["path"] == fp:
+                s["instrumental"] = True
+                s["instrumental_auto"] = auto
+                break
+        self._save_instrumental()
+        self._do_refresh()
+
     def _toggle_instrumental(self, songs, mark):
         for s in songs:
             s["instrumental"] = mark
-            if mark: self._instrumental.add(s["path"])
-            else: self._instrumental.discard(s["path"])
+            s.pop("instrumental_auto", None)
+            if mark: self._instrumental.add(s["path"]); self._auto_inst.discard(s["path"])
+            else: self._instrumental.discard(s["path"]); self._auto_inst.discard(s["path"])
         self._save_instrumental()
         self._do_refresh()
 
