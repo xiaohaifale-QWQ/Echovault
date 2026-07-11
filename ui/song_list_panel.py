@@ -61,7 +61,7 @@ class SongListPanel(QWidget):
     def _do_refresh(self, *a):
         self.table.setRowCount(0); f = self._songs
         t = self.search_box.text().lower()
-        if t: f = [s for s in f if t in s["name"].lower()]
+        if t: f = [s for s in f if t in Path(s["name"]).stem.lower()]
         if self._filter_type == "has_lrc": f = [s for s in f if s.get("has_lrc")]
         elif self._filter_type == "no_lrc": f = [s for s in f if not s.get("has_lrc")]
         elif self._filter_type.startswith("."):
@@ -69,7 +69,7 @@ class SongListPanel(QWidget):
             f = [s for s in f if Path(s["name"]).suffix.upper() == fmt]
         self.table.setRowCount(len(f))
         for i, s in enumerate(f):
-            n = QTableWidgetItem(s["name"]); n.setData(Qt.ItemDataRole.UserRole, s); self.table.setItem(i, 0, n)
+            n = QTableWidgetItem(Path(s["name"]).stem); n.setData(Qt.ItemDataRole.UserRole, s); self.table.setItem(i, 0, n)
             fmt = Path(s["name"]).suffix.lstrip(".").upper()
             fi = QTableWidgetItem(fmt); fi.setTextAlignment(Qt.AlignmentFlag.AlignCenter); self.table.setItem(i, 1, fi)
             st = "OK" if s.get("has_lrc") else "--"
@@ -95,18 +95,19 @@ class SongListPanel(QWidget):
         if sel: self.song_selected.emit(sel[0])
 
     def _on_double_click(self, row, col):
-        """双击改名"""
         if col != self.COL_NAME: return
         item = self.table.item(row, 0)
         if not item: return
         song = item.data(Qt.ItemDataRole.UserRole)
         if not song: return
         old_path = Path(song["path"])
-        old_name = old_path.name
+        old_stem = old_path.stem
+        old_ext = old_path.suffix
         
-        new_name, ok = QInputDialog.getText(self, "重命名", "新文件名:", text=old_name)
-        if not ok or not new_name.strip() or new_name.strip() == old_name: return
-        new_name = new_name.strip()
+        new_stem, ok = QInputDialog.getText(self, "重命名", "新文件名:", text=old_stem)
+        if not ok or not new_stem.strip() or new_stem.strip() == old_stem: return
+        new_stem = new_stem.strip()
+        new_name = new_stem + old_ext
         new_path = old_path.parent / new_name
         
         try:
@@ -118,6 +119,12 @@ class SongListPanel(QWidget):
                 os.rename(str(old_lrc), str(new_lrc))
                 song["lrc_path"] = str(new_lrc)
             self._build_filter_items(); self._do_refresh()
+            for r in range(self.table.rowCount()):
+                it = self.table.item(r, 0)
+                if it and it.data(Qt.ItemDataRole.UserRole).get("path") == song["path"]:
+                    self.table.selectRow(r)
+                    self.song_selected.emit(it.data(Qt.ItemDataRole.UserRole))
+                    break
         except Exception as e:
             QMessageBox.critical(self, "重命名失败", str(e))
 
