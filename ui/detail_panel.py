@@ -140,14 +140,11 @@ class DetailPanel(QWidget):
         try:
             lrc = parse_lrc_file(lrc_path)
             lines = []
-            for line in sorted(lrc.lines, key=lambda l: l.timestamp)[:30]:  # 最多显示30行
+            for line in sorted(lrc.lines, key=lambda l: l.timestamp):
                 minutes = int(line.timestamp // 60)
                 seconds = line.timestamp % 60
                 ts = f"[{minutes:02d}:{seconds:05.2f}]"
                 lines.append(f"{ts} {line.text}")
-            
-            if len(lrc.lines) > 30:
-                lines.append(f"... 共 {len(lrc.lines)} 行")
             
             self.lyrics_text.setPlainText("\n".join(lines))
         except Exception as e:

@@ -16,7 +16,8 @@ class SongListPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._songs = []; self._filter_type = "all"; self._setup_ui()
+        self._songs = []; self._filter_type = "no_lrc"; self._setup_ui()
+        self.filter_combo.setCurrentIndex(2)  # 默认"无歌词"
 
     def _setup_ui(self):
         l = QVBoxLayout(self); l.setContentsMargins(4,4,4,4)
