@@ -89,5 +89,10 @@ class SongListPanel(QWidget):
                 if ok: s["lrc_path"] = str(Path(fp).with_suffix(".lrc"))
                 break
         self._do_refresh()
-        sel = self.get_selected_songs()
-        if sel: self.song_selected.emit(sel[0])
+        # 重新选中并触发预览刷新
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item and item.data(Qt.ItemDataRole.UserRole).get("path") == fp:
+                self.table.selectRow(row)
+                self.song_selected.emit(item.data(Qt.ItemDataRole.UserRole))
+                break
