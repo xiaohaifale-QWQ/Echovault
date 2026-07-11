@@ -122,7 +122,6 @@ class SongListPanel(QWidget):
         if sel: self.song_selected.emit(sel[0])
 
     def _on_context_menu(self, pos):
-        """右键菜单：标记/取消纯音乐"""
         items = self.table.selectedItems()
         if not items: return
         songs = self.get_selected_songs()
@@ -131,10 +130,13 @@ class SongListPanel(QWidget):
         menu = QMenu(self)
         if all_inst:
             act = QAction("取消纯音乐标记", self)
-            act.triggered.connect(lambda: self._toggle_instrumental(songs, False))
+            # 用 functools 避免 lambda 闭包问题
+            from functools import partial
+            act.triggered.connect(partial(self._toggle_instrumental, songs, False))
         else:
             act = QAction("标记为纯音乐", self)
-            act.triggered.connect(lambda: self._toggle_instrumental(songs, True))
+            from functools import partial
+            act.triggered.connect(partial(self._toggle_instrumental, songs, True))
         menu.addAction(act)
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
@@ -152,18 +154,22 @@ class SongListPanel(QWidget):
         self._do_refresh()
 
     def _toggle_instrumental(self, songs, mark):
-        for s in songs:
-            s["instrumental"] = mark
-            s.pop("instrumental_auto", None)
-            if mark: self._instrumental.add(s["path"]); self._auto_inst.discard(s["path"])
-            else: self._instrumental.discard(s["path"]); self._auto_inst.discard(s["path"])
+        # songs 来自 table item 是副本，用 path 在 _songs 中找到原始数据更新
+        paths = {s["path"] for s in songs}
+        for s in self._songs:
+            if s["path"] in paths:
+                s["instrumental"] = mark
+                s.pop("instrumental_auto", None)
+        if mark:
+            self._instrumental.update(paths)
+            self._auto_inst.difference_update(paths)
+        else:
+            self._instrumental.difference_update(paths)
+            self._auto_inst.difference_update(paths)
         self._save_instrumental()
-        # 如果当前筛选会隐藏这些歌曲，自动切换到"全部"
         lf = self.lyric_filter.currentIndex()
-        if mark and lf in (1, 2):  # "有歌词"或"无歌词"
-            self.lyric_filter.setCurrentIndex(0)  # 切换到"全部"
-        elif not mark and lf == 3:  # "纯音乐"
-            self.lyric_filter.setCurrentIndex(0)
+        if mark and lf in (1, 2): self.lyric_filter.setCurrentIndex(0)
+        elif not mark and lf == 3: self.lyric_filter.setCurrentIndex(0)
         self._do_refresh()
 
     def _on_double_click(self, row, col):
