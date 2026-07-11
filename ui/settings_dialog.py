@@ -17,6 +17,10 @@ class _DownloadWorker(QThread):
         super().__init__(); self.model = model
 
     def run(self):
+        # 必须在 import whisper 之前设置
+        import ssl, os as _os
+        ssl._create_default_https_context = ssl._create_unverified_context
+        _os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
         try:
             try:
                 import whisper
@@ -25,10 +29,6 @@ class _DownloadWorker(QThread):
                 subprocess.check_call([sys.executable, "-m", "pip", "install", "openai-whisper", "-q"])
                 import whisper
             self.progress.emit(f"正在下载 {self.model} 模型...")
-            # 国内网络修复：使用镜像 + 跳过SSL验证
-            import ssl, os as _os
-            ssl._create_default_https_context = ssl._create_unverified_context
-            _os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
             whisper.load_model(self.model)
             self.finished.emit(True, f"{self.model} 模型就绪")
         except subprocess.CalledProcessError:
