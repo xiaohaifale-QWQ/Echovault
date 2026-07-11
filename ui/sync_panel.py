@@ -4,22 +4,18 @@
 功能:
 - 配置本地/远程文件夹路径
 - 对比两个目录的差异
-- 显示差异列表
 - 执行同步操作
-- 启动 HTTP 文件服务
-- 启动 mDNS 设备发现
+- LocalSend 接收端 (手机 LocalSend App 直接发送文件到本机)
 """
 
 import os
-import asyncio
-import threading
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QGroupBox, QFormLayout, QLineEdit, QComboBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QAbstractItemView, QFileDialog,
-    QMessageBox, QProgressBar, QTextEdit, QSplitter,
+    QMessageBox, QProgressBar,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 
@@ -27,8 +23,7 @@ from core.sync_engine import (
     SyncEngine, SyncDirection, ConflictResolution,
     DiffType, FileDiff, SyncPlan,
 )
-from server.http_server import SyncHTTPServer
-from server.discovery import DiscoveryService, get_local_ip
+from server.localsend_receiver import LocalSendReceiver
 
 
 class SyncWorker(QThread):
@@ -57,9 +52,7 @@ class SyncPanel(QWidget):
         self.engine = SyncEngine()
         self._diffs: list[FileDiff] = []
         self._plan: SyncPlan = None
-        self._http_server: SyncHTTPServer = None
-        self._discovery: DiscoveryService = None
-        self._server_thread: threading.Thread = None
+        self._localsend: LocalSendReceiver = None
         
         self._setup_ui()
     
@@ -95,7 +88,6 @@ class SyncPanel(QWidget):
         btn_b = QPushButton("...")
         btn_b.setFixedWidth(36)
         btn_b.clicked.connect(lambda: self._browse_dir(self.dir_b_input))
-        a_layout_btn = btn_b  # keep reference
         b_layout.addWidget(btn_b)
         path_form.addRow("手机 (B):", b_layout)
         
@@ -139,12 +131,6 @@ class SyncPanel(QWidget):
         self.btn_sync.clicked.connect(self._on_sync)
         btn_layout.addWidget(self.btn_sync)
         
-        self.btn_server = QPushButton("启动服务")
-        self.btn_server.setMinimumHeight(36)
-        self.btn_server.setCheckable(True)
-        self.btn_server.toggled.connect(self._on_toggle_server)
-        btn_layout.addWidget(self.btn_server)
-        
         layout.addLayout(btn_layout)
         
         # 进度条
@@ -176,19 +162,40 @@ class SyncPanel(QWidget):
         
         layout.addWidget(diff_group)
         
-        # 设备发现
-        disc_group = QGroupBox("局域网设备")
-        disc_layout = QVBoxLayout(disc_group)
+        # LocalSend 接收端
+        ls_group = QGroupBox("LocalSend 接收")
+        ls_layout = QVBoxLayout(ls_group)
         
-        self.device_label = QLabel("未扫描")
-        self.device_label.setStyleSheet("color: #666;")
-        disc_layout.addWidget(self.device_label)
+        ls_desc = QLabel(
+            "开启后，本机在局域网中显示为 LocalSend 设备。\n"
+            "手机打开 LocalSend App 即可发现本机并发送文件到 A 路径。"
+        )
+        ls_desc.setStyleSheet("color: #666; font-size: 12px; padding: 4px;")
+        ls_desc.setWordWrap(True)
+        ls_layout.addWidget(ls_desc)
         
-        self.btn_discover = QPushButton("扫描设备")
-        self.btn_discover.clicked.connect(self._on_discover)
-        disc_layout.addWidget(self.btn_discover)
+        ls_btn_layout = QHBoxLayout()
         
-        layout.addWidget(disc_group)
+        self.btn_localsend = QPushButton("开启 LocalSend 接收")
+        self.btn_localsend.setMinimumHeight(36)
+        self.btn_localsend.setCheckable(True)
+        self.btn_localsend.toggled.connect(self._on_toggle_localsend)
+        ls_btn_layout.addWidget(self.btn_localsend)
+        
+        self.ls_status = QLabel("未启动")
+        self.ls_status.setStyleSheet("color: #999;")
+        ls_btn_layout.addWidget(self.ls_status)
+        ls_btn_layout.addStretch()
+        
+        ls_layout.addLayout(ls_btn_layout)
+        
+        self.ls_recent = QLabel("")
+        self.ls_recent.setStyleSheet("color: #4CAF50; font-size: 11px;")
+        self.ls_recent.setWordWrap(True)
+        ls_layout.addWidget(self.ls_recent)
+        
+        layout.addWidget(ls_group)
+        layout.addStretch()
     
     def set_dir_a(self, path: str):
         """设置本机目录"""
@@ -197,13 +204,11 @@ class SyncPanel(QWidget):
     # ─── 事件处理 ──────────────────────
     
     def _browse_dir(self, line_edit: QLineEdit):
-        """选择文件夹"""
         dir_path = QFileDialog.getExistingDirectory(self, "选择文件夹")
         if dir_path:
             line_edit.setText(dir_path)
     
     def _on_compare(self):
-        """对比两个目录"""
         dir_a = self.dir_a_input.text().strip()
         dir_b = self.dir_b_input.text().strip()
         
@@ -218,7 +223,6 @@ class SyncPanel(QWidget):
             self._diffs = self.engine.compare_directories(dir_a, dir_b)
             self._populate_diff_table()
             
-            # 统计
             only_a = sum(1 for d in self._diffs if d.diff_type == DiffType.ONLY_IN_A)
             only_b = sum(1 for d in self._diffs if d.diff_type == DiffType.ONLY_IN_B)
             newer = sum(1 for d in self._diffs if d.diff_type in (DiffType.NEWER_IN_A, DiffType.NEWER_IN_B))
@@ -235,7 +239,6 @@ class SyncPanel(QWidget):
             QMessageBox.critical(self, "错误", f"对比失败: {e}")
     
     def _populate_diff_table(self):
-        """填充差异表格"""
         self.diff_table.setRowCount(len(self._diffs))
         
         type_labels = {
@@ -255,14 +258,12 @@ class SyncPanel(QWidget):
             self.diff_table.setItem(row, 2, QTableWidgetItem(size_str))
     
     def _on_sync(self):
-        """执行同步"""
         dir_a = self.dir_a_input.text().strip()
         dir_b = self.dir_b_input.text().strip()
         
         if not self._diffs:
             return
         
-        # 生成计划
         direction_str = self.direction_combo.currentData()
         direction = SyncDirection(direction_str)
         
@@ -275,7 +276,6 @@ class SyncPanel(QWidget):
             QMessageBox.information(self, "提示", "没有需要同步的文件。")
             return
         
-        # 确认
         reply = QMessageBox.question(
             self, "确认同步",
             f"将执行 {self._plan.total_operations} 个操作:\n"
@@ -288,7 +288,6 @@ class SyncPanel(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
         
-        # 后台执行
         self.worker = SyncWorker(self.engine, self._plan)
         self.worker.progress.connect(self._on_sync_progress)
         self.worker.finished.connect(self._on_sync_finished)
@@ -313,73 +312,55 @@ class SyncPanel(QWidget):
             f"跳过: {stats['skipped']} | 错误: {stats['errors']}"
         )
     
-    def _on_toggle_server(self, checked: bool):
-        """启动/停止 HTTP 文件服务"""
+    # ─── LocalSend 接收端 ──────────────
+    
+    def _on_toggle_localsend(self, checked: bool):
         if checked:
             dir_a = self.dir_a_input.text().strip()
             if not dir_a:
-                QMessageBox.warning(self, "提示", "请先配置本机文件夹路径。")
-                self.btn_server.setChecked(False)
+                QMessageBox.warning(self, "提示", "请先配置本机文件夹路径 (A)。")
+                self.btn_localsend.setChecked(False)
                 return
             
-            self._start_http_server(dir_a)
+            self._start_localsend(dir_a)
         else:
-            self._stop_http_server()
+            self._stop_localsend()
     
-    def _start_http_server(self, music_dir: str):
-        """在后台线程启动 HTTP 服务"""
-        self._http_server = SyncHTTPServer(music_dir)
+    def _start_localsend(self, save_dir: str):
+        self._localsend = LocalSendReceiver(
+            save_dir=save_dir,
+            alias="MusicSync",
+            on_file_received=self._on_file_received,
+        )
+        self._localsend.start()
         
-        async def _run():
-            await self._http_server.start()
+        from server.localsend_receiver import HTTP_PORT
+        ip = self._localsend._get_local_ip()
         
-        def _thread_run():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(_run())
-            loop.run_forever()
+        self.btn_localsend.setText("关闭 LocalSend 接收")
+        self.ls_status.setText(f"运行中 - 端口 {HTTP_PORT}")
+        self.ls_status.setStyleSheet("color: #4CAF50; font-weight: bold;")
         
-        self._server_thread = threading.Thread(target=_thread_run, daemon=True)
-        self._server_thread.start()
-        
-        ip = get_local_ip()
-        self.btn_server.setText("停止服务")
         QMessageBox.information(
-            self, "服务已启动",
-            f"HTTP 文件服务已启动\n\n"
-            f"本机地址: http://{ip}:{SyncHTTPServer.DEFAULT_PORT}\n\n"
-            f"手机浏览器打开此地址即可访问文件。"
+            self, "LocalSend 已启动",
+            f"本机已作为 LocalSend 设备运行。\n\n"
+            f"设备名: MusicSync\n"
+            f"地址: {ip}:{HTTP_PORT}\n\n"
+            f"请在手机 LocalSend App 中查找 'MusicSync' 设备，\n"
+            f"选择音乐文件发送即可。文件将保存到:\n"
+            f"{save_dir}"
         )
-        
-        # 同时启动 mDNS 广播
-        self._discovery = DiscoveryService(SyncHTTPServer.DEFAULT_PORT)
-        self._discovery.start_advertising()
     
-    def _stop_http_server(self):
-        """停止 HTTP 服务"""
-        if self._discovery:
-            self._discovery.stop()
+    def _stop_localsend(self):
+        if self._localsend:
+            self._localsend.stop()
+            self._localsend = None
         
-        # aiohttp 没有同步的 stop 方法，依赖线程 daemon
-        self.btn_server.setText("启动服务")
+        self.btn_localsend.setText("开启 LocalSend 接收")
+        self.ls_status.setText("未启动")
+        self.ls_status.setStyleSheet("color: #999;")
     
-    def _on_discover(self):
-        """扫描局域网设备"""
-        if not self._discovery:
-            self._discovery = DiscoveryService()
-        
-        if not self._discovery.is_available:
-            QMessageBox.warning(self, "提示", "zeroconf 未安装，无法扫描设备。\npip install zeroconf")
-            return
-        
-        self._discovery.start_discovery(self._on_device_found)
-        self.device_label.setText("扫描中...")
-    
-    def _on_device_found(self, device: dict):
-        """发现设备回调"""
-        devices = self._discovery.get_discovered_devices()
-        text = "\n".join(
-            f"  {d['name']} — http://{d['ip']}:{d['port']}"
-            for d in devices
-        )
-        self.device_label.setText(f"已发现 {len(devices)} 个设备:\n{text}")
+    def _on_file_received(self, file_path: str):
+        """LocalSend 收到文件的回调"""
+        name = Path(file_path).name
+        self.ls_recent.setText(f"最近接收: {name}")
