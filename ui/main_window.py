@@ -303,6 +303,7 @@ class MainWindow(QMainWindow):
     
     def _on_transcribe_finished(self, results: dict):
         self.trans_progress.setVisible(False)
+        self.trans_progress.setValue(0)
         success = sum(1 for v in results.values() if v["success"])
         failed = len(results) - success
         self.status_label.setText(f"识别完成: 成功 {success}, 失败 {failed}")

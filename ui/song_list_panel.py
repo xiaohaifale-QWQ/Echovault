@@ -83,7 +83,10 @@ class SongListPanel(QWidget):
 
     def update_song_status(self, fp, ok):
         for s in self._songs:
-            if s["path"] == fp: s["has_lrc"] = ok; break
+            if s["path"] == fp:
+                s["has_lrc"] = ok
+                if ok: s["lrc_path"] = str(Path(fp).with_suffix(".lrc"))
+                break
         self._do_refresh()
         sel = self.get_selected_songs()
         if sel: self.song_selected.emit(sel[0])
