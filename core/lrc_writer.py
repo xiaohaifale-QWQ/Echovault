@@ -118,7 +118,13 @@ def _correct_common_errors(text: str, language: str) -> str:
     if language.startswith("zh"):
         for wrong, correct in _COMMON_CORRECTIONS.items():
             text = text.replace(wrong, correct)
-    # 英文可扩展
+        # 繁体转简体
+        try:
+            from opencc import OpenCC
+            cc = OpenCC('t2s')
+            text = cc.convert(text)
+        except ImportError:
+            pass
     return text
 
 
