@@ -17,19 +17,39 @@ class _DownloadWorker(QThread):
         super().__init__(); self.model = model
 
     def run(self):
-        # 必须在 import whisper 之前设置
         import ssl, os as _os
         ssl._create_default_https_context = ssl._create_unverified_context
-        _os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+        _os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+        _os.environ["HF_HUB_DISABLE_SSL_VERIFY"] = "1"
+        # 也尝试 pip 的镜像
+        _os.environ.setdefault("PIP_INDEX_URL", "https://pypi.tuna.tsinghua.edu.cn/simple")
+        
         try:
             try:
                 import whisper
             except ImportError:
                 self.progress.emit("正在安装 openai-whisper...")
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "openai-whisper", "-q"])
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install", "openai-whisper", "-q",
+                    "-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
+                    "--trusted-host", "pypi.tuna.tsinghua.edu.cn"
+                ])
                 import whisper
-            self.progress.emit(f"正在下载 {self.model} 模型...")
-            whisper.load_model(self.model)
+            
+            self.progress.emit(f"正在下载 {self.model} 模型 (使用镜像)...")
+            
+            # 多次重试
+            for attempt in range(3):
+                try:
+                    whisper.load_model(self.model)
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        raise
+                    self.progress.emit(f"重试 {attempt+2}/3...")
+                    import time; time.sleep(2)
+            
+            self.finished.emit(True, f"{self.model} 模型就绪")
             self.finished.emit(True, f"{self.model} 模型就绪")
         except subprocess.CalledProcessError:
             self.finished.emit(False, "pip 安装失败，请检查网络")
