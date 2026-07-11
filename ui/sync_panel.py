@@ -363,7 +363,7 @@ class SyncPanel(QWidget):
         
         QMessageBox.information(
             self, "LocalSend 已启动",
-            f"本机已作为 LocalSend 设备运行。\n\n"
+            f"本机已作为 LocalSend 设备运行 (HTTPS)。\n\n"
             f"设备名: MusicSync\n"
             f"地址: {ip}:{HTTP_PORT}\n\n"
             f"请在手机 LocalSend App 中查找 'MusicSync' 设备，\n"
