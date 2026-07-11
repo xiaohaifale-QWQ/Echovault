@@ -230,7 +230,7 @@ class MainWindow(QMainWindow):
                 "lrc_path": str(lrc_path) if lrc_path.exists() else None,
             })
         
-        self.song_list_panel.load_songs(songs)
+        self.song_list_panel.load_songs(songs, root_dir=folder_path)
         self._refresh_statusbar()
         
         # 同步面板也设置本机路径
@@ -257,7 +257,7 @@ class MainWindow(QMainWindow):
     def _on_transcribe_all(self):
         """识别全部未标注歌曲"""
         songs = self.song_list_panel.get_all_songs()
-        files = [s["path"] for s in songs if not s.get("has_lrc")]
+        files = [s["path"] for s in songs if not s.get("has_lrc") and not s.get("instrumental")]
         if not files:
             QMessageBox.information(self, "提示", "所有歌曲都已有歌词！")
             return
