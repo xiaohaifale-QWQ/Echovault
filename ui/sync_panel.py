@@ -245,7 +245,9 @@ class SyncPanel(QWidget):
         self.ls_status.setText(f"运行中 - 端口 {HTTP_PORT}")
         self.ls_status.setStyleSheet("color: #4CAF50; font-weight: bold;")
         QMessageBox.information(self, "LocalSend",
-            f"设备名: MusicSync\n地址: {ip}:{HTTP_PORT} (HTTPS)\n\n手机 LocalSend 查找 'MusicSync' 即可发送。")
+            f"设备名: MusicSync\n"
+            f"发送: LocalSend 查找 'MusicSync' (端口 {HTTP_PORT})\n"
+            f"浏览: http://{ip}:8899 (手机浏览器打开下载文件)")
     
     def _stop_ls(self):
         if self._localsend: self._localsend.stop(); self._localsend = None

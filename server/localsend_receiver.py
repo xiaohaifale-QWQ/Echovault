@@ -1,433 +1,225 @@
-"""
-LocalSend 协议接收端 (HTTPS)
+"""LocalSend HTTPS receiver + HTTP browse server"""
 
-实现 LocalSend Protocol v2.1，让 MusicSync 在局域网中
-作为一个 LocalSend 设备出现。手机端的 LocalSend App
-可以直接发现本机并将音乐文件发送到指定文件夹。
-
-协议详情: https://github.com/localsend/protocol
-"""
-
-import os
-import json
-import uuid
-import socket
-import struct
-import ssl
-import hashlib
-import logging
-import tempfile
-import threading
-import datetime
+import os, json, uuid, socket, struct, ssl, hashlib, logging, tempfile, threading, datetime
 from pathlib import Path
 from typing import Optional, Callable
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 logger = logging.getLogger(__name__)
-
-MULTICAST_GROUP = "224.0.0.167"
-MULTICAST_PORT = 53317
-HTTP_PORT = 53317
-PROTOCOL_VERSION = "2.0"
-DEVICE_TYPE = "desktop"
-
+MULTICAST_GROUP, MULTICAST_PORT, HTTP_PORT, BROWSE_PORT = "224.0.0.167", 53317, 53317, 8899
+PROTOCOL_VERSION, DEVICE_TYPE = "2.0", "desktop"
 
 class LocalSendReceiver:
-    """LocalSend 协议接收端 (HTTPS)"""
-    
-    def __init__(
-        self,
-        save_dir: str,
-        alias: str = "MusicSync",
-        on_file_received: Optional[Callable] = None,
-        on_progress: Optional[Callable] = None,
-    ):
-        self.save_dir = Path(save_dir)
-        self.alias = alias
-        self.on_file_received = on_file_received
-        self.on_progress = on_progress
-        self.fingerprint = ""
-        self._cert_file: Optional[str] = None
-        
-        self._http_server: Optional[HTTPServer] = None
-        self._http_thread: Optional[threading.Thread] = None
-        self._udp_socket: Optional[socket.socket] = None
-        self._udp_thread: Optional[threading.Thread] = None
-        self._running = False
-        self._sessions: dict = {}
-    
+    def __init__(self, save_dir: str, alias: str = "MusicSync",
+                 on_file_received: Optional[Callable] = None,
+                 on_progress: Optional[Callable] = None):
+        self.save_dir = Path(save_dir); self.alias = alias
+        self.on_file_received = on_file_received; self.on_progress = on_progress
+        self.fingerprint = ""; self._cert_file = None
+        self._http_server = None; self._browse_server = None
+        self._udp_socket = None; self._running = False; self._sessions = {}
+
     @property
-    def is_running(self) -> bool:
-        return self._running
-    
+    def is_running(self): return self._running
+
     def start(self):
-        if self._running:
-            return
-        
-        self.save_dir.mkdir(parents=True, exist_ok=True)
-        self._running = True
-        
-        # 生成 HTTPS 自签名证书
-        self._generate_cert()
-        
-        # 启动 HTTPS 服务器
-        self._start_https_server()
-        
-        # UDP 多播（可选）
-        try:
-            self._start_udp_multicast()
-            self._send_announcement()
-        except Exception as e:
-            logger.warning(f"UDP 多播启动失败: {e}")
-        
-        ip = self._get_local_ip()
-        logger.info(f"LocalSend 接收端已启动: {self.alias} @ {ip}:{HTTP_PORT} (HTTPS)")
-    
+        if self._running: return
+        self.save_dir.mkdir(parents=True, exist_ok=True); self._running = True
+        self._generate_cert(); self._start_https_server(); self._start_browse_server()
+        try: self._start_udp_multicast(); self._send_announcement()
+        except Exception as e: logger.warning(f"UDP failed: {e}")
+        logger.info(f"LocalSend: {self.alias} @ {self._get_local_ip()}:{HTTP_PORT}")
+
     def stop(self):
         self._running = False
-        if self._http_server:
-            self._http_server.shutdown()
-        if self._udp_socket:
-            self._udp_socket.close()
+        if self._http_server: self._http_server.shutdown()
+        if self._browse_server: self._browse_server.shutdown()
+        if self._udp_socket: self._udp_socket.close()
         if self._cert_file and os.path.exists(self._cert_file):
-            try:
-                os.unlink(self._cert_file)
-            except Exception:
-                pass
-        logger.info("LocalSend 接收端已停止")
-    
-    def _get_local_ip(self) -> str:
+            try: os.unlink(self._cert_file)
+            except: pass
+        logger.info("LocalSend stopped")
+
+    def _get_local_ip(self):
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1"
-    
-    # ─── HTTPS 证书 ─────────────────────────
-    
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]; s.close(); return ip
+        except: return "127.0.0.1"
+
     def _generate_cert(self):
-        """生成自签名证书"""
-        from cryptography import x509
-        from cryptography.x509.oid import NameOID
+        from cryptography import x509; from cryptography.x509.oid import NameOID
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
-        
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        
-        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "MusicSync")])
-        
-        cert = (
-            x509.CertificateBuilder()
-            .subject_name(subject)
-            .issuer_name(subject)
-            .public_key(key.public_key())
-            .serial_number(x509.random_serial_number())
-            .not_valid_before(datetime.datetime.utcnow())
-            .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=3650))
-            .sign(key, hashes.SHA256())
-        )
-        
-        cert_pem = cert.public_bytes(serialization.Encoding.PEM)
-        key_pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        )
-        
-        tmp = tempfile.NamedTemporaryFile(suffix=".pem", delete=False)
-        tmp.write(cert_pem + key_pem)
-        tmp.close()
-        self._cert_file = tmp.name
-        
-        self.fingerprint = hashlib.sha256(cert_pem).hexdigest()
-        logger.info(f"HTTPS 证书已生成")
-    
-    # ─── HTTPS 服务器 ───────────────────────
-    
+        key = rsa.generate_private_key(65537, 2048)
+        subj = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "MusicSync")])
+        cert = x509.CertificateBuilder().subject_name(subj).issuer_name(subj).public_key(
+            key.public_key()).serial_number(x509.random_serial_number()).not_valid_before(
+            datetime.datetime.utcnow()).not_valid_after(datetime.datetime.utcnow() +
+            datetime.timedelta(days=3650)).sign(key, hashes.SHA256())
+        cp, kp = cert.public_bytes(serialization.Encoding.PEM), key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+        tmp = tempfile.NamedTemporaryFile(suffix=".pem", delete=False); tmp.write(cp + kp); tmp.close()
+        self._cert_file = tmp.name; self.fingerprint = hashlib.sha256(cp).hexdigest()
+        logger.info("HTTPS cert generated")
+
     def _start_https_server(self):
-        receiver = self
-        
-        class LocalSendHandler(BaseHTTPRequestHandler):
-            
-            def log_message(self, format, *args):
-                pass  # 减少日志噪音
-            
-            def _send_json(self, data: dict, status: int = 200):
-                body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            
-            def _read_json(self) -> dict:
-                length = int(self.headers.get("Content-Length", 0))
-                if length == 0:
-                    return {}
-                return json.loads(self.rfile.read(length))
-            
-            def do_POST(self):
-                path = self.path.split("?")[0]
-                if path == "/api/localsend/v2/register":
-                    self._handle_register()
-                elif path == "/api/localsend/v2/prepare-upload":
-                    self._handle_prepare_upload()
-                elif path == "/api/localsend/v2/upload":
-                    self._handle_upload()
-                elif path == "/api/localsend/v2/cancel":
-                    self._handle_cancel()
-                else:
-                    self._send_json({"message": "not found"}, 404)
-            
-            def do_GET(self):
-                if self.path.split("?")[0] == "/api/localsend/v2/info":
-                    self._handle_info()
-                else:
-                    self._send_json({"message": "not found"}, 404)
-            
-            def _handle_register(self):
-                data = {}
-                try:
-                    data = self._read_json()
-                except Exception:
-                    pass
-                logger.info(f"设备注册: {data.get('alias', 'unknown')}")
-                self._send_json({
-                    "alias": receiver.alias,
-                    "version": PROTOCOL_VERSION,
-                    "deviceModel": "Windows",
-                    "deviceType": DEVICE_TYPE,
-                    "fingerprint": receiver.fingerprint,
-                    "port": HTTP_PORT,
-                    "protocol": "https",
-                    "download": True,
-                })
-            
-            def _handle_prepare_upload(self):
-                try:
-                    data = self._read_json()
-                except Exception:
-                    self._send_json({"message": "Invalid body"}, 400)
-                    return
-                
-                files_info = data.get("files", {})
-                sender_alias = data.get("info", {}).get("alias", "unknown")
-                
-                session_id = uuid.uuid4().hex[:12]
-                file_tokens = {}
-                skipped = 0
-                session_files = {}
-                
-                for file_id, info in files_info.items():
-                    name = info.get("fileName", "unknown")
-                    size = info.get("size", 0)
-                    
-                    existing = receiver.save_dir / Path(name).name
-                    if existing.exists() and existing.stat().st_size == size:
-                        logger.info(f"跳过重复: {name}")
-                        skipped += 1
-                        continue
-                    
-                    token = uuid.uuid4().hex[:16]
-                    file_tokens[file_id] = token
-                    session_files[file_id] = {"name": name, "size": size, "token": token}
-                
-                if skipped:
-                    logger.info(f"跳过 {skipped} 个重复文件")
-                
-                if not session_files:
-                    logger.info("全部跳过，无需传输")
-                    self.send_response(204)
-                    self.end_headers()
-                    return
-                
-                receiver._sessions[session_id] = {"files": session_files, "sender": sender_alias}
-                
-                logger.info(f"上传请求: {sender_alias}, {len(session_files)} 文件, session={session_id}")
-                self._send_json({"sessionId": session_id, "files": file_tokens})
-            
-            def _handle_upload(self):
-                query = {}
-                if "?" in self.path:
-                    import urllib.parse
-                    query = dict(urllib.parse.parse_qsl(self.path.split("?")[1]))
-                
-                session_id = query.get("sessionId", "")
-                file_id = query.get("fileId", "")
-                token = query.get("token", "")
-                
-                session = receiver._sessions.get(session_id)
-                if not session:
-                    self._send_json({"message": "Invalid session"}, 403)
-                    return
-                
-                fi = session["files"].get(file_id)
-                if not fi or fi["token"] != token:
-                    self._send_json({"message": "Invalid token"}, 403)
-                    return
-                
-                length = int(self.headers.get("Content-Length", 0))
-                chunks = []
-                received = 0
-                total_files = len(session["files"])
-                keys = list(session["files"].keys())
-                idx = keys.index(file_id) + 1 if file_id in keys else 0
-                fname = fi["name"]
-                
-                while received < length:
-                    chunk = self.rfile.read(min(65536, length - received))
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                    received += len(chunk)
-                    if receiver.on_progress and length > 0:
-                        pct = int(received * 100 / length)
-                        receiver.on_progress(idx, total_files, f"{fname} ({pct}%)")
-                
-                file_data = b"".join(chunks)
-                safe_name = Path(fname).name
-                file_path = receiver.save_dir / safe_name
-                
-                if file_path.exists():
-                    stem, suffix = file_path.stem, file_path.suffix
-                    counter = 1
-                    while file_path.exists():
-                        file_path = receiver.save_dir / f"{stem} ({counter}){suffix}"
-                        counter += 1
-                
-                file_path.write_bytes(file_data)
-                
-                logger.info(f"接收完成: {safe_name} ({len(file_data)} bytes)")
-                
-                if receiver.on_file_received:
-                    receiver.on_file_received(str(file_path))
-                
-                self.send_response(200)
-                self.end_headers()
-            
-            def _handle_cancel(self):
-                query = {}
-                if "?" in self.path:
-                    import urllib.parse
-                    query = dict(urllib.parse.parse_qsl(self.path.split("?")[1]))
-                sid = query.get("sessionId", "")
-                if sid in receiver._sessions:
-                    del receiver._sessions[sid]
-                self.send_response(200)
-                self.end_headers()
-            
-            def _handle_info(self):
-                self._send_json({
-                    "alias": receiver.alias,
-                    "version": PROTOCOL_VERSION,
-                    "deviceModel": "Windows",
-                    "deviceType": DEVICE_TYPE,
-                    "fingerprint": receiver.fingerprint,
-                    "port": HTTP_PORT,
-                    "protocol": "https",
-                    "download": True,
-                })
-        
-        # 创建 HTTPS 服务器
-        self._http_server = HTTPServer(("0.0.0.0", HTTP_PORT), LocalSendHandler)
-        
-        # 用 SSL 包装 socket
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.load_cert_chain(self._cert_file)
-        self._http_server.socket = ctx.wrap_socket(
-            self._http_server.socket, server_side=True
-        )
-        
-        self._http_thread = threading.Thread(target=self._http_server.serve_forever, daemon=True)
-        self._http_thread.start()
-    
-    # ─── UDP 多播 ───────────────────────────
-    
+        r = self
+        class H(BaseHTTPRequestHandler):
+            def log_message(s, *a): pass
+            def _json(s, d, st=200):
+                b = json.dumps(d, ensure_ascii=False).encode()
+                s.send_response(st); s.send_header("Content-Type", "application/json")
+                s.send_header("Content-Length", str(len(b))); s.end_headers(); s.wfile.write(b)
+            def _read(s):
+                n = int(s.headers.get("Content-Length", 0))
+                return json.loads(s.rfile.read(n)) if n else {}
+            def do_POST(s):
+                p = s.path.split("?")[0]
+                if p == "/api/localsend/v2/register": s._reg()
+                elif p == "/api/localsend/v2/prepare-upload": s._prep()
+                elif p == "/api/localsend/v2/upload": s._up()
+                elif p == "/api/localsend/v2/cancel": s._cancel()
+                else: s._json({"message":"not found"}, 404)
+            def do_GET(s):
+                if s.path.split("?")[0] == "/api/localsend/v2/info": s._info()
+                else: s._json({"message":"not found"}, 404)
+            def _reg(s):
+                d = {}; 
+                try: d = s._read()
+                except: pass
+                logger.info(f"register: {d.get('alias','?')}")
+                s._json({"alias":r.alias,"version":PROTOCOL_VERSION,"deviceModel":"Windows",
+                    "deviceType":DEVICE_TYPE,"fingerprint":r.fingerprint,"port":HTTP_PORT,
+                    "protocol":"https","download":True})
+            def _prep(s):
+                try: d = s._read()
+                except: s._json({"message":"Invalid"},400); return
+                fs, sid, tokens, skipped = d.get("files",{}), uuid.uuid4().hex[:12], {}, 0
+                sf = {}
+                for fid, inf in fs.items():
+                    nm, sz = inf.get("fileName","?"), inf.get("size",0)
+                    ex = r.save_dir / Path(nm).name
+                    if ex.exists() and ex.stat().st_size == sz: skipped += 1; continue
+                    tk = uuid.uuid4().hex[:16]; tokens[fid] = tk
+                    sf[fid] = {"name":nm,"size":sz,"token":tk}
+                if skipped: logger.info(f"skip {skipped} dups")
+                if not sf: s.send_response(204); s.end_headers(); return
+                r._sessions[sid] = {"files":sf,"sender":d.get("info",{}).get("alias","?")}
+                logger.info(f"upload: {len(sf)} files, sid={sid}")
+                s._json({"sessionId":sid,"files":tokens})
+            def _up(s):
+                import urllib.parse; q = dict(urllib.parse.parse_qsl(s.path.split("?")[1])) if "?" in s.path else {}
+                sid, fid, tok = q.get("sessionId",""), q.get("fileId",""), q.get("token","")
+                se = r._sessions.get(sid)
+                if not se: s._json({"message":"bad session"},403); return
+                fi = se["files"].get(fid)
+                if not fi or fi["token"] != tok: s._json({"message":"bad token"},403); return
+                length = int(s.headers.get("Content-Length",0))
+                chunks, recv, total, keys = [], 0, len(se["files"]), list(se["files"].keys())
+                idx = keys.index(fid)+1 if fid in keys else 0; fn = fi["name"]
+                while recv < length:
+                    ck = s.rfile.read(min(65536, length-recv))
+                    if not ck: break
+                    chunks.append(ck); recv += len(ck)
+                    if r.on_progress and length > 0:
+                        r.on_progress(idx, total, f"{fn} ({int(recv*100/length)}%)")
+                data = b"".join(chunks); safe = Path(fn).name; fp = r.save_dir / safe
+                if fp.exists():
+                    st, su = fp.stem, fp.suffix; c = 1
+                    while fp.exists(): fp = r.save_dir / f"{st} ({c}){su}"; c += 1
+                fp.write_bytes(data)
+                logger.info(f"received: {safe} ({len(data)}B)")
+                if r.on_file_received: r.on_file_received(str(fp))
+                s.send_response(200); s.end_headers()
+            def _cancel(s):
+                import urllib.parse; q = dict(urllib.parse.parse_qsl(s.path.split("?")[1])) if "?" in s.path else {}
+                sid = q.get("sessionId","")
+                if sid in r._sessions: del r._sessions[sid]
+                s.send_response(200); s.end_headers()
+            def _info(s):
+                s._json({"alias":r.alias,"version":PROTOCOL_VERSION,"deviceModel":"Windows",
+                    "deviceType":DEVICE_TYPE,"fingerprint":r.fingerprint,"port":HTTP_PORT,
+                    "protocol":"https","download":True})
+        self._http_server = HTTPServer(("0.0.0.0", HTTP_PORT), H)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); ctx.load_cert_chain(self._cert_file)
+        self._http_server.socket = ctx.wrap_socket(self._http_server.socket, server_side=True)
+        threading.Thread(target=self._http_server.serve_forever, daemon=True).start()
+
+    def _start_browse_server(self):
+        r = self
+        class B(BaseHTTPRequestHandler):
+            def log_message(s, *a): pass
+            def do_GET(s):
+                p = s.path.split("?")[0]
+                if p == "/" or p == "/index.html": s._idx()
+                elif p.startswith("/download/"): s._dl(p[10:])
+                else: s.send_response(404); s.end_headers()
+            def _idx(s):
+                ip = r._get_local_ip(); items = ""
+                if r.save_dir.exists():
+                    for f in sorted(r.save_dir.iterdir()):
+                        if f.is_file():
+                            sz = f"{f.stat().st_size/1024:.0f}KB" if f.stat().st_size>1024 else f"{f.stat().st_size}B"
+                            items += f'<li><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{f.name}</span><span style="color:#888;font-size:12px;margin:0 12px">{sz}</span><a style="color:#1976D2;text-decoration:none;font-size:13px" href="/download/{f.name}">下载</a></li>'
+                html = f"""<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MusicSync</title><style>
+*{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:-apple-system,sans-serif;background:#f5f5f5;color:#333}}
+.h{{background:#1976D2;color:#fff;padding:16px}}.h h1{{font-size:20px;font-weight:500}}.h p{{font-size:13px;opacity:.85;margin-top:4px}}
+.c{{max-width:600px;margin:16px auto;padding:0 12px}}.card{{background:#fff;border-radius:8px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.1)}}
+.card h2{{font-size:15px;margin-bottom:8px;color:#1976D2}}ul{{list-style:none}}
+li{{display:flex;align-items:center;padding:10px 0;border-bottom:1px solid #eee;font-size:14px}}li:last-child{{border-bottom:none}}
+</style></head><body><div class="h"><h1>MusicSync</h1><p>{r.alias} @ {ip}:{BROWSE_PORT}</p></div>
+<div class="c"><div class="card"><h2>电脑上的文件</h2><ul>{items or '<li style="color:#999">暂无文件</li>'}</ul></div>
+<div class="card"><h2>发送到电脑</h2><p style="font-size:13px;color:#666;line-height:1.8">打开手机 LocalSend App，找到 <b>{r.alias}</b> 设备，选择文件发送。</p></div>
+</div></body></html>"""
+                s.send_response(200); s.send_header("Content-Type","text/html; charset=utf-8"); s.end_headers()
+                s.wfile.write(html.encode())
+            def _dl(s, fn):
+                fp = r.save_dir / Path(fn).name
+                if not fp.exists(): s.send_response(404); s.end_headers(); return
+                d = fp.read_bytes(); s.send_response(200)
+                s.send_header("Content-Type","application/octet-stream")
+                s.send_header("Content-Disposition",f'attachment; filename="{fp.name}"')
+                s.send_header("Content-Length",str(len(d))); s.end_headers(); s.wfile.write(d)
+        self._browse_server = HTTPServer(("0.0.0.0", BROWSE_PORT), B)
+        threading.Thread(target=self._browse_server.serve_forever, daemon=True).start()
+        logger.info(f"Browse: http://{self._get_local_ip()}:{BROWSE_PORT}")
+
     def _start_udp_multicast(self):
         self._udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self._udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        if hasattr(socket, "SO_REUSEPORT"):
-            self._udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        
+        if hasattr(socket, "SO_REUSEPORT"): self._udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         self._udp_socket.bind(("0.0.0.0", MULTICAST_PORT))
-        
         mreq = struct.pack("4sl", socket.inet_aton(MULTICAST_GROUP), socket.INADDR_ANY)
         self._udp_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-        
-        self._udp_thread = threading.Thread(target=self._udp_listen_loop, daemon=True)
-        self._udp_thread.start()
-    
-    def _udp_listen_loop(self):
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    def _loop(self):
         while self._running:
-            try:
-                data, addr = self._udp_socket.recvfrom(4096)
-                self._handle_udp_message(data, addr)
-            except socket.timeout:
-                continue
-            except Exception:
-                if self._running:
-                    pass
-    
-    def _handle_udp_message(self, data: bytes, addr: tuple):
+            try: d, a = self._udp_socket.recvfrom(4096); self._on_udp(d, a)
+            except: pass
+
+    def _on_udp(self, data, addr):
+        try: m = json.loads(data.decode())
+        except: return
+        if m.get("fingerprint") == self.fingerprint: return
+        if m.get("announce") and m.get("port"): self._reply(addr[0], m)
+
+    def _reply(self, ip, msg):
         try:
-            msg = json.loads(data.decode("utf-8"))
-        except Exception:
-            return
-        
-        if msg.get("fingerprint") == self.fingerprint:
-            return
-        
-        if msg.get("announce") and msg.get("port"):
-            self._reply_to_device(addr[0], msg)
-    
-    def _reply_to_device(self, sender_ip: str, msg: dict):
-        protocol = msg.get("protocol", "https")
-        try:
-            import urllib.request
-            body = json.dumps({
-                "alias": self.alias,
-                "version": PROTOCOL_VERSION,
-                "deviceModel": "Windows",
-                "deviceType": DEVICE_TYPE,
-                "fingerprint": self.fingerprint,
-                "port": HTTP_PORT,
-                "protocol": "https",
-                "download": True,
-            }).encode("utf-8")
-            
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
-            url = f"{protocol}://{sender_ip}:{msg['port']}/api/localsend/v2/register"
-            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
-            with urllib.request.urlopen(req, timeout=3, context=ctx):
-                pass
-            logger.info(f"回复设备: {msg.get('alias', 'unknown')}")
-        except Exception:
-            pass
-    
+            import urllib.request; b = json.dumps({"alias":self.alias,"version":PROTOCOL_VERSION,
+                "deviceModel":"Windows","deviceType":DEVICE_TYPE,"fingerprint":self.fingerprint,
+                "port":HTTP_PORT,"protocol":"https","download":True}).encode()
+            ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+            u = f"{msg.get('protocol','https')}://{ip}:{msg['port']}/api/localsend/v2/register"
+            urllib.request.urlopen(urllib.request.Request(u, data=b, headers={"Content-Type":"application/json"}, method="POST"), timeout=3, context=ctx)
+        except: pass
+
     def _send_announcement(self):
-        msg = json.dumps({
-            "alias": self.alias,
-            "version": PROTOCOL_VERSION,
-            "deviceModel": "Windows",
-            "deviceType": DEVICE_TYPE,
-            "fingerprint": self.fingerprint,
-            "port": HTTP_PORT,
-            "protocol": "https",
-            "download": True,
-            "announce": True,
-        }).encode("utf-8")
-        
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-            sock.sendto(msg, (MULTICAST_GROUP, MULTICAST_PORT))
-            sock.close()
-            logger.info(f"已发送 UDP announcement")
-        except Exception as e:
-            logger.warning(f"发送 announcement 失败: {e}")
+            m = json.dumps({"alias":self.alias,"version":PROTOCOL_VERSION,"deviceModel":"Windows",
+                "deviceType":DEVICE_TYPE,"fingerprint":self.fingerprint,"port":HTTP_PORT,
+                "protocol":"https","download":True,"announce":True}).encode()
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+            s.sendto(m, (MULTICAST_GROUP, MULTICAST_PORT)); s.close()
+        except Exception as e: logger.warning(f"announce failed: {e}")
