@@ -1,5 +1,5 @@
 """设置对话框"""
-import os, subprocess, sys
+import os, subprocess, sys, hashlib
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QCheckBox, QPushButton,
@@ -9,65 +9,76 @@ from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from core.config import AppConfig, config_manager
 
 
+# Whisper 模型下载 URL (OpenAI 官方 + 各镜像)
+_MODEL_URLS = {
+    "tiny": "https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt",
+    "base": "https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f4fb7e4ac6a38fd/base.pt",
+    "small": "https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt",
+    "medium": "https://openaipublic.azureedge.net/main/whisper/models/345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1/medium.pt",
+}
+
 class _DownloadWorker(QThread):
-    progress = pyqtSignal(str)
+    progress = pyqtSignal(int, str)  # percent, message
     finished = pyqtSignal(bool, str)
 
     def __init__(self, model: str):
         super().__init__(); self.model = model
 
     def run(self):
-        import os as _os
-        _os.environ.setdefault("PIP_INDEX_URL", "https://pypi.tuna.tsinghua.edu.cn/simple")
-        
         try:
+            # 安装 openai-whisper
             try:
                 import whisper
             except ImportError:
-                self.progress.emit("正在安装 openai-whisper...")
+                self.progress.emit(0, "安装 openai-whisper...")
                 subprocess.check_call([
                     sys.executable, "-m", "pip", "install", "openai-whisper", "-q",
                     "-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
                     "--trusted-host", "pypi.tuna.tsinghua.edu.cn"
                 ])
-                import whisper
+
+            # 检查模型是否已缓存
+            cache = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
+            model_file = os.path.join(cache, f"{self.model}.pt")
             
-            self.progress.emit(f"正在从 modelscope 下载 {self.model} 模型...")
-            _os.environ["MODELSCOPE_CACHE"] = _os.path.join(_os.path.expanduser("~"), ".cache", "whisper")
+            if os.path.exists(model_file) and os.path.getsize(model_file) > 1000:
+                self.progress.emit(100, "模型已存在，加载中...")
+                import whisper; whisper.load_model(self.model)
+                self.finished.emit(True, f"{self.model} 模型就绪")
+                return
+
+            # 下载模型
+            url = _MODEL_URLS.get(self.model)
+            if not url:
+                self.finished.emit(False, f"未知模型: {self.model}")
+                return
+
+            self.progress.emit(0, f"正在下载 {self.model} 模型...")
+            os.makedirs(cache, exist_ok=True)
+
+            # 使用 urllib 手动下载（带进度）
+            import urllib.request, ssl
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+
+            def _report(count, block_size, total_size):
+                if total_size > 0:
+                    pct = min(int(count * block_size * 100 / total_size), 99)
+                    mb = count * block_size / 1048576
+                    total_mb = total_size / 1048576
+                    self.progress.emit(pct, f"下载中 {mb:.1f}/{total_mb:.1f} MB ({pct}%)")
+
+            urllib.request.urlretrieve(url, model_file, _report, context=ctx)
             
-            # 优先从 modelscope 下载（国内可访问）
-            try:
-                self._download_via_modelscope()
-            except ImportError:
-                # modelscope 未安装，回退到默认方式
-                self.progress.emit("正在安装 modelscope...")
-                subprocess.check_call([
-                    sys.executable, "-m", "pip", "install", "modelscope", "-q",
-                    "-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
-                    "--trusted-host", "pypi.tuna.tsinghua.edu.cn"
-                ])
-                self._download_via_modelscope()
-            
+            self.progress.emit(100, "加载模型中...")
+            import whisper; whisper.load_model(self.model)
             self.finished.emit(True, f"{self.model} 模型就绪")
+
         except subprocess.CalledProcessError:
-            self.finished.emit(False, "pip 安装失败，请检查网络")
+            self.finished.emit(False, "pip 安装失败，检查网络")
         except Exception as e:
             self.finished.emit(False, str(e))
-    
-    def _download_via_modelscope(self):
-        """从 modelscope (国内魔搭社区) 下载 Whisper 模型"""
-        from modelscope import snapshot_download
-        ids = {
-            "tiny": "keepitsimple/whisper-tiny",
-            "base": "keepitsimple/whisper-base", 
-            "small": "keepitsimple/whisper-small",
-            "medium": "keepitsimple/whisper-medium",
-        }
-        model_id = ids.get(self.model, f"keepitsimple/whisper-{self.model}")
-        cache = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
-        snapshot_download(model_id, cache_dir=cache)
-        import whisper
-        whisper.load_model(self.model)
 
 
 class SettingsDialog(QDialog):
@@ -104,8 +115,9 @@ class SettingsDialog(QDialog):
         dl_row = QHBoxLayout()
         self.btn_dl = QPushButton("下载模型"); self.btn_dl.setVisible(False)
         self.btn_dl.clicked.connect(self._on_download); dl_row.addWidget(self.btn_dl)
-        self.dl_bar = QProgressBar(); self.dl_bar.setVisible(False); self.dl_bar.setMaximum(0)
-        dl_row.addWidget(self.dl_bar); dl_row.addStretch()
+        self.dl_bar = QProgressBar(); self.dl_bar.setVisible(False); self.dl_bar.setMaximum(100)
+        self.dl_label = QLabel(""); self.dl_label.setStyleSheet("font-size:11px;color:#666")
+        dl_row.addWidget(self.dl_bar); dl_row.addWidget(self.dl_label); dl_row.addStretch()
         af.addRow("", dl_row)
 
         self.vocal_check = QCheckBox("启用 Demucs 人声分离 (每首多花 1-3 分钟，提升准确率)")
@@ -141,14 +153,18 @@ class SettingsDialog(QDialog):
 
     def _on_download(self):
         model = self.model_combo.currentData()
-        self.btn_dl.setEnabled(False); self.dl_bar.setVisible(True)
+        self.btn_dl.setEnabled(False); self.dl_bar.setVisible(True); self.dl_bar.setValue(0)
         self.worker = _DownloadWorker(model)
-        self.worker.progress.connect(lambda m: self.dl_bar.setFormat(f"  {m}"))
+        self.worker.progress.connect(self._on_dl_progress)
         self.worker.finished.connect(self._on_dl_done)
         self.worker.start()
 
+    def _on_dl_progress(self, pct, msg):
+        self.dl_bar.setValue(pct)
+        self.dl_label.setText(msg)
+
     def _on_dl_done(self, ok, msg):
-        self.btn_dl.setEnabled(True); self.dl_bar.setVisible(False)
+        self.btn_dl.setEnabled(True); self.dl_bar.setVisible(False); self.dl_label.setText("")
         if ok: QMessageBox.information(self, "完成", msg)
         else: QMessageBox.critical(self, "下载失败", msg)
 
