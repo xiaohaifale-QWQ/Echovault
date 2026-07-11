@@ -13,51 +13,61 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 
 class LibraryPanel(QWidget):
-    """音乐库文件夹树"""
     
     folder_selected = pyqtSignal(str)
-    collapse_requested = pyqtSignal()  # 请求折叠
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self._root_path = ""
+        self._collapsed = False
         self._setup_ui()
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
         
-        # 标题
+        # 标题栏（始终可见）
         header = QHBoxLayout()
         title = QLabel("音乐库")
         title.setStyleSheet("font-weight: bold; font-size: 13px; padding: 4px;")
         header.addWidget(title)
         header.addStretch()
         
-        self.btn_collapse = QPushButton("\u00AB")  # <<
+        self.btn_collapse = QPushButton("\u00AB")
         self.btn_collapse.setFixedSize(22, 22)
-        self.btn_collapse.setToolTip("收起音乐库 (Ctrl+B)")
+        self.btn_collapse.setToolTip("收起/展开音乐库")
         self.btn_collapse.setStyleSheet("QPushButton { border: none; font-size: 12px; color: #888; } QPushButton:hover { color: #333; }")
-        self.btn_collapse.clicked.connect(self.collapse_requested.emit)
+        self.btn_collapse.clicked.connect(self._toggle_collapse)
         header.addWidget(self.btn_collapse)
-        
         layout.addLayout(header)
         
-        # 文件夹树
+        # 文件夹树 + 提示（可折叠部分）
+        from PyQt6.QtWidgets import QFrame
+        self._collapse_container = QFrame()
+        cl = QVBoxLayout(self._collapse_container)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(2)
+        
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setAnimated(True)
         self.tree.setIndentation(16)
         self.tree.itemClicked.connect(self._on_clicked)
         self.tree.itemExpanded.connect(self._on_expanded)
+        cl.addWidget(self.tree)
         
-        layout.addWidget(self.tree)
-        
-        # 提示
         hint = QLabel("点击文件夹加载歌曲\nCtrl+O 打开新文件夹")
         hint.setStyleSheet("color: #888; font-size: 11px; padding: 4px;")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(hint)
+        cl.addWidget(hint)
+        
+        layout.addWidget(self._collapse_container)
+    
+    def _toggle_collapse(self):
+        self._collapsed = not self._collapsed
+        self._collapse_container.setVisible(not self._collapsed)
+        self.btn_collapse.setText("\u00BB" if self._collapsed else "\u00AB")
     
     def set_root(self, folder_path: str):
         """设置根目录"""

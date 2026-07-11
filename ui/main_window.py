@@ -64,9 +64,7 @@ class MainWindow(QMainWindow):
         
         # 左侧：音乐库
         self.library_panel = LibraryPanel()
-        self._library_widget = self.library_panel  # 引用以便折叠
         splitter.addWidget(self.library_panel)
-        self._library_visible = True
         
         # 中间：歌曲列表
         self.song_list_panel = SongListPanel()
@@ -174,7 +172,7 @@ class MainWindow(QMainWindow):
         if available:
             self.provider_label.setText(f"Provider: {available[0].display_name}")
         else:
-            self.provider_label.setText("Provider: 无可用（请设置 API Key）")
+            self.provider_label.setText("Provider: 无可用 (需安装 Groq 或 Whisper)")
     
     def _connect_signals(self):
         """连接信号"""
@@ -190,14 +188,6 @@ class MainWindow(QMainWindow):
         
         # 刷新计数
         self.song_list_panel.model_updated.connect(self._refresh_statusbar)
-        
-        # 折叠音乐库
-        self.library_panel.collapse_requested.connect(self._toggle_library)
-    
-    def _toggle_library(self):
-        self._library_visible = not self._library_visible
-        self._library_widget.setVisible(self._library_visible)
-        self.library_panel.btn_collapse.setText("\u00AB" if self._library_visible else "\u00BB")
     
     # ─── 事件处理 ─────────────────────────────
     
@@ -279,10 +269,13 @@ class MainWindow(QMainWindow):
         from ui.transcribe_worker import TranscribeWorker
         
         if not self.router.list_available():
-            QMessageBox.warning(
-                self, "无可用 Provider",
-                "请先在设置中配置 API Key（Groq 免费获取: console.groq.com/keys）"
-            )
+            msg = "没有可用的语音识别引擎。\n\n"
+            try: import groq
+            except ImportError: msg += "- Groq SDK 未安装: pip install groq\n"
+            else: msg += "- Groq API Key 未设置\n"
+            try: import whisper
+            except ImportError: msg += "- 本地 Whisper 未安装: pip install openai-whisper\n"
+            QMessageBox.warning(self, "无可用 Provider", msg)
             self._on_settings()
             return
         
