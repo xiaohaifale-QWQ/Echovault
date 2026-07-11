@@ -158,6 +158,12 @@ class SongListPanel(QWidget):
             if mark: self._instrumental.add(s["path"]); self._auto_inst.discard(s["path"])
             else: self._instrumental.discard(s["path"]); self._auto_inst.discard(s["path"])
         self._save_instrumental()
+        # 如果当前筛选会隐藏这些歌曲，自动切换到"全部"
+        lf = self.lyric_filter.currentIndex()
+        if mark and lf in (1, 2):  # "有歌词"或"无歌词"
+            self.lyric_filter.setCurrentIndex(0)  # 切换到"全部"
+        elif not mark and lf == 3:  # "纯音乐"
+            self.lyric_filter.setCurrentIndex(0)
         self._do_refresh()
 
     def _on_double_click(self, row, col):
