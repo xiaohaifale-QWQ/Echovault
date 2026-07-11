@@ -16,7 +16,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QSplitter, QMenuBar, QMenu, QStatusBar,
     QMessageBox, QFileDialog, QLabel, QWidget, QVBoxLayout,
-    QTabWidget,
+    QTabWidget, QPushButton,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
@@ -64,7 +64,9 @@ class MainWindow(QMainWindow):
         
         # 左侧：音乐库
         self.library_panel = LibraryPanel()
+        self._library_widget = self.library_panel  # 引用以便折叠
         splitter.addWidget(self.library_panel)
+        self._library_visible = True
         
         # 中间：歌曲列表
         self.song_list_panel = SongListPanel()
@@ -188,6 +190,14 @@ class MainWindow(QMainWindow):
         
         # 刷新计数
         self.song_list_panel.model_updated.connect(self._refresh_statusbar)
+        
+        # 折叠音乐库
+        self.library_panel.collapse_requested.connect(self._toggle_library)
+    
+    def _toggle_library(self):
+        self._library_visible = not self._library_visible
+        self._library_widget.setVisible(self._library_visible)
+        self.library_panel.btn_collapse.setText("\u00AB" if self._library_visible else "\u00BB")
     
     # ─── 事件处理 ─────────────────────────────
     

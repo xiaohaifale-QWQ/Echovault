@@ -15,7 +15,8 @@ from PyQt6.QtCore import Qt, pyqtSignal
 class LibraryPanel(QWidget):
     """音乐库文件夹树"""
     
-    folder_selected = pyqtSignal(str)  # 选中的文件夹路径
+    folder_selected = pyqtSignal(str)
+    collapse_requested = pyqtSignal()  # 请求折叠
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -32,6 +33,14 @@ class LibraryPanel(QWidget):
         title.setStyleSheet("font-weight: bold; font-size: 13px; padding: 4px;")
         header.addWidget(title)
         header.addStretch()
+        
+        self.btn_collapse = QPushButton("\u00AB")  # <<
+        self.btn_collapse.setFixedSize(22, 22)
+        self.btn_collapse.setToolTip("收起音乐库 (Ctrl+B)")
+        self.btn_collapse.setStyleSheet("QPushButton { border: none; font-size: 12px; color: #888; } QPushButton:hover { color: #333; }")
+        self.btn_collapse.clicked.connect(self.collapse_requested.emit)
+        header.addWidget(self.btn_collapse)
+        
         layout.addLayout(header)
         
         # 文件夹树

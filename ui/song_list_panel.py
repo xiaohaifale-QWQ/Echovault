@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
-    QLabel, QLineEdit, QHBoxLayout, QAbstractItemView,
+    QLabel, QLineEdit, QHBoxLayout, QAbstractItemView, QComboBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush
@@ -43,7 +43,8 @@ class SongListPanel(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._songs: list[dict] = []  # 歌曲数据
+        self._songs: list[dict] = []
+        self._filter_type = "all"  # all, has_lrc, no_lrc
         self._setup_ui()
     
     def _setup_ui(self):
@@ -58,11 +59,17 @@ class SongListPanel(QWidget):
         header.addStretch()
         
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("搜索歌曲...")
+        self.search_box.setPlaceholderText("搜索...")
         self.search_box.setClearButtonEnabled(True)
-        self.search_box.setMaximumWidth(200)
+        self.search_box.setMaximumWidth(150)
         self.search_box.textChanged.connect(self._on_search)
         header.addWidget(self.search_box)
+        
+        self.filter_combo = QComboBox()
+        self.filter_combo.addItems(["全部", "有歌词", "无歌词"])
+        self.filter_combo.setMaximumWidth(80)
+        self.filter_combo.currentIndexChanged.connect(self._on_filter_changed)
+        header.addWidget(self.filter_combo)
         
         layout.addLayout(header)
         
@@ -99,14 +106,22 @@ class SongListPanel(QWidget):
         self._songs = songs
         self._refresh_table()
     
-    def _refresh_table(self, filter_text: str = ""):
+    def _refresh_table(self):
         """刷新表格显示"""
         self.table.setRowCount(0)
         
+        text = self.search_box.text().lower()
         filtered = self._songs
-        if filter_text:
-            text_lower = filter_text.lower()
-            filtered = [s for s in self._songs if text_lower in s["name"].lower()]
+        
+        # 文本搜索
+        if text:
+            filtered = [s for s in filtered if text in s["name"].lower()]
+        
+        # 状态筛选
+        if self._filter_type == "has_lrc":
+            filtered = [s for s in filtered if s.get("has_lrc")]
+        elif self._filter_type == "no_lrc":
+            filtered = [s for s in filtered if not s.get("has_lrc")]
         
         self.table.setRowCount(len(filtered))
         
@@ -140,8 +155,12 @@ class SongListPanel(QWidget):
         self.model_updated.emit()
     
     def _on_search(self, text: str):
-        """搜索过滤"""
-        self._refresh_table(text)
+        self._refresh_table()
+    
+    def _on_filter_changed(self, idx: int):
+        types = ["all", "has_lrc", "no_lrc"]
+        self._filter_type = types[idx] if idx < len(types) else "all"
+        self._refresh_table()
     
     def _on_selection_changed(self):
         """选中行变化"""
@@ -172,7 +191,7 @@ class SongListPanel(QWidget):
                 break
         
         # 刷新当前显示
-        self._refresh_table(self.search_box.text())
+        self._refresh_table()
         
         # 重新触发选中
         selected = self.get_selected_songs()
