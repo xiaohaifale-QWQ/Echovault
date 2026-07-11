@@ -191,7 +191,9 @@ class MainWindow(QMainWindow):
         
         # 刷新计数
         self.song_list_panel.model_updated.connect(self._refresh_statusbar)
-    
+        
+        # 批量识别按钮
+        self.song_list_panel.batch_transcribe.connect(self._on_transcribe_all)
     # ─── 事件处理 ─────────────────────────────
     
     def _on_open_folder(self):
