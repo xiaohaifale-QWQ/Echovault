@@ -59,33 +59,30 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(QSize(1100, 680))
         self.resize(QSize(1280, 780))
         
-        # 中央三栏布局
+        # 两栏布局
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # 左侧：音乐库
-        self.library_panel = LibraryPanel()
-        splitter.addWidget(self.library_panel)
-        
-        # 中间：歌曲列表
+        # 左侧：歌曲列表
         self.song_list_panel = SongListPanel()
         splitter.addWidget(self.song_list_panel)
         
-        # 右侧：详情 + 同步（选项卡切换）
+        # 右侧：选项卡
         self.right_tabs = QTabWidget()
         
         self.detail_panel = DetailPanel()
         self.right_tabs.addTab(self.detail_panel, "详情")
+        
+        self.library_panel = LibraryPanel()
+        self.right_tabs.addTab(self.library_panel, "音乐库")
         
         self.sync_panel = SyncPanel()
         self.right_tabs.addTab(self.sync_panel, "同步")
         
         splitter.addWidget(self.right_tabs)
         
-        # 比例：1 : 2 : 1.5
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 4)
-        splitter.setStretchFactor(2, 3)
-        splitter.setSizes([250, 500, 380])
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([700, 400])
         
         self.setCentralWidget(splitter)
     
@@ -126,7 +123,7 @@ class MainWindow(QMainWindow):
         
         sync_goto_action = QAction("打开同步面板(&S)", self)
         sync_goto_action.setShortcut("Ctrl+D")
-        sync_goto_action.triggered.connect(lambda: self.right_tabs.setCurrentIndex(1))
+        sync_goto_action.triggered.connect(lambda: self.right_tabs.setCurrentIndex(2))
         sync_menu.addAction(sync_goto_action)
         
         # 设置菜单
@@ -194,15 +191,6 @@ class MainWindow(QMainWindow):
         
         # 刷新计数
         self.song_list_panel.model_updated.connect(self._refresh_statusbar)
-        
-        # 折叠音乐库
-        self.song_list_panel.toggle_library.connect(self._toggle_library)
-        self._library_visible = True
-    
-    def _toggle_library(self):
-        self._library_visible = not self._library_visible
-        self.library_panel.setVisible(self._library_visible)
-        self.song_list_panel.btn_lib.setText("\u2630" if self._library_visible else "\u00D7")
     
     # ─── 事件处理 ─────────────────────────────
     

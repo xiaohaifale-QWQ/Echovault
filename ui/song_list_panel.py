@@ -1,7 +1,7 @@
-"""Song list panel with filter + format column + library toggle"""
+"""Song list panel with filter + format column"""
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
-    QLabel, QLineEdit, QHBoxLayout, QAbstractItemView, QComboBox, QPushButton)
+    QLabel, QLineEdit, QHBoxLayout, QAbstractItemView, QComboBox)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush
 
@@ -12,7 +12,6 @@ def _fmt_size(b): return f"{b/1024:.0f}KB" if b>1024 else f"{b}B"
 class SongListPanel(QWidget):
     song_selected = pyqtSignal(dict)
     model_updated = pyqtSignal()
-    toggle_library = pyqtSignal()
     COL_NAME, COL_FORMAT, COL_STATUS, COL_SIZE, COL_FOLDER, COL_PATH = 0, 1, 2, 3, 4, 5
 
     def __init__(self, parent=None):
@@ -22,9 +21,6 @@ class SongListPanel(QWidget):
     def _setup_ui(self):
         l = QVBoxLayout(self); l.setContentsMargins(4,4,4,4)
         h = QHBoxLayout()
-        self.btn_lib = QPushButton("\u2630"); self.btn_lib.setFixedSize(24,24)
-        self.btn_lib.setToolTip("显示/隐藏音乐库"); self.btn_lib.setStyleSheet("QPushButton{border:none;font-size:14px;color:#888}QPushButton:hover{color:#333}")
-        self.btn_lib.clicked.connect(self.toggle_library.emit); h.addWidget(self.btn_lib)
         t = QLabel("歌曲列表"); t.setStyleSheet("font-weight:bold;font-size:13px;padding:4px")
         h.addWidget(t); h.addStretch()
         self.search_box = QLineEdit(); self.search_box.setPlaceholderText("搜索...")
