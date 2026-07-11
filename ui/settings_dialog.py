@@ -18,17 +18,16 @@ _MODEL_URLS = {
 }
 
 class _DownloadWorker(QThread):
-    progress = pyqtSignal(int, str)  # percent, message
+    progress = pyqtSignal(int, str)
     finished = pyqtSignal(bool, str)
 
     def __init__(self, model: str):
         super().__init__(); self.model = model
 
     def run(self):
+        import os as _os
         try:
-            # 安装 openai-whisper
-            try:
-                import whisper
+            try: import whisper
             except ImportError:
                 self.progress.emit(0, "安装 openai-whisper...")
                 subprocess.check_call([
@@ -37,48 +36,64 @@ class _DownloadWorker(QThread):
                     "--trusted-host", "pypi.tuna.tsinghua.edu.cn"
                 ])
 
-            # 检查模型是否已缓存
-            cache = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
-            model_file = os.path.join(cache, f"{self.model}.pt")
+            cache = _os.path.join(_os.path.expanduser("~"), ".cache", "whisper")
+            model_file = _os.path.join(cache, f"{self.model}.pt")
             
-            if os.path.exists(model_file) and os.path.getsize(model_file) > 1000:
-                self.progress.emit(100, "模型已存在，加载中...")
+            if _os.path.exists(model_file) and _os.path.getsize(model_file) > 100000:
+                self.progress.emit(100, "加载中...")
                 import whisper; whisper.load_model(self.model)
                 self.finished.emit(True, f"{self.model} 模型就绪")
                 return
 
-            # 下载模型
-            url = _MODEL_URLS.get(self.model)
-            if not url:
-                self.finished.emit(False, f"未知模型: {self.model}")
-                return
-
-            self.progress.emit(0, f"正在下载 {self.model} 模型...")
-            os.makedirs(cache, exist_ok=True)
-
-            # 使用 urllib 手动下载（带进度）
-            import urllib.request, ssl
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-
-            def _report(count, block_size, total_size):
-                if total_size > 0:
-                    pct = min(int(count * block_size * 100 / total_size), 99)
-                    mb = count * block_size / 1048576
-                    total_mb = total_size / 1048576
-                    self.progress.emit(pct, f"下载中 {mb:.1f}/{total_mb:.1f} MB ({pct}%)")
-
-            urllib.request.urlretrieve(url, model_file, _report, context=ctx)
+            _os.makedirs(cache, exist_ok=True)
+            repo = f"openai/whisper-{self.model}"
+            mirrors = ["https://hf-mirror.com", "https://huggingface.co"]
             
-            self.progress.emit(100, "加载模型中...")
+            downloaded = False
+            for mirror in mirrors:
+                url = f"{mirror}/{repo}/resolve/main/pytorch_model.bin"
+                try:
+                    self.progress.emit(0, f"下载 {self.model}...")
+                    if self._download_file(url, model_file):
+                        downloaded = True; break
+                except: continue
+            
+            if not downloaded:
+                self.finished.emit(False, "所有镜像下载失败, 请检查网络")
+                return
+            
+            self.progress.emit(100, "加载中...")
             import whisper; whisper.load_model(self.model)
             self.finished.emit(True, f"{self.model} 模型就绪")
 
         except subprocess.CalledProcessError:
-            self.finished.emit(False, "pip 安装失败，检查网络")
+            self.finished.emit(False, "pip 安装失败")
         except Exception as e:
             self.finished.emit(False, str(e))
+
+    def _download_file(self, url, save_path):
+        import urllib.request, ssl, socket
+        ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+        socket.setdefaulttimeout(30)
+        tmp = save_path + ".tmp"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "MusicSync/1.0"})
+            resp = urllib.request.urlopen(req, context=ctx, timeout=60)
+            total = int(resp.headers.get("Content-Length", 0))
+            received = 0
+            with open(tmp, "wb") as f:
+                while True:
+                    chunk = resp.read(131072)
+                    if not chunk: break
+                    f.write(chunk); received += len(chunk)
+                    if total > 0:
+                        pct = int(received * 100 / total)
+                        mb = received / 1048576; tb = total / 1048576
+                        self.progress.emit(pct, f"{mb:.1f}/{tb:.1f} MB ({pct}%)")
+            os.replace(tmp, save_path); return True
+        except Exception as e:
+            if os.path.exists(tmp): os.remove(tmp)
+            return False
 
 
 class SettingsDialog(QDialog):
