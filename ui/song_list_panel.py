@@ -62,10 +62,12 @@ class SongListPanel(QWidget):
         self.table.setRowCount(0); f = self._songs
         t = self.search_box.text().lower()
         if t: f = [s for s in f if t in Path(s["name"]).stem.lower()]
-        if self._filter_type == "has_lrc": f = [s for s in f if s.get("has_lrc")]
+        if self._filter_type == "all" or not self._filter_type:
+            pass
+        elif self._filter_type == "has_lrc": f = [s for s in f if s.get("has_lrc")]
         elif self._filter_type == "no_lrc": f = [s for s in f if not s.get("has_lrc")]
-        elif self._filter_type.startswith("."):
-            fmt = self._filter_type.lstrip(".").upper()
+        else:
+            fmt = self._filter_type.upper().lstrip(".")
             f = [s for s in f if Path(s["name"]).suffix.upper() == fmt]
         self.table.setRowCount(len(f))
         for i, s in enumerate(f):
