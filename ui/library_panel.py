@@ -68,6 +68,11 @@ class LibraryPanel(QWidget):
         self._collapsed = not self._collapsed
         self._collapse_container.setVisible(not self._collapsed)
         self.btn_collapse.setText("\u00BB" if self._collapsed else "\u00AB")
+        if self._collapsed:
+            self.setFixedWidth(55)
+        else:
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(16777215)
     
     def set_root(self, folder_path: str):
         """设置根目录"""
