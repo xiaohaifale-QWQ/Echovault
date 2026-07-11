@@ -10,12 +10,7 @@ from core.config import AppConfig, config_manager
 
 
 # Whisper 模型下载 URL (OpenAI 官方 + 各镜像)
-_MODEL_URLS = {
-    "tiny": "https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt",
-    "base": "https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f4fb7e4ac6a38fd/base.pt",
-    "small": "https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt",
-    "medium": "https://openaipublic.azureedge.net/main/whisper/models/345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1/medium.pt",
-}
+_GH_RELEASE = "https://github.com/xiaohaifale-QWQ/whisper-models/releases/download/v1.0"
 
 class _DownloadWorker(QThread):
     progress = pyqtSignal(int, str)
@@ -46,20 +41,16 @@ class _DownloadWorker(QThread):
                 return
 
             _os.makedirs(cache, exist_ok=True)
-            repo = f"openai/whisper-{self.model}"
-            mirrors = ["https://hf-mirror.com", "https://huggingface.co"]
             
-            downloaded = False
-            for mirror in mirrors:
-                url = f"{mirror}/{repo}/resolve/main/pytorch_model.bin"
-                try:
-                    self.progress.emit(0, f"下载 {self.model}...")
-                    if self._download_file(url, model_file):
-                        downloaded = True; break
-                except: continue
+            if self.model == "medium":
+                # medium 分两片，需合并
+                ok = self._download_medium(cache)
+            else:
+                url = f"{_GH_RELEASE}/{self.model}.pt"
+                ok = self._download_file(url, model_file)
             
-            if not downloaded:
-                self.finished.emit(False, "所有镜像下载失败, 请检查网络")
+            if not ok:
+                self.finished.emit(False, "下载失败, 请检查网络")
                 return
             
             self.progress.emit(100, "加载中...")
@@ -70,6 +61,34 @@ class _DownloadWorker(QThread):
             self.finished.emit(False, "pip 安装失败")
         except Exception as e:
             self.finished.emit(False, str(e))
+
+    def _download_medium(self, cache):
+        p1_url = f"{_GH_RELEASE}/medium.part1"
+        p2_url = f"{_GH_RELEASE}/medium.part2"
+        p1_file = os.path.join(cache, "medium.part1")
+        p2_file = os.path.join(cache, "medium.part2")
+        model_file = os.path.join(cache, "medium.pt")
+        import os as _os
+        
+        if not _os.path.exists(p1_file) or _os.path.getsize(p1_file) < 100000:
+            self.progress.emit(0, "下载 medium 分片 1/2...")
+            if not self._download_file(p1_url, p1_file):
+                return False
+        if not _os.path.exists(p2_file) or _os.path.getsize(p2_file) < 100000:
+            self.progress.emit(50, "下载 medium 分片 2/2...")
+            if not self._download_file(p2_url, p2_file):
+                return False
+        
+        self.progress.emit(95, "合并分片...")
+        with open(model_file, "wb") as out:
+            for p in [p1_file, p2_file]:
+                with open(p, "rb") as inp:
+                    while True:
+                        chunk = inp.read(1048576)
+                        if not chunk: break
+                        out.write(chunk)
+        _os.remove(p1_file); _os.remove(p2_file)
+        return True
 
     def _download_file(self, url, save_path):
         import urllib.request, ssl, socket
