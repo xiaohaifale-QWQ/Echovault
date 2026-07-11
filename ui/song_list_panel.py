@@ -101,38 +101,40 @@ class SongListPanel(QWidget):
         song = item.data(Qt.ItemDataRole.UserRole)
         if not song: return
         old_path = Path(song["path"])
-        old_stem = old_path.stem
-        old_ext = old_path.suffix
         
         from PyQt6.QtWidgets import QDialog, QVBoxLayout as VL, QDialogButtonBox as DBB
         dlg = QDialog(self); dlg.setWindowTitle("重命名")
-        ll = VL(dlg)
-        le = QLineEdit(old_stem); ll.addWidget(le)
-        bb = DBB(DBB.StandardButton.Ok | DBB.StandardButton.Cancel); bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
-        ll.addWidget(bb)
+        ll = VL(dlg); le = QLineEdit(old_path.stem); ll.addWidget(le)
+        bb = DBB(DBB.StandardButton.Ok | DBB.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject); ll.addWidget(bb)
         if not dlg.exec(): return
         new_stem = le.text().strip()
-        if not new_stem or new_stem == old_stem: return
+        if not new_stem or new_stem == old_path.stem: return
         
-        new_name = new_stem + old_ext
+        new_name = new_stem + old_path.suffix
         new_path = old_path.parent / new_name
+        old_str = str(old_path); new_str = str(new_path)
         try:
-            os.rename(str(old_path), str(new_path))
-            song["path"] = str(new_path); song["name"] = new_name
-            old_lrc = old_path.with_suffix(".lrc")
-            new_lrc = new_path.with_suffix(".lrc")
-            if old_lrc.exists():
-                os.rename(str(old_lrc), str(new_lrc))
-                song["lrc_path"] = str(new_lrc)
+            os.rename(old_str, new_str)
+            old_lrc = old_path.with_suffix(".lrc"); new_lrc = new_path.with_suffix(".lrc")
+            if old_lrc.exists(): os.rename(str(old_lrc), str(new_lrc))
         except Exception as e:
-            QMessageBox.critical(self, "重命名失败", str(e))
-            return
+            QMessageBox.critical(self, "重命名失败", str(e)); return
+        
+        # 更新 _songs 列表中的字典
+        for s in self._songs:
+            if s["path"] == old_str:
+                s["path"] = new_str; s["name"] = new_name
+                if Path(new_lrc).exists(): s["lrc_path"] = str(new_lrc)
+                break
+        
         self._build_filter_items(); self._do_refresh()
+        # 重新选中
         for r in range(self.table.rowCount()):
             it = self.table.item(r, 0)
-            if it and it.data(Qt.ItemDataRole.UserRole).get("path") == song["path"]:
-                self.table.selectRow(r); self.song_selected.emit(it.data(Qt.ItemDataRole.UserRole))
-                break
+            d = it.data(Qt.ItemDataRole.UserRole) if it else None
+            if d and d.get("path") == new_str:
+                self.table.selectRow(r); self.song_selected.emit(d); break
 
     def get_selected_songs(self):
         s = []
