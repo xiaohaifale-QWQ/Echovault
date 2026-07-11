@@ -4,9 +4,9 @@ MusicSync 主窗口
 三栏布局：
 - 左侧：音乐库文件夹树
 - 中间：歌曲列表 + 状态
-- 右侧：详情 + 操作 + 歌词预览
+- 右侧：详情/同步（选项卡切换）
 
-菜单栏：文件 / 设置 / 帮助
+菜单栏：文件 / 识别 / 同步 / 设置 / 帮助
 状态栏：歌曲统计 + 上次同步时间
 """
 
@@ -16,6 +16,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QSplitter, QMenuBar, QMenu, QStatusBar,
     QMessageBox, QFileDialog, QLabel, QWidget, QVBoxLayout,
+    QTabWidget,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
@@ -28,6 +29,7 @@ from ui.library_panel import LibraryPanel
 from ui.song_list_panel import SongListPanel
 from ui.detail_panel import DetailPanel
 from ui.settings_dialog import SettingsDialog
+from ui.sync_panel import SyncPanel
 
 
 class MainWindow(QMainWindow):
@@ -68,9 +70,16 @@ class MainWindow(QMainWindow):
         self.song_list_panel = SongListPanel()
         splitter.addWidget(self.song_list_panel)
         
-        # 右侧：详情 + 操作
+        # 右侧：详情 + 同步（选项卡切换）
+        self.right_tabs = QTabWidget()
+        
         self.detail_panel = DetailPanel()
-        splitter.addWidget(self.detail_panel)
+        self.right_tabs.addTab(self.detail_panel, "详情")
+        
+        self.sync_panel = SyncPanel()
+        self.right_tabs.addTab(self.sync_panel, "同步")
+        
+        splitter.addWidget(self.right_tabs)
         
         # 比例：1 : 2 : 1.5
         splitter.setStretchFactor(0, 2)
@@ -111,6 +120,14 @@ class MainWindow(QMainWindow):
         trans_selected_action.setShortcut("Ctrl+T")
         trans_selected_action.triggered.connect(self._on_transcribe_selected)
         trans_menu.addAction(trans_selected_action)
+        
+        # 同步菜单
+        sync_menu = menubar.addMenu("同步(&Y)")
+        
+        sync_goto_action = QAction("打开同步面板(&S)", self)
+        sync_goto_action.setShortcut("Ctrl+D")
+        sync_goto_action.triggered.connect(lambda: self.right_tabs.setCurrentIndex(1))
+        sync_menu.addAction(sync_goto_action)
         
         # 设置菜单
         settings_menu = menubar.addMenu("设置(&S)")
@@ -210,6 +227,10 @@ class MainWindow(QMainWindow):
         
         self.song_list_panel.load_songs(songs)
         self._refresh_statusbar()
+        
+        # 同步面板也设置本机路径
+        self.sync_panel.set_dir_a(folder_path)
+        
         self.status_label.setText("就绪")
     
     def _on_transcribe_single(self, file_path: str):

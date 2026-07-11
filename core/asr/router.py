@@ -18,7 +18,14 @@ try:
 except ImportError:
     _HAS_GROQ = False
     GroqWhisperProvider = None
-# from .local_whisper import LocalWhisperProvider   # Phase 2
+
+# 尝试导入本地 Whisper Provider
+try:
+    from .local_whisper import LocalWhisperProvider
+    _HAS_LOCAL = True
+except ImportError:
+    _HAS_LOCAL = False
+    LocalWhisperProvider = None
 
 
 class ASRRouter:
@@ -49,6 +56,12 @@ class ASRRouter:
             ))
         else:
             logger.warning("Groq SDK 未安装，跳过 Groq Provider。安装: pip install groq")
+        
+        if LocalWhisperProvider is not None:
+            model = config.asr.local_model if config else "base"
+            self.register(LocalWhisperProvider(model_name=model))
+        else:
+            logger.warning("openai-whisper 未安装，跳过本地 Provider。安装: pip install openai-whisper")
     
     def register(self, provider: ASRProvider):
         """注册一个 Provider"""
