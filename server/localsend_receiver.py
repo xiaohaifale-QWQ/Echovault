@@ -83,11 +83,12 @@ class LocalSendReceiver:
         # 启动 HTTP 服务器
         self._start_http_server()
         
-        # 启动 UDP 多播
-        self._start_udp_multicast()
-        
-        # 发送 announcement
-        self._send_announcement()
+        # 启动 UDP 多播（可选，失败不影响 HTTP 接收）
+        try:
+            self._start_udp_multicast()
+            self._send_announcement()
+        except Exception as e:
+            logger.warning(f"UDP 多播启动失败（不影响 HTTP 接收功能）: {e}")
         
         ip = self._get_local_ip()
         logger.info(f"LocalSend 接收端已启动: {self.alias} @ {ip}:{HTTP_PORT}")
@@ -309,7 +310,9 @@ class LocalSendReceiver:
         """加入 UDP 多播组，监听其他设备的 announcement"""
         self._udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self._udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        # SO_REUSEPORT 仅 Linux/macOS 支持，Windows 跳过
+        if hasattr(socket, "SO_REUSEPORT"):
+            self._udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         
         # 绑定端口
         self._udp_socket.bind(("0.0.0.0", MULTICAST_PORT))

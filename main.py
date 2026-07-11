@@ -118,18 +118,32 @@ def cmd_transcribe(args):
 
 def cmd_gui(args):
     """启动图形界面"""
-    from PyQt6.QtWidgets import QApplication
+    import traceback
+    from PyQt6.QtWidgets import QApplication, QMessageBox
+    from PyQt6.QtCore import Qt
     from ui.main_window import MainWindow
+    
+    # 全局异常捕获
+    def _excepthook(exc_type, exc_value, exc_tb):
+        tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        logger.error(f"未捕获的异常:\n{tb_text}")
+        QMessageBox.critical(None, "程序错误", f"发生未处理的错误:\n\n{exc_value}\n\n详情已写入日志。")
+        sys.exit(1)
+    
+    sys.excepthook = _excepthook
     
     app = QApplication(sys.argv)
     app.setApplicationName("MusicSync")
     app.setOrganizationName("MusicSync")
-    
-    # 样式
     app.setStyle("Fusion")
     
-    window = MainWindow()
-    window.show()
+    try:
+        window = MainWindow()
+        window.show()
+    except Exception as e:
+        logger.error(f"窗口初始化失败: {e}")
+        QMessageBox.critical(None, "启动失败", f"无法创建主窗口:\n\n{e}")
+        sys.exit(1)
     
     sys.exit(app.exec())
 
