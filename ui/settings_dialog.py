@@ -17,11 +17,7 @@ class _DownloadWorker(QThread):
         super().__init__(); self.model = model
 
     def run(self):
-        import ssl, os as _os
-        ssl._create_default_https_context = ssl._create_unverified_context
-        _os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-        _os.environ["HF_HUB_DISABLE_SSL_VERIFY"] = "1"
-        # 也尝试 pip 的镜像
+        import os as _os
         _os.environ.setdefault("PIP_INDEX_URL", "https://pypi.tuna.tsinghua.edu.cn/simple")
         
         try:
@@ -36,25 +32,42 @@ class _DownloadWorker(QThread):
                 ])
                 import whisper
             
-            self.progress.emit(f"正在下载 {self.model} 模型 (使用镜像)...")
+            self.progress.emit(f"正在从 modelscope 下载 {self.model} 模型...")
+            _os.environ["MODELSCOPE_CACHE"] = _os.path.join(_os.path.expanduser("~"), ".cache", "whisper")
             
-            # 多次重试
-            for attempt in range(3):
-                try:
-                    whisper.load_model(self.model)
-                    break
-                except Exception as e:
-                    if attempt == 2:
-                        raise
-                    self.progress.emit(f"重试 {attempt+2}/3...")
-                    import time; time.sleep(2)
+            # 优先从 modelscope 下载（国内可访问）
+            try:
+                self._download_via_modelscope()
+            except ImportError:
+                # modelscope 未安装，回退到默认方式
+                self.progress.emit("正在安装 modelscope...")
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install", "modelscope", "-q",
+                    "-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
+                    "--trusted-host", "pypi.tuna.tsinghua.edu.cn"
+                ])
+                self._download_via_modelscope()
             
-            self.finished.emit(True, f"{self.model} 模型就绪")
             self.finished.emit(True, f"{self.model} 模型就绪")
         except subprocess.CalledProcessError:
             self.finished.emit(False, "pip 安装失败，请检查网络")
         except Exception as e:
             self.finished.emit(False, str(e))
+    
+    def _download_via_modelscope(self):
+        """从 modelscope (国内魔搭社区) 下载 Whisper 模型"""
+        from modelscope import snapshot_download
+        ids = {
+            "tiny": "keepitsimple/whisper-tiny",
+            "base": "keepitsimple/whisper-base", 
+            "small": "keepitsimple/whisper-small",
+            "medium": "keepitsimple/whisper-medium",
+        }
+        model_id = ids.get(self.model, f"keepitsimple/whisper-{self.model}")
+        cache = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
+        snapshot_download(model_id, cache_dir=cache)
+        import whisper
+        whisper.load_model(self.model)
 
 
 class SettingsDialog(QDialog):
