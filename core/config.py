@@ -22,9 +22,10 @@ class ASRConfig:
 @dataclass
 class SyncConfig:
     """文件同步配置"""
-    direction: str = "bidirectional"  # a_to_b | b_to_a | bidirectional | mirror_a_to_b
-    conflict_resolution: str = "manual"  # newest | manual | skip
-    auto_sync_interval_minutes: int = 0  # 0=手动触发
+    direction: str = "bidirectional"
+    conflict_resolution: str = "manual"
+    auto_sync_interval_minutes: int = 0
+    remote_dir: str = ""  # 手机端同步路径
 
 
 @dataclass
@@ -88,6 +89,7 @@ class ConfigManager:
                 "direction": c.sync.direction,
                 "conflict_resolution": c.sync.conflict_resolution,
                 "auto_sync_interval_minutes": c.sync.auto_sync_interval_minutes,
+                "remote_dir": c.sync.remote_dir,
             },
         }
     
@@ -104,6 +106,7 @@ class ConfigManager:
         c.sync.direction = sync_data.get("direction", "bidirectional")
         c.sync.conflict_resolution = sync_data.get("conflict_resolution", "manual")
         c.sync.auto_sync_interval_minutes = sync_data.get("auto_sync_interval_minutes", 0)
+        c.sync.remote_dir = sync_data.get("remote_dir", "")
 
 
 # 全局单例

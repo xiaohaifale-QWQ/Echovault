@@ -47,16 +47,19 @@ class LocalSendReceiver:
         save_dir: str,
         alias: str = "MusicSync",
         on_file_received: Optional[Callable] = None,
+        on_progress: Optional[Callable] = None,
     ):
         """
         Args:
             save_dir: 接收文件的保存目录
             alias: 在 LocalSend 中显示的名称
             on_file_received: 文件接收完成回调 (file_path: str)
+            on_progress: 传输进度回调 (current: int, total: int, filename: str)
         """
         self.save_dir = Path(save_dir)
         self.alias = alias
         self.on_file_received = on_file_received
+        self.on_progress = on_progress
         self.fingerprint = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
         
         self._http_server: Optional[HTTPServer] = None
@@ -192,16 +195,37 @@ class LocalSendReceiver:
                 
                 session_id = uuid.uuid4().hex[:12]
                 file_tokens = {}
+                skipped = 0
                 
                 session_files = {}
                 for file_id, info in files_info.items():
+                    name = info.get("fileName", "unknown")
+                    size = info.get("size", 0)
+                    
+                    # 检查是否已存在相同文件（名称+大小一致则跳过）
+                    existing_path = receiver.save_dir / Path(name).name
+                    if existing_path.exists() and existing_path.stat().st_size == size:
+                        logger.info(f"跳过重复文件: {name} (已存在且大小相同)")
+                        skipped += 1
+                        continue
+                    
                     token = uuid.uuid4().hex[:16]
                     file_tokens[file_id] = token
                     session_files[file_id] = {
-                        "name": info.get("fileName", "unknown"),
-                        "size": info.get("size", 0),
+                        "name": name,
+                        "size": size,
                         "token": token,
                     }
+                
+                if skipped > 0:
+                    logger.info(f"跳过 {skipped} 个重复文件")
+                
+                if not session_files:
+                    # 全部跳过
+                    logger.info(f"所有文件均已存在，无需传输")
+                    self.send_response(204)  # No Content
+                    self.end_headers()
+                    return
                 
                 receiver._sessions[session_id] = {
                     "files": session_files,
@@ -240,10 +264,29 @@ class LocalSendReceiver:
                     self._send_json({"message": "Invalid token"}, 403)
                     return
                 
-                # 读取文件内容
+                # 读取文件内容（分块 + 进度回调）
                 length = int(self.headers.get("Content-Length", 0))
-                file_data = self.rfile.read(length)
+                chunks = []
+                received = 0
+                chunk_size = 65536
+                filename = file_info["name"]
                 
+                total_files = len(session["files"])
+                keys = list(session["files"].keys())
+                current_idx = keys.index(file_id) + 1 if file_id in keys else 0
+                
+                while received < length:
+                    chunk = self.rfile.read(min(chunk_size, length - received))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    received += len(chunk)
+                    
+                    if receiver.on_progress and length > 0:
+                        pct = int(received * 100 / length)
+                        receiver.on_progress(current_idx, total_files, f"{filename} ({pct}%)")
+                
+                file_data = b"".join(chunks)
                 # 保存文件
                 filename = file_info["name"]
                 safe_name = Path(filename).name  # 防止路径遍历

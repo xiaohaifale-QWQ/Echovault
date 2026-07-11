@@ -23,6 +23,7 @@ from core.sync_engine import (
     SyncEngine, SyncDirection, ConflictResolution,
     DiffType, FileDiff, SyncPlan,
 )
+from core.config import config_manager
 from server.localsend_receiver import LocalSendReceiver
 
 
@@ -53,8 +54,14 @@ class SyncPanel(QWidget):
         self._diffs: list[FileDiff] = []
         self._plan: SyncPlan = None
         self._localsend: LocalSendReceiver = None
+        self._receiving_files: int = 0  # 当前正在接收的文件数
         
         self._setup_ui()
+        
+        # 加载上次的远程路径
+        cfg = config_manager.load()
+        if cfg.sync.remote_dir:
+            self.dir_b_input.setText(cfg.sync.remote_dir)
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -189,6 +196,11 @@ class SyncPanel(QWidget):
         
         ls_layout.addLayout(ls_btn_layout)
         
+        # LocalSend 进度
+        self.ls_progress = QProgressBar()
+        self.ls_progress.setVisible(False)
+        ls_layout.addWidget(self.ls_progress)
+        
         self.ls_recent = QLabel("")
         self.ls_recent.setStyleSheet("color: #4CAF50; font-size: 11px;")
         self.ls_recent.setWordWrap(True)
@@ -322,6 +334,13 @@ class SyncPanel(QWidget):
                 self.btn_localsend.setChecked(False)
                 return
             
+            # 保存远程路径
+            remote = self.dir_b_input.text().strip()
+            if remote:
+                cfg = config_manager.load()
+                cfg.sync.remote_dir = remote
+                config_manager.save()
+            
             self._start_localsend(dir_a)
         else:
             self._stop_localsend()
@@ -331,6 +350,7 @@ class SyncPanel(QWidget):
             save_dir=save_dir,
             alias="MusicSync",
             on_file_received=self._on_file_received,
+            on_progress=self._on_localsend_progress,
         )
         self._localsend.start()
         
@@ -364,3 +384,11 @@ class SyncPanel(QWidget):
         """LocalSend 收到文件的回调"""
         name = Path(file_path).name
         self.ls_recent.setText(f"最近接收: {name}")
+        self.ls_progress.setVisible(False)
+    
+    def _on_localsend_progress(self, current: int, total: int, filename: str):
+        """LocalSend 传输进度回调"""
+        self.ls_progress.setVisible(True)
+        self.ls_progress.setMaximum(total * 100)
+        self.ls_progress.setValue((current - 1) * 100 + int(filename.split("(")[-1].rstrip("%)")) if "%" in filename else 0)
+        self.ls_status.setText(f"接收中: {filename}")
