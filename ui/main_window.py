@@ -171,11 +171,11 @@ class MainWindow(QMainWindow):
         
         self.count_label.setText(f"共 {total} 首 | 有歌词 {has_lrc} 首")
         
-        available = self.router.list_available()
-        if available:
-            self.provider_label.setText(f"Provider: {available[0].display_name}")
+        provider = self.router.get(self.config.asr.provider)
+        if provider and provider.is_available():
+            self.provider_label.setText(f"引擎: {provider.display_name}")
         else:
-            self.provider_label.setText("Provider: 无可用 (需安装 Groq 或 Whisper)")
+            self.provider_label.setText("引擎: 不可用 (请检查设置)")
     
     def _connect_signals(self):
         """连接信号"""
@@ -275,14 +275,21 @@ class MainWindow(QMainWindow):
         """执行批量识别"""
         from ui.transcribe_worker import TranscribeWorker
         
-        if not self.router.list_available():
-            msg = "没有可用的语音识别引擎。\n\n"
-            try: import groq
-            except ImportError: msg += "- Groq SDK 未安装: pip install groq\n"
-            else: msg += "- Groq API Key 未设置\n"
-            try: import whisper
-            except ImportError: msg += "- 本地 Whisper 未安装: pip install openai-whisper\n"
-            QMessageBox.warning(self, "无可用 Provider", msg)
+        # 检查当前配置的 Provider 是否可用
+        provider_name = self.config.asr.provider
+        provider = self.router.get(provider_name)
+        
+        if not provider or not provider.is_available():
+            if provider_name == "groq":
+                msg = "Groq 云端引擎不可用。\n\n请确认已设置 Groq API Key。\n免费获取: https://console.groq.com/keys"
+            elif provider_name == "local":
+                msg = "本地 Whisper 引擎不可用。\n\n"
+                try: import whisper
+                except ImportError: msg += "- openai-whisper 未安装: pip install openai-whisper\n"
+                else: msg += "- 模型未下载，请在设置中下载模型\n"
+            else:
+                msg = f"引擎 '{provider_name}' 不可用。"
+            QMessageBox.warning(self, "引擎不可用", msg)
             self._on_settings()
             return
         

@@ -83,7 +83,7 @@ class ASRRouter:
         language: Optional[str] = None,
     ) -> TranscriptionResult:
         """
-        使用最佳可用的 Provider 转录音频
+        使用指定的 Provider 转录音频
         
         Args:
             audio_path: 音频文件路径
@@ -94,39 +94,34 @@ class ASRRouter:
             TranscriptionResult
         
         Raises:
-            RuntimeError: 所有 Provider 都不可用
+            RuntimeError: Provider 不可用或识别失败
         """
-        # 确定尝试顺序
-        if provider_name:
-            candidates = [provider_name]
-        elif self._config:
-            candidates = [self._config.asr.provider] + [
-                p for p in self.FALLBACK_ORDER if p != self._config.asr.provider
-            ]
-        else:
-            candidates = self.FALLBACK_ORDER.copy()
+        # 确定使用的 provider：显式指定 > 配置 > 报错
+        name = provider_name or (self._config.asr.provider if self._config else None)
+        if not name:
+            # 没有配置，按优先级找第一个可用的
+            for n in self.FALLBACK_ORDER:
+                p = self._providers.get(n)
+                if p and p.is_available():
+                    name = n
+                    break
+            if not name:
+                raise RuntimeError("没有可用的 ASR Provider")
         
-        last_error = None
-        for name in candidates:
-            provider = self._providers.get(name)
-            if provider is None:
-                continue
-            if not provider.is_available():
-                logger.info(f"Provider '{name}' 不可用，尝试下一个...")
-                continue
-            
-            try:
-                logger.info(f"使用 Provider: {provider.display_name}")
-                return provider.transcribe(audio_path, language=language)
-            except Exception as e:
-                logger.warning(f"Provider '{name}' 失败: {e}")
-                last_error = e
-                continue
+        provider = self._providers.get(name)
+        if provider is None:
+            raise RuntimeError(
+                f"Provider '{name}' 未注册。\n"
+                f"可用: {[p.display_name for p in self._providers.values()]}"
+            )
+        if not provider.is_available():
+            raise RuntimeError(
+                f"Provider '{provider.display_name}' 不可用。\n"
+                f"请检查配置（API Key、模型文件等）。"
+            )
         
-        raise RuntimeError(
-            f"所有 ASR Provider 都不可用。最后错误: {last_error}\n"
-            f"可用 Provider: {[p.display_name for p in self.list_available()]}"
-        )
+        logger.info(f"使用 Provider: {provider.display_name}")
+        return provider.transcribe(audio_path, language=language)
 
 
 # 全局路由器实例（延迟初始化）
