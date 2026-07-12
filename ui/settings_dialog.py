@@ -1,4 +1,4 @@
-"""设置对话框"""
+﻿"""设置对话框"""
 import os, subprocess, sys, hashlib
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -437,10 +437,13 @@ class SettingsDialog(QDialog):
         self.btn_scan_gpu.setEnabled(True)
         self.gpu_info_label.setText(info)
         has_gpu = info.startswith("✅")
-        self.btn_install_gpu.setEnabled(has_gpu)
-        if has_gpu and "CUDA 已就绪" in info:
+        cuda_ready = "CUDA 已就绪" in info
+        if cuda_ready:
             self.btn_install_gpu.setText("CUDA 已安装 ✓")
             self.btn_install_gpu.setEnabled(False)
+        else:
+            self.btn_install_gpu.setEnabled(has_gpu)
+            self.btn_install_gpu.setText("安装 GPU 加速 (PyTorch CUDA ~2.5GB)")
     
     def _on_install_gpu(self):
         self.btn_install_gpu.setVisible(False)
@@ -474,10 +477,11 @@ class SettingsDialog(QDialog):
             return  # 用户主动取消，不弹框
         if ok:
             self.gpu_check.setChecked(True)
-            self.gpu_info_label.setText(self.gpu_info_label.text().rstrip() + " (CUDA 已就绪)")
-            self.btn_install_gpu.setText("CUDA 已安装 ✓")
-            self.btn_install_gpu.setEnabled(False)
-            QMessageBox.information(self, "安装完成", msg)
+            self._save()
+            QMessageBox.information(self, "安装完成", msg + "\n\n点击确定后将重启应用。")
+            import subprocess as _sp
+            _sp.Popen([sys.executable] + sys.argv)
+            sys.exit(0)
         else:
             self.btn_install_gpu.setEnabled(True)
             QMessageBox.critical(self, "安装失败", msg)
