@@ -417,7 +417,7 @@ class MainWindow(QMainWindow):
     
     def _do_restart(self):
         """重新启动应用"""
-        import subprocess, os, logging
+        import subprocess, os, sys, logging
         script = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "main.py")
         cmd = [sys.executable, script]
         logging.getLogger("linlangyuefu").info(f"重启: {cmd}")
