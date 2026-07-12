@@ -24,10 +24,11 @@ class LocalWhisperProvider(ASRProvider):
     # 内置模型大小
     AVAILABLE_MODELS = ["tiny", "base", "small", "medium", "large"]
     
-    def __init__(self, model_name: str = "base"):
+    def __init__(self, model_name: str = "base", use_gpu: bool = False):
         self._model_name = model_name
         self._model = None
         self._device = None
+        self._use_gpu = use_gpu
     
     @property
     def name(self) -> str:
@@ -35,14 +36,17 @@ class LocalWhisperProvider(ASRProvider):
     
     @property
     def display_name(self) -> str:
-        return f"本地 Whisper ({self._model_name})"
+        dev = "GPU" if self._use_gpu else "CPU"
+        return f"本地 Whisper ({self._model_name}, {dev})"
     
     def _get_model(self):
         if self._model is None:
             try: import whisper
             except ImportError: raise RuntimeError("openai-whisper not installed")
-            try: import torch; self._device = "cuda" if torch.cuda.is_available() else "cpu"
+            try: import torch
             except ImportError: self._device = "cpu"
+            else:
+                self._device = "cuda" if (self._use_gpu and torch.cuda.is_available()) else "cpu"
             logger.info(f"Loading '{self._model_name}' (device:{self._device})...")
             from core.whisper_loader import load_hf_whisper
             self._model = load_hf_whisper(self._model_name)

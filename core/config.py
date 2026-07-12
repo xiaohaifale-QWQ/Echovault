@@ -17,6 +17,7 @@ class ASRConfig:
     local_model: str = "base"        # tiny | base | small | medium（仅 local provider）
     language: Optional[str] = None   # None=自动检测, "zh"=中文, "en"=英语, "ja"=日语, "ko"=韩语
     use_vocal_separation: bool = False  # 是否启用 Demucs 人声分离
+    use_gpu: bool = False               # 是否启用 GPU 加速（默认 CPU）
 
 
 @dataclass
@@ -84,6 +85,7 @@ class ConfigManager:
                 "local_model": c.asr.local_model,
                 "language": c.asr.language,
                 "use_vocal_separation": c.asr.use_vocal_separation,
+                "use_gpu": c.asr.use_gpu,
             },
             "sync": {
                 "direction": c.sync.direction,
@@ -102,6 +104,7 @@ class ConfigManager:
         c.asr.local_model = asr_data.get("local_model", "base")
         c.asr.language = asr_data.get("language")
         c.asr.use_vocal_separation = asr_data.get("use_vocal_separation", False)
+        c.asr.use_gpu = asr_data.get("use_gpu", False)
         sync_data = data.get("sync", {})
         c.sync.direction = sync_data.get("direction", "bidirectional")
         c.sync.conflict_resolution = sync_data.get("conflict_resolution", "manual")

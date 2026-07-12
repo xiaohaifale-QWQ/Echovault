@@ -12,6 +12,53 @@ from core.config import AppConfig, config_manager
 # Whisper 模型下载 URL (OpenAI 官方 + 各镜像)
 _GH_RELEASE = "https://github.com/xiaohaifale-QWQ/echovault-models/releases/download/v1.0"
 
+class _GPUDetectWorker(QThread):
+    """后台扫描显卡"""
+    result_ready = pyqtSignal(str)  # GPU 名称 或 错误信息
+    
+    def run(self):
+        try:
+            # 先试 nvidia-smi
+            import subprocess as sp
+            r = sp.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                       capture_output=True, text=True, timeout=10)
+            if r.returncode == 0 and r.stdout.strip():
+                name = r.stdout.strip().split("\n")[0].strip()
+                self.result_ready.emit(f"✅ {name}")
+                return
+        except Exception:
+            pass
+        
+        # 回退：检查 torch.cuda
+        try:
+            import torch
+            if torch.cuda.is_available():
+                name = torch.cuda.get_device_name(0)
+                self.result_ready.emit(f"✅ {name} (CUDA 已就绪)")
+                return
+        except ImportError:
+            pass
+        
+        self.result_ready.emit("❌ 未检测到 NVIDIA 显卡")
+
+
+class _GPUInstallWorker(QThread):
+    """后台安装 PyTorch CUDA 版本"""
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(bool, str)
+    
+    def run(self):
+        try:
+            self.progress.emit("正在安装 PyTorch CUDA 12.1 (~2.5 GB)...")
+            subprocess.check_call([
+                sys.executable, "-m", "pip", "install", "torch", "torchvision", "torchaudio",
+                "--index-url", "https://download.pytorch.org/whl/cu121",
+            ])
+            self.finished.emit(True, "GPU 加速安装完成！重启后生效。")
+        except subprocess.CalledProcessError as e:
+            self.finished.emit(False, f"安装失败: {e}")
+
+
 class _DownloadWorker(QThread):
     progress = pyqtSignal(int, str)
     finished = pyqtSignal(bool, str)
@@ -208,6 +255,37 @@ class SettingsDialog(QDialog):
         af.addRow("", self.vocal_check)
         l.addWidget(ag)
 
+        # ── GPU 加速 ──
+        self.gpu_group = QGroupBox("GPU 加速 (仅本地 Whisper)"); gf = QFormLayout(self.gpu_group)
+        self.gpu_group.setVisible(False)
+        
+        gpu_scan_row = QHBoxLayout()
+        self.btn_scan_gpu = QPushButton("扫描显卡"); self.btn_scan_gpu.setMaximumWidth(80)
+        self.btn_scan_gpu.clicked.connect(self._on_scan_gpu)
+        gpu_scan_row.addWidget(self.btn_scan_gpu)
+        self.gpu_info_label = QLabel("点击扫描检测显卡"); self.gpu_info_label.setStyleSheet("font-size:11px;color:#666")
+        gpu_scan_row.addWidget(self.gpu_info_label)
+        gpu_scan_row.addStretch()
+        gf.addRow("", gpu_scan_row)
+        
+        gpu_install_row = QHBoxLayout()
+        self.btn_install_gpu = QPushButton("安装 GPU 加速 (PyTorch CUDA ~2.5GB)")
+        self.btn_install_gpu.clicked.connect(self._on_install_gpu)
+        self.btn_install_gpu.setEnabled(False)
+        gpu_install_row.addWidget(self.btn_install_gpu)
+        gpu_install_row.addStretch()
+        gf.addRow("", gpu_install_row)
+        
+        self.gpu_progress = QProgressBar(); self.gpu_progress.setVisible(False); self.gpu_progress.setRange(0, 0)
+        gf.addRow("", self.gpu_progress)
+        self.gpu_progress_label = QLabel(""); self.gpu_progress_label.setStyleSheet("font-size:11px;color:#666")
+        self.gpu_progress_label.setVisible(False)
+        gf.addRow("", self.gpu_progress_label)
+        
+        self.gpu_check = QCheckBox("启用 GPU 加速")
+        gf.addRow("", self.gpu_check)
+        l.addWidget(self.gpu_group)
+
         lg = QGroupBox("歌词输出"); lf = QFormLayout(lg)
         dr = QHBoxLayout(); self.lrc_input = QLineEdit()
         self.lrc_input.setPlaceholderText("留空 = 与音频文件同目录"); dr.addWidget(self.lrc_input)
@@ -226,7 +304,10 @@ class SettingsDialog(QDialog):
         for i in range(self.model_combo.count()):
             if self.model_combo.itemData(i) == c.asr.local_model: self.model_combo.setCurrentIndex(i); break
         self.vocal_check.setChecked(c.asr.use_vocal_separation)
+        self.gpu_check.setChecked(c.asr.use_gpu)
         if c.output_lrc_dir: self.lrc_input.setText(c.output_lrc_dir)
+        # 自动扫描显卡
+        self._on_scan_gpu()
 
     def _on_prov(self, idx):
         is_local = self.provider_combo.itemData(idx) == "local"
@@ -236,6 +317,7 @@ class SettingsDialog(QDialog):
         self.btn_cancel_dl.setVisible(False)
         self.dl_bar.setVisible(False)
         self.dl_label.setVisible(False)
+        self.gpu_group.setVisible(is_local)
 
     def _on_download(self):
         model = self.model_combo.currentData()
@@ -266,6 +348,43 @@ class SettingsDialog(QDialog):
             pass  # 用户主动取消，不弹错误框
         else: QMessageBox.critical(self, "下载失败", msg)
 
+    def _on_scan_gpu(self):
+        self.btn_scan_gpu.setEnabled(False)
+        self.gpu_info_label.setText("扫描中...")
+        self._gpu_detector = _GPUDetectWorker()
+        self._gpu_detector.result_ready.connect(self._on_gpu_detected)
+        self._gpu_detector.start()
+    
+    def _on_gpu_detected(self, info: str):
+        self.btn_scan_gpu.setEnabled(True)
+        self.gpu_info_label.setText(info)
+        has_gpu = info.startswith("✅")
+        self.btn_install_gpu.setEnabled(has_gpu)
+        if has_gpu and "CUDA 已就绪" in info:
+            self.btn_install_gpu.setText("CUDA 已安装 ✓")
+            self.btn_install_gpu.setEnabled(False)
+    
+    def _on_install_gpu(self):
+        self.btn_install_gpu.setEnabled(False)
+        self.gpu_progress.setVisible(True)
+        self.gpu_progress_label.setVisible(True)
+        self._gpu_installer = _GPUInstallWorker()
+        self._gpu_installer.progress.connect(lambda m: self.gpu_progress_label.setText(m))
+        self._gpu_installer.finished.connect(self._on_gpu_installed)
+        self._gpu_installer.start()
+    
+    def _on_gpu_installed(self, ok: bool, msg: str):
+        self.gpu_progress.setVisible(False)
+        self.gpu_progress_label.setVisible(False)
+        if ok:
+            self.gpu_check.setChecked(True)
+            self.gpu_info_label.setText(self.gpu_info_label.text().replace("✅", "✅").rstrip() + " (CUDA 已就绪)")
+            self.btn_install_gpu.setText("CUDA 已安装 ✓")
+            QMessageBox.information(self, "安装完成", msg)
+        else:
+            self.btn_install_gpu.setEnabled(True)
+            QMessageBox.critical(self, "安装失败", msg)
+
     def _browse(self, edit):
         d = QFileDialog.getExistingDirectory(self, "选择文件夹")
         if d: edit.setText(d)
@@ -276,6 +395,7 @@ class SettingsDialog(QDialog):
         c.asr.language = self.lang_combo.currentData()
         c.asr.local_model = self.model_combo.currentData()
         c.asr.use_vocal_separation = self.vocal_check.isChecked()
+        c.asr.use_gpu = self.gpu_check.isChecked()
         key = self.api_input.text().strip(); c.groq_api_key = key
         if key: os.environ["GROQ_API_KEY"] = key
         d = self.lrc_input.text().strip(); c.output_lrc_dir = d if d else None
