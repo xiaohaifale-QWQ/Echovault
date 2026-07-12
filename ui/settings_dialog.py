@@ -479,9 +479,15 @@ class SettingsDialog(QDialog):
             self.gpu_check.setChecked(True)
             self._save()
             QMessageBox.information(self, "安装完成", msg + "\n\n点击确定后将重启应用。")
+            # 独立进程启动新实例，避免 I/O 冲突
             import subprocess as _sp
-            _sp.Popen([sys.executable] + sys.argv)
-            sys.exit(0)
+            script = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "main.py")
+            kwargs = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = 0x00000008  # DETACHED_PROCESS
+            _sp.Popen([sys.executable, script], **kwargs)
+            from PyQt6.QtWidgets import QApplication
+            QApplication.quit()
         else:
             self.btn_install_gpu.setEnabled(True)
             QMessageBox.critical(self, "安装失败", msg)
