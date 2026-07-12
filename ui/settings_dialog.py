@@ -64,12 +64,10 @@ class _GPUInstallWorker(QThread):
             import re
             self.progress.emit(0, "正在解析 PyTorch CUDA 12.1 依赖...")
             
-            # 双源：清华镜像优先（快），PyTorch 官方兜底（CUDA 轮子）
+            # 只用 PyTorch CDN（不用清华镜像，它会优先给 CPU 版 torch）
             self._proc = subprocess.Popen(
                 [sys.executable, "-m", "pip", "install", "torch", "torchvision", "torchaudio",
-                 "--index-url", "https://download.pytorch.org/whl/cu121",
-                 "--extra-index-url", "https://pypi.tuna.tsinghua.edu.cn/simple",
-                 "--trusted-host", "pypi.tuna.tsinghua.edu.cn"],
+                 "--index-url", "https://download.pytorch.org/whl/cu121"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1, universal_newlines=True,
             )
