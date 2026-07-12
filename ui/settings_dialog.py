@@ -296,6 +296,11 @@ class SettingsDialog(QDialog):
         kh = QLabel('<a href="https://console.groq.com/keys" style="color:#1976D2">免费获取 Groq Key</a>')
         kh.setOpenExternalLinks(True); kh.setStyleSheet("font-size:11px"); af.addRow("", kh)
 
+        self.xunfei_input = QLineEdit(); self.xunfei_input.setPlaceholderText("输入 API Key...")
+        self.xunfei_input.setEchoMode(QLineEdit.EchoMode.Password); af.addRow("讯飞 Key:", self.xunfei_input)
+        xh = QLabel('<a href="https://console.xfyun.cn/services/iat" style="color:#1976D2">免费获取讯飞 Key</a>')
+        xh.setOpenExternalLinks(True); xh.setStyleSheet("font-size:11px"); af.addRow("", xh)
+
         self.lang_combo = QComboBox()
         for t, v in [("自动检测", None), ("中文", "zh"), ("英语", "en"), ("日语", "ja"), ("韩语", "ko")]:
             self.lang_combo.addItem(t, v)
