@@ -43,25 +43,43 @@ class _GPUDetectWorker(QThread):
 
 
 class _GPUInstallWorker(QThread):
-    """后台安装 PyTorch CUDA 版本 — 带下载进度"""
+    """后台安装 PyTorch CUDA 版本 — 双源 + 可取消"""
     progress = pyqtSignal(int, str)  # percent, message
     finished = pyqtSignal(bool, str)
+    
+    def __init__(self):
+        super().__init__()
+        self._cancelled = False
+        self._proc = None
+    
+    def cancel(self):
+        self._cancelled = True
+        self.requestInterruption()
+        if self._proc:
+            try: self._proc.terminate()
+            except: pass
     
     def run(self):
         try:
             import re
-            # 先收集待下载的包名和大小
             self.progress.emit(0, "正在解析 PyTorch CUDA 12.1 依赖...")
             
-            proc = subprocess.Popen(
+            # 双源：清华镜像优先（快），PyTorch 官方兜底（CUDA 轮子）
+            self._proc = subprocess.Popen(
                 [sys.executable, "-m", "pip", "install", "torch", "torchvision", "torchaudio",
-                 "--index-url", "https://download.pytorch.org/whl/cu121"],
+                 "--index-url", "https://download.pytorch.org/whl/cu121",
+                 "--extra-index-url", "https://pypi.tuna.tsinghua.edu.cn/simple",
+                 "--trusted-host", "pypi.tuna.tsinghua.edu.cn"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1, universal_newlines=True,
             )
             
-            pkg_name = ""; pkg_total = 0; pkg_unit = "MB"
-            for line in iter(proc.stdout.readline, ""):
+            pkg_name = ""
+            for line in iter(self._proc.stdout.readline, ""):
+                if self._cancelled or self.isInterruptionRequested():
+                    self._proc.terminate()
+                    self.finished.emit(False, "安装已取消")
+                    return
                 line = line.strip()
                 if not line:
                     continue
@@ -71,23 +89,15 @@ class _GPUInstallWorker(QThread):
                 if m:
                     pkg_name = m.group(1).split("/")[-1][:50]
                     size_str = m.group(2)
-                    try:
-                        val = float(re.findall(r'[\d.]+', size_str)[0])
-                        pkg_unit = "GB" if "GB" in size_str.upper() else "MB" if "MB" in size_str.upper() else "KB"
-                        if "GB" in size_str.upper(): pkg_total = val * 1024
-                        elif "KB" in size_str.upper(): pkg_total = val / 1024
-                        else: pkg_total = val
-                    except: pkg_total = 0
                     self.progress.emit(0, f"⬇ {pkg_name} ({size_str})")
                     continue
                 
-                # " 1.2/2.5 GB 5.2 MB/s eta 0:04:01" 或 "━━━━━ 45% 5.2 MB/s"
+                # " 1.2/2.5 GB 5.2 MB/s eta 0:04:01"
                 m2 = re.search(r'(\d+\.?\d*)\s*/\s*(\d+\.?\d*)\s*(\w+)', line)
                 if m2:
                     try:
                         done = float(m2.group(1))
                         total = float(m2.group(2))
-                        unit = m2.group(3)
                         pct = int(done / total * 100) if total > 0 else 0
                         speed_match = re.search(r'(\d+\.?\d*\s*\w+/s)', line)
                         speed = speed_match.group(1) if speed_match else ""
@@ -95,7 +105,7 @@ class _GPUInstallWorker(QThread):
                     except: pass
                     continue
                 
-                # pip 百分比格式: "━━━━━━━━━━ 45%"
+                # pip 百分比: "━━━━━ 45%"
                 m3 = re.search(r'(\d+)%', line)
                 if m3 and pkg_name:
                     pct = int(m3.group(1))
@@ -104,17 +114,19 @@ class _GPUInstallWorker(QThread):
                     self.progress.emit(pct, f"⬇ {pkg_name} — {speed} ({pct}%)")
                     continue
                 
-                # Already installed / cached
                 if "already satisfied" in line.lower():
                     self.progress.emit(100, "已安装，跳过")
                 elif any(kw in line.lower() for kw in ['installing', 'successfully installed', 'collecting']):
                     self.progress.emit(-1, line[:100])
             
-            proc.wait()
-            if proc.returncode == 0:
+            self._proc.wait()
+            if self._cancelled or self.isInterruptionRequested():
+                self.finished.emit(False, "安装已取消")
+                return
+            if self._proc.returncode == 0:
                 self.finished.emit(True, "GPU 加速安装完成！重启后生效。")
             else:
-                self.finished.emit(False, f"pip 返回错误码 {proc.returncode}\n请重试或检查网络")
+                self.finished.emit(False, f"pip 返回错误码 {self._proc.returncode}\n请重试或检查网络")
         except FileNotFoundError:
             self.finished.emit(False, "找不到 pip，请确认 Python 安装正确")
         except Exception as e:
@@ -335,6 +347,10 @@ class SettingsDialog(QDialog):
         self.btn_install_gpu.clicked.connect(self._on_install_gpu)
         self.btn_install_gpu.setEnabled(False)
         gpu_install_row.addWidget(self.btn_install_gpu)
+        self.btn_cancel_gpu = QPushButton("取消"); self.btn_cancel_gpu.setVisible(False)
+        self.btn_cancel_gpu.setStyleSheet("color:#c0392b;")
+        self.btn_cancel_gpu.clicked.connect(self._on_cancel_gpu)
+        gpu_install_row.addWidget(self.btn_cancel_gpu)
         gpu_install_row.addStretch()
         gf.addRow("", gpu_install_row)
         
@@ -427,7 +443,8 @@ class SettingsDialog(QDialog):
             self.btn_install_gpu.setEnabled(False)
     
     def _on_install_gpu(self):
-        self.btn_install_gpu.setEnabled(False)
+        self.btn_install_gpu.setVisible(False)
+        self.btn_cancel_gpu.setVisible(True)
         self.gpu_progress.setVisible(True); self.gpu_progress.setValue(0)
         self.gpu_progress_label.setVisible(True); self.gpu_progress_label.setText("")
         self._gpu_installer = _GPUInstallWorker()
@@ -435,18 +452,31 @@ class SettingsDialog(QDialog):
         self._gpu_installer.finished.connect(self._on_gpu_installed)
         self._gpu_installer.start()
     
+    def _on_cancel_gpu(self):
+        if hasattr(self, '_gpu_installer') and self._gpu_installer.isRunning():
+            self._gpu_installer.cancel()
+            self.gpu_progress_label.setText("正在取消...")
+            self.btn_cancel_gpu.setEnabled(False)
+    
     def _on_gpu_dl_progress(self, pct: int, msg: str):
         if pct >= 0:
             self.gpu_progress.setValue(pct)
         self.gpu_progress_label.setText(msg)
     
     def _on_gpu_installed(self, ok: bool, msg: str):
+        self.btn_install_gpu.setVisible(True)
+        self.btn_cancel_gpu.setVisible(False)
+        self.btn_cancel_gpu.setEnabled(True)
         self.gpu_progress.setVisible(False)
         self.gpu_progress_label.setVisible(False)
+        if "取消" in msg:
+            self.btn_install_gpu.setEnabled(True)
+            return  # 用户主动取消，不弹框
         if ok:
             self.gpu_check.setChecked(True)
-            self.gpu_info_label.setText(self.gpu_info_label.text().replace("✅", "✅").rstrip() + " (CUDA 已就绪)")
+            self.gpu_info_label.setText(self.gpu_info_label.text().rstrip() + " (CUDA 已就绪)")
             self.btn_install_gpu.setText("CUDA 已安装 ✓")
+            self.btn_install_gpu.setEnabled(False)
             QMessageBox.information(self, "安装完成", msg)
         else:
             self.btn_install_gpu.setEnabled(True)
