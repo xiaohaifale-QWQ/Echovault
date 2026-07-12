@@ -341,9 +341,28 @@ class MainWindow(QMainWindow):
         self._refresh_statusbar()
         
         if failed > 0:
+            # 收集实际的错误信息
+            errors = []
+            for fp, r in results.items():
+                if not r["success"] and r.get("error"):
+                    err = str(r["error"])
+                    if err not in errors:
+                        errors.append(err)
+            err_detail = "\n".join(errors[:3])  # 最多显示 3 条
+            if len(errors) > 3:
+                err_detail += f"\n... 还有 {len(errors)-3} 条"
+            
+            provider_name = self.config.asr.provider
+            if provider_name == "local":
+                hint = "请确认已在设置中下载模型，且 ffmpeg 已安装。"
+            elif provider_name == "groq":
+                hint = "请检查网络连接和 Groq API Key 配置。"
+            else:
+                hint = "请检查相关配置。"
+            
             QMessageBox.warning(
                 self, "识别完成",
-                f"成功: {success} 首\n失败: {failed} 首\n\n请检查网络连接或 API Key 配置。"
+                f"成功: {success} 首\n失败: {failed} 首\n\n{err_detail}\n\n{hint}"
             )
     
     def _on_edit_lyrics(self, file_path: str):
