@@ -19,6 +19,18 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Force UTF-8 stdout to handle non-GBK characters in file names
+if sys.stdout.encoding != "utf-8":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if sys.stderr.encoding != "utf-8":
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from core.config import config_manager, AppConfig
 from core.asr.router import ASRRouter, get_router
 from core.audio_utils import is_supported, SUPPORTED_FORMATS
@@ -427,8 +439,14 @@ def cmd_sync(args):
             sys.exit(1)
         diff = engine.compare_directories(dir_a, dir_b)
         if args.json_output:
-            items = [{"file": d.get("file",""), "type": d.get("type",""),
-                      "size_a": d.get("size_a",0), "size_b": d.get("size_b",0)} for d in diff]
+            items = []
+            for d in diff:
+                items.append({
+                    "file": d.file.relative_path,
+                    "type": d.diff_type.value,
+                    "size_a": d.file.size,
+                    "size_b": d.other_file.size if d.other_file else 0,
+                })
             print(_json.dumps({"dir_a": dir_a, "dir_b": dir_b, "diff": items, "count": len(diff)},
                               ensure_ascii=False, indent=2))
         else:
@@ -436,10 +454,11 @@ def cmd_sync(args):
             print(f"B: {dir_b}")
             print(f"Differences: {len(diff)}")
             print("-" * 50)
-            icons = {"only_a": "A>", "only_b": "<B", "newer_a": "A>", "newer_b": "<B", "conflict": "!!"}
+            icons = {"only_in_a": "A>", "only_in_b": "<B", "newer_in_a": "A>", "newer_in_b": "<B", "conflict": "!!"}
             for d in diff:
-                ic = icons.get(d.get("type", ""), "??")
-                print(f"  {ic} {d.get('file','?')} [{d.get('type','?')}]")
+                dt = d.diff_type.value
+                ic = icons.get(dt, "??")
+                print(f"  {ic} {d.file.relative_path} [{dt}]")
 
     elif args.sync_action == "serve":
         folder = args.folder or (config.music_dirs[0] if config.music_dirs else None)
