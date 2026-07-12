@@ -1,27 +1,30 @@
 """
-琳琅乐府 — 音乐歌词识别同步系统
+琳琅乐府 - 音乐歌词识别同步系统
 
 用法:
-    python main.py                  # 启动图形界面（默认）
-    python main.py gui              # 启动图形界面
-    python main.py transcribe <文件> # 命令行识别
+    python main.py                       # 启动图形界面
+    python main.py gui                   # 启动图形界面
+    python main.py <命令> [参数]          # CLI 模式
+
+CLI 命令: list | info | transcribe | lyrics | config | model | gpu | sync | rename | mark | serve
+详细文档: CLI.md
 """
 
 import sys
 import os
+import json as _json
 import argparse
 import logging
 from pathlib import Path
 
-# 添加项目根目录到 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.config import config_manager
+from core.config import config_manager, AppConfig
 from core.asr.router import ASRRouter, get_router
 from core.audio_utils import is_supported, SUPPORTED_FORMATS
 from core.lrc_writer import transcribe_and_save_lrc
+from core.lrc_parser import parse_lrc_file
 
-# 日志配置
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -30,159 +33,610 @@ logging.basicConfig(
 logger = logging.getLogger("linlangyuefu")
 
 
-def cmd_transcribe(args):
-    """命令行：转录音频"""
-    target = Path(args.target)
-    
-    if not target.exists():
-        logger.error(f"文件/文件夹不存在: {target}")
+# ============================================================
+# Utilities
+# ============================================================
+
+def _scan_audio(folder):
+    songs = []
+    folder_p = Path(folder)
+    for ext in SUPPORTED_FORMATS:
+        for p in folder_p.rglob("*" + ext):
+            lrc_p = p.with_suffix(".lrc")
+            songs.append({
+                "path": str(p), "name": p.name,
+                "folder": str(p.parent.relative_to(folder_p)) if p.parent != folder_p else "",
+                "size": p.stat().st_size, "has_lrc": lrc_p.exists(),
+                "lrc_path": str(lrc_p) if lrc_p.exists() else None,
+            })
+    return sorted(songs, key=lambda s: s["name"].lower())
+
+
+def _fmt_size(b):
+    if b >= 1_073_741_824: return f"{b/1_073_741_824:.1f} GB"
+    if b >= 1_048_576: return f"{b/1_048_576:.1f} MB"
+    if b >= 1_024: return f"{b/1_024:.0f} KB"
+    return f"{b} B"
+
+
+def _out(data, args):
+    if getattr(args, "json_output", False):
+        print(_json.dumps(data, ensure_ascii=False, indent=2))
+    elif isinstance(data, list):
+        for item in data: print(item)
+    elif isinstance(data, dict):
+        for k, v in data.items(): print(f"{k}: {v}")
+    else:
+        print(data)
+
+
+# ============================================================
+# list - list songs
+# ============================================================
+
+def cmd_list(args):
+    config = config_manager.load()
+    folder = args.folder or (config.music_dirs[0] if config.music_dirs else None)
+    if not folder:
+        logger.error("Please specify folder path")
         sys.exit(1)
-    
-    # 收集待处理的音频文件
-    audio_files = []
+    if not Path(folder).exists():
+        logger.error(f"Folder not found: {folder}")
+        sys.exit(1)
+
+    songs = _scan_audio(folder)
+    if args.status == "has-lrc":
+        songs = [s for s in songs if s["has_lrc"]]
+    elif args.status == "no-lrc":
+        songs = [s for s in songs if not s["has_lrc"]]
+    elif args.status == "instrumental":
+        songs = [s for s in songs if s.get("instrumental")]
+    if args.format:
+        fmt = "." + args.format.lower()
+        songs = [s for s in songs if Path(s["name"]).suffix.lower() == fmt]
+    if args.search:
+        kw = args.search.lower()
+        songs = [s for s in songs if kw in Path(s["name"]).stem.lower()]
+
+    if args.json_output:
+        out = []
+        for s in songs:
+            out.append({"name": s["name"], "path": s["path"], "size": s["size"],
+                        "size_human": _fmt_size(s["size"]), "has_lrc": s["has_lrc"],
+                        "folder": s["folder"]})
+        print(_json.dumps(out, ensure_ascii=False, indent=2))
+    else:
+        has = sum(1 for s in songs if s["has_lrc"])
+        print(f"Folder: {folder}")
+        print(f"Total: {len(songs)} (has lyrics: {has}, no lyrics: {len(songs)-has})")
+        print("-" * 60)
+        for s in songs:
+            st = "Y" if s["has_lrc"] else "N"
+            print(f"  [{st}] {s['name']:<40s} {_fmt_size(s['size']):>8s}  {s['folder']}")
+
+
+# ============================================================
+# info - song detail
+# ============================================================
+
+def cmd_info(args):
+    fp = args.file
+    if not Path(fp).exists():
+        logger.error(f"File not found: {fp}")
+        sys.exit(1)
+
+    pf = Path(fp)
+    lrc_path = str(pf.with_suffix(".lrc"))
+    has_lrc = os.path.exists(lrc_path)
+    info = {
+        "name": pf.name, "path": str(pf),
+        "size": pf.stat().st_size, "size_human": _fmt_size(pf.stat().st_size),
+        "format": pf.suffix.upper().lstrip("."),
+        "has_lrc": has_lrc, "lrc_path": lrc_path if has_lrc else None,
+    }
+    try:
+        from core.metadata import read_tags
+        meta = read_tags(str(pf))
+        if meta.get("title"): info["title"] = meta["title"]
+        if meta.get("artist"): info["artist"] = meta["artist"]
+        if meta.get("album"): info["album"] = meta["album"]
+    except Exception:
+        pass
+
+    if args.json_output:
+        print(_json.dumps(info, ensure_ascii=False, indent=2))
+    else:
+        print(f"File: {info['name']}")
+        print(f"Path: {info['path']}")
+        print(f"Size: {info['size_human']}")
+        print(f"Format: {info['format']}")
+        if info.get("title"): print(f"Title: {info['title']}")
+        if info.get("artist"): print(f"Artist: {info['artist']}")
+        if info.get("album"): print(f"Album: {info['album']}")
+        print(f"Lyrics: {'YES' if has_lrc else 'NO'}")
+        if has_lrc:
+            lrc = parse_lrc_file(lrc_path)
+            print(f"Lines: {len(lrc.lines)}")
+
+
+# ============================================================
+# transcribe
+# ============================================================
+
+def cmd_transcribe(args):
+    target = Path(args.target)
+    if not target.exists():
+        logger.error(f"Target not found: {target}")
+        sys.exit(1)
+
+    files = []
     if target.is_file():
         if is_supported(str(target)):
-            audio_files.append(str(target))
+            files.append(str(target))
         else:
-            logger.error(f"不支持的音频格式: {target.suffix}")
+            logger.error(f"Unsupported format: {target.suffix}")
             sys.exit(1)
     elif target.is_dir():
         for ext in SUPPORTED_FORMATS:
-            audio_files.extend(str(p) for p in target.rglob(f"*{ext}"))
-        if not audio_files:
-            logger.error(f"文件夹中没有支持的音频文件")
+            files.extend(str(p) for p in target.rglob("*" + ext))
+        if not files:
+            logger.error("No supported audio files found")
             sys.exit(1)
-    else:
-        logger.error(f"无效路径: {target}")
-        sys.exit(1)
-    
-    logger.info(f"找到 {len(audio_files)} 个音频文件")
-    
-    # 加载配置
+
+    if not args.quiet:
+        logger.info(f"Found {len(files)} audio files")
+
     config = config_manager.load()
-    
-    # 初始化 ASR 路由器
     router = get_router(config)
-    available = router.list_available()
-    
-    if not available:
-        logger.error(
-            "没有可用的 ASR Provider。\n"
-            "请设置 GROQ_API_KEY 环境变量，或安装本地 Whisper。\n"
-            "免费获取 Groq API Key: https://console.groq.com/keys"
-        )
+    provider = router.get(args.provider or config.asr.provider)
+    if not provider or not provider.is_available():
+        logger.error(f"Provider not available: {args.provider or config.asr.provider}")
         sys.exit(1)
-    
-    logger.info(f"可用 Provider: {[p.display_name for p in available]}")
-    
-    # 逐个处理
-    success = 0
-    failed = 0
-    skipped = 0
-    
-    for i, audio_path in enumerate(audio_files, 1):
-        name = Path(audio_path).name
-        lrc_path = str(Path(audio_path).with_suffix(".lrc"))
-        
-        # 跳过已有 LRC 的文件
-        if os.path.exists(lrc_path) and not args.force:
-            logger.info(f"[{i}/{len(audio_files)}] ⏭ 跳过（已有LRC）: {name}")
-            skipped += 1
+    if not args.quiet:
+        logger.info(f"Engine: {provider.display_name}")
+
+    results = []
+    ok = fail = skip = 0
+    for i, fp in enumerate(files, 1):
+        name = Path(fp).name
+        lrc_p = str(Path(fp).with_suffix(".lrc"))
+        if os.path.exists(lrc_p) and not args.force:
+            if not args.quiet: logger.info(f"[{i}/{len(files)}] SKIP {name}")
+            skip += 1; results.append({"file": name, "status": "skipped"})
             continue
-        
         try:
-            logger.info(f"[{i}/{len(audio_files)}] 识别中: {name}")
-            
-            lrc_path = transcribe_and_save_lrc(
-                audio_path=audio_path,
-                router=router,
-                language=args.language,
-                output_dir=args.output_dir,
+            if not args.quiet: logger.info(f"[{i}/{len(files)}] TRANS {name}")
+            out = transcribe_and_save_lrc(
+                audio_path=fp, router=router,
+                language=args.language, output_dir=args.output_dir,
                 overwrite=args.force,
             )
-            
-            logger.info(f"[{i}/{len(audio_files)}] 完成: {name} -> {Path(lrc_path).name}")
-            success += 1
-            
+            if not args.quiet: logger.info(f"[{i}/{len(files)}] OK   {name}")
+            ok += 1; results.append({"file": name, "status": "ok", "lrc_path": out})
         except FileExistsError:
-            logger.info(f"[{i}/{len(audio_files)}] ⏭ 跳过: {name} (LRC已存在)")
-            skipped += 1
+            skip += 1; results.append({"file": name, "status": "skipped"})
         except Exception as e:
-            logger.error(f"[{i}/{len(audio_files)}] 失败: {name} - {e}")
-            failed += 1
-    
-    # 汇总
-    logger.info("=" * 40)
-    logger.info(f"处理完成: 成功 {success} | 跳过 {skipped} | 失败 {failed}")
+            if not args.quiet: logger.error(f"[{i}/{len(files)}] FAIL {name}: {e}")
+            fail += 1; results.append({"file": name, "status": "failed", "error": str(e)})
 
+    summary = {"total": len(files), "ok": ok, "failed": fail, "skipped": skip}
+    if args.json_output:
+        print(_json.dumps({"summary": summary, "results": results}, ensure_ascii=False, indent=2))
+    else:
+        print(f"\nDone: ok={ok} skip={skip} fail={fail}")
+    if fail > 0:
+        sys.exit(1)
+
+
+# ============================================================
+# lyrics
+# ============================================================
+
+def cmd_lyrics(args):
+    if args.lyrics_action == "show":
+        fp = args.file
+        lrc_p = str(Path(fp).with_suffix(".lrc"))
+        if not os.path.exists(lrc_p):
+            logger.error(f"LRC not found: {lrc_p}")
+            sys.exit(1)
+        lrc = parse_lrc_file(lrc_p)
+        if args.json_output:
+            lines = [{"ts": ln.timestamp, "text": ln.text} for ln in lrc.lines]
+            print(_json.dumps(lines, ensure_ascii=False, indent=2))
+        else:
+            for ln in sorted(lrc.lines, key=lambda x: x.timestamp):
+                m, s = divmod(ln.timestamp, 60)
+                print(f"[{int(m):02d}:{s:05.2f}] {ln.text}")
+
+    elif args.lyrics_action == "search":
+        folder = args.folder or (config_manager.load().music_dirs[0] if config_manager.load().music_dirs else None)
+        if not folder:
+            logger.error("Please specify folder")
+            sys.exit(1)
+        kw = args.keyword.lower()
+        results = []
+        for p in Path(folder).rglob("*.lrc"):
+            try:
+                text = p.read_text(encoding="utf-8")
+                if kw in text.lower():
+                    lrc = parse_lrc_file(str(p))
+                    matches = [ln for ln in lrc.lines if kw in ln.text.lower()]
+                    results.append({
+                        "file": str(p), "song": p.stem, "matches": len(matches),
+                        "lines": [{"ts": ln.timestamp, "text": ln.text} for ln in matches[:5]],
+                    })
+            except Exception:
+                pass
+        if args.json_output:
+            print(_json.dumps(results, ensure_ascii=False, indent=2))
+        else:
+            for r in results:
+                print(f"\n{r['song']} ({r['matches']} matches)")
+                for ln in r["lines"]:
+                    m, s = divmod(ln["ts"], 60)
+                    print(f"  [{int(m):02d}:{s:05.2f}] {ln['text']}")
+
+
+# ============================================================
+# config
+# ============================================================
+
+def cmd_config(args):
+    if args.config_action == "show":
+        c = config_manager.load()
+        data = {
+            "music_dirs": c.music_dirs, "output_lrc_dir": c.output_lrc_dir,
+            "asr": {
+                "provider": c.asr.provider, "local_model": c.asr.local_model,
+                "language": c.asr.language, "use_vocal_separation": c.asr.use_vocal_separation,
+                "use_gpu": c.asr.use_gpu,
+            },
+            "config_path": str(config_manager.config_path),
+        }
+        _out(data, args)
+
+    elif args.config_action == "set":
+        c = config_manager.load()
+        keys = args.key.split(".")
+        if keys[0] == "asr" and len(keys) == 2:
+            setattr(c.asr, keys[1], args.value if keys[1] in ("provider", "local_model", "language") else
+                    args.value.lower() in ("true", "1", "yes"))
+        elif keys[0] == "output_lrc_dir":
+            c.output_lrc_dir = None if args.value.lower() in ("none", "null") else args.value
+        elif keys[0] == "music_dirs":
+            c.music_dirs = [args.value]
+        elif keys[0] == "groq_api_key":
+            c.groq_api_key = args.value
+        else:
+            logger.error(f"Unknown config key: {args.key}")
+            sys.exit(1)
+        config_manager.config = c
+        config_manager.save()
+        print(f"OK: {args.key} = {args.value}")
+
+    elif args.config_action == "path":
+        print(config_manager.config_path)
+
+
+# ============================================================
+# model
+# ============================================================
+
+_MODELS = {
+    "tiny":   {"size": "~144 MB", "desc": "Fastest, decent accuracy"},
+    "base":   {"size": "~277 MB", "desc": "Recommended, balanced"},
+    "small":  {"size": "~922 MB", "desc": "Better, slower"},
+    "medium": {"size": "~2.9 GB", "desc": "Best, very slow"},
+}
+
+def cmd_model(args):
+    cache = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
+    if args.model_action == "list":
+        models = []
+        for name, info in _MODELS.items():
+            mf = os.path.join(cache, name + ".pt")
+            installed = os.path.exists(mf) and os.path.getsize(mf) > 100_000
+            models.append({"name": name, "size": info["size"], "desc": info["desc"],
+                           "installed": installed, "path": mf if installed else None})
+        _out(models, args)
+
+    elif args.model_action == "info":
+        name = args.model_name
+        if name not in _MODELS:
+            logger.error(f"Unknown model: {name}")
+            sys.exit(1)
+        info = dict(_MODELS[name])
+        info["name"] = name
+        mf = os.path.join(cache, name + ".pt")
+        info["installed"] = os.path.exists(mf)
+        info["path"] = mf
+        info["size_on_disk"] = _fmt_size(os.path.getsize(mf)) if info["installed"] else "N/A"
+        _out(info, args)
+
+    elif args.model_action == "download":
+        name = args.model_name
+        if name not in _MODELS:
+            logger.error(f"Unknown model: {name}")
+            sys.exit(1)
+        from PyQt6.QtCore import QCoreApplication
+        from ui.settings_dialog import _DownloadWorker
+        app = QCoreApplication(sys.argv)
+        worker = _DownloadWorker(name)
+
+        def _p(pct, msg): print(f"\r  [{pct:3d}%] {msg}", end="", flush=True)
+        def _d(ok, msg):
+            print()
+            print(f"{'OK' if ok else 'FAIL'}: {msg}")
+            app.exit(0 if ok else 1)
+
+        worker.progress.connect(_p)
+        worker.finished.connect(_d)
+        worker.start()
+        sys.exit(app.exec())
+
+
+# ============================================================
+# gpu
+# ============================================================
+
+def cmd_gpu(args):
+    if args.gpu_action == "scan":
+        gpu_name = None
+        try:
+            import subprocess as sp
+            r = sp.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                       capture_output=True, text=True, timeout=10)
+            if r.returncode == 0 and r.stdout.strip():
+                gpu_name = r.stdout.strip().split("\n")[0].strip()
+        except Exception:
+            pass
+        cuda_ok = False
+        try:
+            import torch; cuda_ok = torch.cuda.is_available()
+        except ImportError:
+            pass
+        result = {"gpu_detected": bool(gpu_name), "gpu_name": gpu_name, "cuda_installed": cuda_ok}
+        _out(result, args)
+
+    elif args.gpu_action == "status":
+        c = config_manager.load()
+        result = {"gpu_enabled": c.asr.use_gpu}
+        try:
+            import torch
+            result["cuda_available"] = torch.cuda.is_available()
+            if result["cuda_available"]:
+                result["gpu_name"] = torch.cuda.get_device_name(0)
+        except ImportError:
+            result["cuda_available"] = False
+        _out(result, args)
+
+
+# ============================================================
+# sync
+# ============================================================
+
+def cmd_sync(args):
+    config = config_manager.load()
+    if args.sync_action == "compare":
+        from core.sync_engine import SyncEngine
+        engine = SyncEngine()
+        dir_a = args.dir_a or (config.music_dirs[0] if config.music_dirs else None)
+        dir_b = args.dir_b or config.sync.remote_dir
+        if not dir_a or not dir_b:
+            logger.error("Please specify --dir-a and --dir-b")
+            sys.exit(1)
+        diff = engine.compare_directories(dir_a, dir_b)
+        if args.json_output:
+            items = [{"file": d.get("file",""), "type": d.get("type",""),
+                      "size_a": d.get("size_a",0), "size_b": d.get("size_b",0)} for d in diff]
+            print(_json.dumps({"dir_a": dir_a, "dir_b": dir_b, "diff": items, "count": len(diff)},
+                              ensure_ascii=False, indent=2))
+        else:
+            print(f"A: {dir_a}")
+            print(f"B: {dir_b}")
+            print(f"Differences: {len(diff)}")
+            print("-" * 50)
+            icons = {"only_a": "A>", "only_b": "<B", "newer_a": "A>", "newer_b": "<B", "conflict": "!!"}
+            for d in diff:
+                ic = icons.get(d.get("type", ""), "??")
+                print(f"  {ic} {d.get('file','?')} [{d.get('type','?')}]")
+
+    elif args.sync_action == "serve":
+        folder = args.folder or (config.music_dirs[0] if config.music_dirs else None)
+        if not folder:
+            logger.error("Please specify folder")
+            sys.exit(1)
+        from server.http_server import start_http_server
+        print(f"Starting HTTP file server...")
+        print(f"Folder: {folder}")
+        start_http_server(folder)
+
+
+# ============================================================
+# rename
+# ============================================================
+
+def cmd_rename(args):
+    old = Path(args.file)
+    if not old.exists():
+        logger.error(f"File not found: {args.file}")
+        sys.exit(1)
+    new_name = args.new_name
+    if not new_name.endswith(old.suffix):
+        new_name += old.suffix
+    new = old.parent / new_name
+    if new.exists():
+        logger.error(f"Target exists: {new}")
+        sys.exit(1)
+    old.rename(new)
+    old_lrc = old.with_suffix(".lrc")
+    new_lrc = new.with_suffix(".lrc")
+    if old_lrc.exists():
+        old_lrc.rename(new_lrc)
+        print(f"OK: {old.name} -> {new.name} (+ LRC)")
+    else:
+        print(f"OK: {old.name} -> {new.name}")
+
+
+# ============================================================
+# mark
+# ============================================================
+
+def cmd_mark(args):
+    fp = args.file
+    folder = str(Path(fp).parent)
+    inst_file = os.path.join(folder, ".musicsync_instrumental.json")
+    data = {}
+    if os.path.exists(inst_file):
+        with open(inst_file, "r", encoding="utf-8") as f:
+            data = _json.load(f)
+    if args.mark:
+        data[fp] = True
+        print(f"OK: marked as instrumental: {Path(fp).name}")
+    else:
+        data.pop(fp, None)
+        print(f"OK: unmarked: {Path(fp).name}")
+    with open(inst_file, "w", encoding="utf-8") as f:
+        _json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+# ============================================================
+# serve
+# ============================================================
+
+def cmd_serve(args):
+    if args.serve_action == "http":
+        config = config_manager.load()
+        folder = config.music_dirs[0] if config.music_dirs else os.getcwd()
+        from server.http_server import start_http_server
+        print(f"Starting HTTP server...")
+        print(f"Folder: {folder}")
+        start_http_server(folder)
+    elif args.serve_action == "localsend":
+        print("LocalSend receiver requires GUI mode.")
+        print("  python main.py gui -> Sync -> Start LocalSend receiver")
+        sys.exit(1)
+
+
+# ============================================================
+# GUI
+# ============================================================
 
 def cmd_gui(args):
-    """启动图形界面"""
     import traceback
     from PyQt6.QtWidgets import QApplication, QMessageBox
-    from PyQt6.QtCore import Qt
     from ui.main_window import MainWindow
-    
-    # 全局异常捕获
-    def _excepthook(exc_type, exc_value, exc_tb):
-        tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-        logger.error(f"未捕获的异常:\n{tb_text}")
-        QMessageBox.critical(None, "程序错误", f"发生未处理的错误:\n\n{exc_value}\n\n详情已写入日志。")
+
+    def _hook(exc_type, exc_value, exc_tb):
+        tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        logger.error(f"Unhandled exception:\n{tb}")
+        QMessageBox.critical(None, "Error", f"Unhandled error:\n\n{exc_value}")
         sys.exit(1)
-    
-    sys.excepthook = _excepthook
-    
+
+    sys.excepthook = _hook
     app = QApplication(sys.argv)
-    app.setApplicationName("琳琅乐府")
-    app.setOrganizationName("琳琅乐府")
+    app.setApplicationName("Echovault")
+    app.setOrganizationName("Echovault")
     app.setStyle("Fusion")
-    
     try:
-        window = MainWindow()
-        window.show()
+        win = MainWindow()
+        win.show()
     except Exception as e:
-        logger.error(f"窗口初始化失败: {e}")
-        QMessageBox.critical(None, "启动失败", f"无法创建主窗口:\n\n{e}")
+        logger.error(f"Window init failed: {e}")
+        QMessageBox.critical(None, "Startup Error", str(e))
         sys.exit(1)
-    
     sys.exit(app.exec())
 
 
+# ============================================================
+# Entry point
+# ============================================================
+
 def main():
-    parser = argparse.ArgumentParser(
-        prog="linlangyuefu",
-        description="琳琅乐府 — AI 歌词识别 + 文件同步",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-示例:
-  python main.py transcribe E:/music/song.mp3
-  python main.py transcribe E:/music/ --language zh
-  python main.py transcribe E:/music/ --force --output-dir ./lyrics
-        """,
-    )
-    
-    subparsers = parser.add_subparsers(dest="command", help="可用命令")
-    
-    # transcribe 命令
-    trans_parser = subparsers.add_parser("transcribe", help="识别歌曲歌词")
-    trans_parser.add_argument("target", help="音频文件或文件夹路径")
-    trans_parser.add_argument("--language", "-l", help="语言代码 (zh/en/ja/ko)")
-    trans_parser.add_argument("--force", "-f", action="store_true", help="强制覆盖已有 LRC")
-    trans_parser.add_argument("--output-dir", "-o", help="LRC 输出目录（默认与音频同目录）")
-    trans_parser.add_argument("--provider", "-p", help="指定 ASR Provider")
-    trans_parser.set_defaults(func=cmd_transcribe)
-    
-    # gui 命令
-    gui_parser = subparsers.add_parser("gui", help="启动图形界面")
-    gui_parser.set_defaults(func=cmd_gui)
-    
-    args = parser.parse_args()
-    
-    # 如果没有子命令，默认启动 GUI
+    p = argparse.ArgumentParser(prog="linlangyuefu", description="Echovault - AI lyrics + file sync")
+    sub = p.add_subparsers(dest="command")
+
+    # gui
+    sub.add_parser("gui", help="Launch GUI").set_defaults(func=cmd_gui)
+
+    # list
+    sp = sub.add_parser("list", help="List songs")
+    sp.add_argument("folder", nargs="?")
+    sp.add_argument("--status", choices=["all","has-lrc","no-lrc","instrumental"], default="all")
+    sp.add_argument("--format")
+    sp.add_argument("--search")
+    sp.add_argument("--json", dest="json_output", action="store_true")
+    sp.set_defaults(func=cmd_list)
+
+    # info
+    sp = sub.add_parser("info", help="Song detail")
+    sp.add_argument("file")
+    sp.add_argument("--json", dest="json_output", action="store_true")
+    sp.set_defaults(func=cmd_info)
+
+    # transcribe
+    sp = sub.add_parser("transcribe", help="Transcribe lyrics")
+    sp.add_argument("target")
+    sp.add_argument("--language", "-l")
+    sp.add_argument("--force", "-f", action="store_true")
+    sp.add_argument("--output-dir", "-o")
+    sp.add_argument("--provider", "-p")
+    sp.add_argument("--json", dest="json_output", action="store_true")
+    sp.add_argument("--quiet", "-q", action="store_true")
+    sp.set_defaults(func=cmd_transcribe)
+
+    # lyrics
+    sp = sub.add_parser("lyrics", help="Lyrics operations")
+    s2 = sp.add_subparsers(dest="lyrics_action")
+    x = s2.add_parser("show", help="Show lyrics")
+    x.add_argument("file"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_lyrics)
+    x = s2.add_parser("search", help="Search lyrics")
+    x.add_argument("keyword"); x.add_argument("--folder", "-f"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_lyrics)
+
+    # config
+    sp = sub.add_parser("config", help="Configuration")
+    s2 = sp.add_subparsers(dest="config_action")
+    x = s2.add_parser("show", help="Show config"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_config)
+    x = s2.add_parser("set", help="Set config"); x.add_argument("key"); x.add_argument("value"); x.set_defaults(func=cmd_config)
+    x = s2.add_parser("path", help="Config file path"); x.set_defaults(func=cmd_config)
+
+    # model
+    sp = sub.add_parser("model", help="Model management")
+    s2 = sp.add_subparsers(dest="model_action")
+    x = s2.add_parser("list", help="List models"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_model)
+    x = s2.add_parser("info", help="Model detail"); x.add_argument("model_name"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_model)
+    x = s2.add_parser("download", help="Download model"); x.add_argument("model_name"); x.set_defaults(func=cmd_model)
+
+    # gpu
+    sp = sub.add_parser("gpu", help="GPU management")
+    s2 = sp.add_subparsers(dest="gpu_action")
+    x = s2.add_parser("scan", help="Scan GPU"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_gpu)
+    x = s2.add_parser("status", help="GPU status"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_gpu)
+
+    # sync
+    sp = sub.add_parser("sync", help="File sync")
+    s2 = sp.add_subparsers(dest="sync_action")
+    x = s2.add_parser("compare", help="Compare folders"); x.add_argument("--dir-a"); x.add_argument("--dir-b"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_sync)
+    x = s2.add_parser("serve", help="HTTP file server"); x.add_argument("--folder", "-f"); x.set_defaults(func=cmd_sync)
+
+    # rename
+    sp = sub.add_parser("rename", help="Rename song (+LRC)")
+    sp.add_argument("file"); sp.add_argument("new_name"); sp.set_defaults(func=cmd_rename)
+
+    # mark
+    sp = sub.add_parser("mark", help="Mark instrumental")
+    sp.add_argument("file"); sp.add_argument("--unmark", dest="mark", action="store_false"); sp.set_defaults(func=cmd_mark, mark=True)
+
+    # serve
+    sp = sub.add_parser("serve", help="Start services")
+    s2 = sp.add_subparsers(dest="serve_action")
+    x = s2.add_parser("http", help="HTTP file server"); x.set_defaults(func=cmd_serve)
+    x = s2.add_parser("localsend", help="LocalSend (needs GUI)"); x.set_defaults(func=cmd_serve)
+
+    args = p.parse_args()
     if args.command is None:
         cmd_gui(args)
         return
-    
     args.func(args)
 
 
