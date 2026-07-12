@@ -286,8 +286,8 @@ class SettingsDialog(QDialog):
 
         ag = QGroupBox("语音识别 (ASR)"); af = QFormLayout(ag)
         self.provider_combo = QComboBox()
-        self.provider_combo.addItem("Groq Whisper (云端, 免费)", "groq")
-        self.provider_combo.addItem("本地 Whisper (离线)", "local")
+        self.provider_combo.addItem("云端", "groq")
+        self.provider_combo.addItem("本地", "local")
         self.provider_combo.currentIndexChanged.connect(self._on_prov)
         af.addRow("识别引擎:", self.provider_combo)
 
@@ -335,7 +335,7 @@ class SettingsDialog(QDialog):
         l.addWidget(ag)
 
         # ── GPU 加速 ──
-        self.gpu_group = QGroupBox("GPU 加速 (仅本地 Whisper)"); gf = QFormLayout(self.gpu_group)
+        self.gpu_group = QGroupBox("GPU 加速 (仅本地)"); gf = QFormLayout(self.gpu_group)
         self.gpu_group.setVisible(False)
         
         gpu_scan_row = QHBoxLayout()
