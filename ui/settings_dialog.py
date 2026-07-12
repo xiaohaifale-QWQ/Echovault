@@ -1,4 +1,4 @@
-﻿"""设置对话框"""
+"""设置对话框"""
 import os, subprocess, sys, hashlib
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -17,7 +17,11 @@ class _DownloadWorker(QThread):
     finished = pyqtSignal(bool, str)
 
     def __init__(self, model: str):
-        super().__init__(); self.model = model
+        super().__init__(); self.model = model; self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+        self.requestInterruption()
 
     def run(self):
         import os as _os
@@ -40,13 +44,20 @@ class _DownloadWorker(QThread):
 
             _os.makedirs(cache, exist_ok=True)
             
+            if self._cancelled or self.isInterruptionRequested():
+                self.finished.emit(False, "下载已取消")
+                return
+
             if self.model == "medium":
-                # medium 分两片，需合并
                 ok = self._download_medium(cache)
             else:
                 url = f"{_GH_RELEASE}/{self.model}.pt"
                 ok = self._download_file(url, model_file)
             
+            if self._cancelled or self.isInterruptionRequested():
+                self.finished.emit(False, "下载已取消")
+                return
+
             if not ok:
                 self.finished.emit(False, "下载失败, 请检查网络")
                 return
@@ -115,6 +126,8 @@ class _DownloadWorker(QThread):
             import time as _time; start = _time.time()
             with open(tmp, "wb") as f:
                 while True:
+                    if self._cancelled or self.isInterruptionRequested():
+                        raise InterruptedError("用户取消")
                     chunk = resp.read(131072)
                     if not chunk: break
                     f.write(chunk); received += len(chunk)
@@ -176,6 +189,9 @@ class SettingsDialog(QDialog):
         dl_btn_row = QHBoxLayout()
         self.btn_dl = QPushButton("下载模型"); self.btn_dl.setVisible(False)
         self.btn_dl.clicked.connect(self._on_download); dl_btn_row.addWidget(self.btn_dl)
+        self.btn_cancel_dl = QPushButton("取消下载"); self.btn_cancel_dl.setVisible(False)
+        self.btn_cancel_dl.setStyleSheet("color:#c0392b;")
+        self.btn_cancel_dl.clicked.connect(self._on_cancel_download); dl_btn_row.addWidget(self.btn_cancel_dl)
         dl_btn_row.addStretch()
         af.addRow("", dl_btn_row)
         
@@ -217,12 +233,14 @@ class SettingsDialog(QDialog):
         self.api_input.setVisible(not is_local)
         self.model_combo.setVisible(is_local)
         self.btn_dl.setVisible(is_local)
+        self.btn_cancel_dl.setVisible(False)
         self.dl_bar.setVisible(False)
         self.dl_label.setVisible(False)
 
     def _on_download(self):
         model = self.model_combo.currentData()
-        self.btn_dl.setEnabled(False); self.dl_bar.setVisible(True); self.dl_bar.setValue(0)
+        self.btn_dl.setVisible(False); self.btn_cancel_dl.setVisible(True)
+        self.dl_bar.setVisible(True); self.dl_bar.setValue(0)
         self.dl_label.setVisible(True); self.dl_label.setText("")
         self.worker = _DownloadWorker(model)
         self.worker.progress.connect(self._on_dl_progress)
@@ -233,9 +251,19 @@ class SettingsDialog(QDialog):
         self.dl_bar.setValue(pct)
         self.dl_label.setText(msg)
 
+    def _on_cancel_download(self):
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.cancel()
+            self.dl_label.setText("正在取消...")
+            self.btn_cancel_dl.setEnabled(False)
+
     def _on_dl_done(self, ok, msg):
-        self.btn_dl.setEnabled(True); self.dl_bar.setVisible(False); self.dl_label.setVisible(False)
+        self.btn_dl.setVisible(True); self.btn_cancel_dl.setVisible(False)
+        self.btn_cancel_dl.setEnabled(True)
+        self.dl_bar.setVisible(False); self.dl_label.setVisible(False)
         if ok: QMessageBox.information(self, "完成", msg)
+        elif "取消" in msg:
+            pass  # 用户主动取消，不弹错误框
         else: QMessageBox.critical(self, "下载失败", msg)
 
     def _browse(self, edit):
