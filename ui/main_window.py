@@ -404,20 +404,31 @@ class MainWindow(QMainWindow):
     def _on_settings(self):
         """打开设置对话框"""
         dialog = SettingsDialog(self.config, self)
-        dialog.restart_requested.connect(self._do_restart)
-        if dialog.exec():
+        result = dialog.exec()
+        if result == 42:
+            # GPU 安装完成，重启应用
+            import logging
+            logging.getLogger("linlangyuefu").info("GPU 安装完成，准备重启...")
+            self._do_restart()
+        elif result:
             # 设置已保存，重建 router
             self.router = get_router(self.config)
             self._refresh_statusbar()
     
     def _do_restart(self):
         """重新启动应用"""
-        import subprocess, os
+        import subprocess, os, logging
         script = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "main.py")
-        subprocess.Popen(
-            [sys.executable, script],
-            creationflags=0x00000008 if sys.platform == "win32" else 0,
-        )
+        cmd = [sys.executable, script]
+        logging.getLogger("linlangyuefu").info(f"重启: {cmd}")
+        try:
+            subprocess.Popen(
+                cmd,
+                creationflags=0x00000008 if sys.platform == "win32" else 0,
+            )
+            logging.getLogger("linlangyuefu").info("新进程已启动，退出旧进程")
+        except Exception as e:
+            logging.getLogger("linlangyuefu").error(f"重启失败: {e}")
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()
     
