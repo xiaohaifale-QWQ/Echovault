@@ -21,7 +21,8 @@ def load_hf_whisper(model_name, cache_dir=None):
     n_mels = conv1.shape[1]
     n_audio_state = conv1.shape[0]
     n_audio_ctx = ckpt["model.encoder.embed_positions.weight"].shape[0]
-    n_audio_head = ckpt["model.encoder.layers.0.self_attn.q_proj.bias"].shape[0]
+    # n_audio_head: 64 dims per head for all whisper models
+    n_audio_head = n_audio_state // 64
     
     enc_layers = {int(k.split(".")[3]) for k in ckpt if k.startswith("model.encoder.layers.")}
     dec_layers = {int(k.split(".")[3]) for k in ckpt if k.startswith("model.decoder.layers.")}
@@ -30,7 +31,7 @@ def load_hf_whisper(model_name, cache_dir=None):
     
     n_text_ctx = ckpt["model.decoder.embed_positions.weight"].shape[0]
     n_text_state = ckpt["model.decoder.layers.0.self_attn.k_proj.weight"].shape[0]
-    n_text_head = ckpt["model.decoder.layers.0.self_attn.q_proj.bias"].shape[0]
+    n_text_head = n_text_state // 64
     
     n_vocab = 51865
     for k in ckpt:
