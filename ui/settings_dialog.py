@@ -479,7 +479,11 @@ class SettingsDialog(QDialog):
             return  # 用户主动取消，不弹框
         if ok:
             self.gpu_check.setChecked(True)
-            self._save()
+            # 直接保存配置（不用 _save() 因为它内部会 accept 导致 done(42) 无效）
+            c = self.config
+            c.asr.use_gpu = True
+            config_manager.config = c
+            config_manager.save()
             QMessageBox.information(self, "安装完成", msg + "\n\n点击确定后将重启应用。")
             self.done(42)  # 特殊返回码：请求重启
         else:
