@@ -1,4 +1,4 @@
-"""设置对话框"""
+﻿"""设置对话框"""
 import os, subprocess, sys, hashlib
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -168,7 +168,7 @@ class SettingsDialog(QDialog):
         af.addRow("默认语言:", self.lang_combo)
 
         self.model_combo = QComboBox()
-        for t, v in [("tiny (39M, 最快)", "tiny"), ("base (74M, 推荐)", "base"), ("small (244M)", "small"), ("medium (769M, 更准)", "medium")]:
+        for t, v in [("tiny (~144 MB, 最快)", "tiny"), ("base (~277 MB, 推荐)", "base"), ("small (~922 MB)", "small"), ("medium (~2.9 GB, 更准)", "medium")]:
             self.model_combo.addItem(t, v)
         self.model_combo.setVisible(False); af.addRow("本地模型:", self.model_combo)
 
