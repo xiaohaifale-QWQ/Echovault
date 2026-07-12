@@ -1,4 +1,4 @@
-﻿"""设置对话框"""
+"""设置对话框"""
 import os, subprocess, sys, hashlib
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -377,6 +377,7 @@ class SettingsDialog(QDialog):
         c = self.config
         i = 0 if c.asr.provider == "groq" else 1; self.provider_combo.setCurrentIndex(i)
         self.api_input.setText(c.groq_api_key)
+        self.xunfei_input.setText(c.xunfei_api_key)
         li = [j for j in range(self.lang_combo.count()) if self.lang_combo.itemData(j) == c.asr.language]
         self.lang_combo.setCurrentIndex(li[0] if li else 0)
         for i in range(self.model_combo.count()):
@@ -390,6 +391,7 @@ class SettingsDialog(QDialog):
     def _on_prov(self, idx):
         is_local = self.provider_combo.itemData(idx) == "local"
         self.api_input.setVisible(not is_local)
+        self.xunfei_input.setVisible(not is_local)
         self.model_combo.setVisible(is_local)
         self.btn_dl.setVisible(is_local)
         self.btn_cancel_dl.setVisible(False)

@@ -39,11 +39,14 @@ class AppConfig:
     
     # API Keys（建议通过环境变量设置，这里提供默认值）
     groq_api_key: str = ""
+    xunfei_api_key: str = ""
     
     def __post_init__(self):
         # 从环境变量读取 API Key
         if not self.groq_api_key:
             self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
+        if not self.xunfei_api_key:
+            self.xunfei_api_key = os.environ.get("XUNFEI_API_KEY", "")
 
 
 class ConfigManager:
