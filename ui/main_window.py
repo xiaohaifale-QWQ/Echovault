@@ -150,10 +150,17 @@ class MainWindow(QMainWindow):
         self.statusbar.addWidget(self.status_label)
         
         self.trans_progress = QProgressBar()
-        self.trans_progress.setMaximumWidth(250)
+        self.trans_progress.setMaximumWidth(200)
         self.trans_progress.setMaximumHeight(16)
         self.trans_progress.setVisible(False)
         self.statusbar.addWidget(self.trans_progress)
+        
+        self.btn_stop_transcribe = QPushButton("停止")
+        self.btn_stop_transcribe.setMaximumHeight(18)
+        self.btn_stop_transcribe.setStyleSheet("QPushButton{color:#c0392b;font-size:11px;padding:0 6px;margin-left:4px}QPushButton:hover{color:white;background:#c0392b}")
+        self.btn_stop_transcribe.setVisible(False)
+        self.btn_stop_transcribe.clicked.connect(self._on_stop_transcribe)
+        self.statusbar.addWidget(self.btn_stop_transcribe)
         
         self.count_label = QLabel("")
         self.statusbar.addPermanentWidget(self.count_label)
@@ -299,6 +306,7 @@ class MainWindow(QMainWindow):
         self.worker.finished.connect(self._on_transcribe_finished)
         self.worker.song_done.connect(self._on_song_done)
         
+        self.btn_stop_transcribe.setVisible(True)
         self.trans_progress.setVisible(True)
         if len(files) <= 1:
             self.trans_progress.setRange(0, 0)  # 单首歌：脉冲模式
@@ -315,8 +323,21 @@ class MainWindow(QMainWindow):
     def _on_stage_progress(self, msg: str):
         self.status_label.setText(msg)
     
+    def _on_stop_transcribe(self):
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.requestInterruption()
+            self.btn_stop_transcribe.setEnabled(False)
+            self.status_label.setText("正在停止...")
+    
     def _on_song_done(self, file_path: str, lrc_path: str, success: bool):
         self.song_list_panel.update_song_status(file_path, success)
+        # 识别成功后立即刷新右侧详情面板
+        if success:
+            songs = self.song_list_panel.get_all_songs()
+            for s in songs:
+                if s["path"] == file_path:
+                    self.detail_panel.show_song(s)
+                    break
         # 自动检测纯音乐：歌词太短（<20字）可能是纯音乐
         if success and lrc_path and os.path.exists(lrc_path):
             try:
@@ -332,6 +353,8 @@ class MainWindow(QMainWindow):
         self._refresh_statusbar()
     
     def _on_transcribe_finished(self, results: dict):
+        self.btn_stop_transcribe.setVisible(False)
+        self.btn_stop_transcribe.setEnabled(True)
         self.trans_progress.setVisible(False)
         self.trans_progress.setRange(0, 100)  # 恢复正常模式
         self.trans_progress.setValue(0)

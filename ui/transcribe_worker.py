@@ -31,6 +31,10 @@ class TranscribeWorker(QThread):
         total = len(self.files)
         
         for i, file_path in enumerate(self.files, 1):
+            if self.isInterruptionRequested():
+                self.stage_progress.emit("已停止")
+                break
+            
             filename = file_path.split("\\")[-1] if "\\" in file_path else file_path.split("/")[-1]
             
             self.progress.emit(i, total, filename)
