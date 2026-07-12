@@ -10,7 +10,7 @@ from core.config import AppConfig, config_manager
 
 
 # Whisper 模型下载 URL (OpenAI 官方 + 各镜像)
-_GH_RELEASE = "https://github.com/xiaohaifale-QWQ/Echovault/releases/download/models"
+_GH_RELEASE = "https://github.com/xiaohaifale-QWQ/echovault-models/releases/download/v1.0"
 
 class _DownloadWorker(QThread):
     progress = pyqtSignal(int, str)
