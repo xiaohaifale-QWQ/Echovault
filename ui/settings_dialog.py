@@ -43,20 +43,82 @@ class _GPUDetectWorker(QThread):
 
 
 class _GPUInstallWorker(QThread):
-    """后台安装 PyTorch CUDA 版本"""
-    progress = pyqtSignal(str)
+    """后台安装 PyTorch CUDA 版本 — 带下载进度"""
+    progress = pyqtSignal(int, str)  # percent, message
     finished = pyqtSignal(bool, str)
     
     def run(self):
         try:
-            self.progress.emit("正在安装 PyTorch CUDA 12.1 (~2.5 GB)...")
-            subprocess.check_call([
-                sys.executable, "-m", "pip", "install", "torch", "torchvision", "torchaudio",
-                "--index-url", "https://download.pytorch.org/whl/cu121",
-            ])
-            self.finished.emit(True, "GPU 加速安装完成！重启后生效。")
-        except subprocess.CalledProcessError as e:
-            self.finished.emit(False, f"安装失败: {e}")
+            import re
+            # 先收集待下载的包名和大小
+            self.progress.emit(0, "正在解析 PyTorch CUDA 12.1 依赖...")
+            
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "pip", "install", "torch", "torchvision", "torchaudio",
+                 "--index-url", "https://download.pytorch.org/whl/cu121"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, universal_newlines=True,
+            )
+            
+            pkg_name = ""; pkg_total = 0; pkg_unit = "MB"
+            for line in iter(proc.stdout.readline, ""):
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # "Downloading <url> (<size>)"
+                m = re.search(r'Downloading\s+(\S+)\s+\(([\d.]+\s*\w+)\)', line)
+                if m:
+                    pkg_name = m.group(1).split("/")[-1][:50]
+                    size_str = m.group(2)
+                    try:
+                        val = float(re.findall(r'[\d.]+', size_str)[0])
+                        pkg_unit = "GB" if "GB" in size_str.upper() else "MB" if "MB" in size_str.upper() else "KB"
+                        if "GB" in size_str.upper(): pkg_total = val * 1024
+                        elif "KB" in size_str.upper(): pkg_total = val / 1024
+                        else: pkg_total = val
+                    except: pkg_total = 0
+                    self.progress.emit(0, f"⬇ {pkg_name} ({size_str})")
+                    continue
+                
+                # " 1.2/2.5 GB 5.2 MB/s eta 0:04:01" 或 "━━━━━ 45% 5.2 MB/s"
+                m2 = re.search(r'(\d+\.?\d*)\s*/\s*(\d+\.?\d*)\s*(\w+)', line)
+                if m2:
+                    try:
+                        done = float(m2.group(1))
+                        total = float(m2.group(2))
+                        unit = m2.group(3)
+                        pct = int(done / total * 100) if total > 0 else 0
+                        speed_match = re.search(r'(\d+\.?\d*\s*\w+/s)', line)
+                        speed = speed_match.group(1) if speed_match else ""
+                        self.progress.emit(pct, f"⬇ {pkg_name} — {speed} ({pct}%)")
+                    except: pass
+                    continue
+                
+                # pip 百分比格式: "━━━━━━━━━━ 45%"
+                m3 = re.search(r'(\d+)%', line)
+                if m3 and pkg_name:
+                    pct = int(m3.group(1))
+                    speed_match = re.search(r'(\d+\.?\d*\s*\w+/s)', line)
+                    speed = speed_match.group(1) if speed_match else ""
+                    self.progress.emit(pct, f"⬇ {pkg_name} — {speed} ({pct}%)")
+                    continue
+                
+                # Already installed / cached
+                if "already satisfied" in line.lower():
+                    self.progress.emit(100, "已安装，跳过")
+                elif any(kw in line.lower() for kw in ['installing', 'successfully installed', 'collecting']):
+                    self.progress.emit(-1, line[:100])
+            
+            proc.wait()
+            if proc.returncode == 0:
+                self.finished.emit(True, "GPU 加速安装完成！重启后生效。")
+            else:
+                self.finished.emit(False, f"pip 返回错误码 {proc.returncode}\n请重试或检查网络")
+        except FileNotFoundError:
+            self.finished.emit(False, "找不到 pip，请确认 Python 安装正确")
+        except Exception as e:
+            self.finished.emit(False, str(e))
 
 
 class _DownloadWorker(QThread):
@@ -276,7 +338,7 @@ class SettingsDialog(QDialog):
         gpu_install_row.addStretch()
         gf.addRow("", gpu_install_row)
         
-        self.gpu_progress = QProgressBar(); self.gpu_progress.setVisible(False); self.gpu_progress.setRange(0, 0)
+        self.gpu_progress = QProgressBar(); self.gpu_progress.setVisible(False); self.gpu_progress.setMaximum(100)
         gf.addRow("", self.gpu_progress)
         self.gpu_progress_label = QLabel(""); self.gpu_progress_label.setStyleSheet("font-size:11px;color:#666")
         self.gpu_progress_label.setVisible(False)
@@ -366,12 +428,17 @@ class SettingsDialog(QDialog):
     
     def _on_install_gpu(self):
         self.btn_install_gpu.setEnabled(False)
-        self.gpu_progress.setVisible(True)
-        self.gpu_progress_label.setVisible(True)
+        self.gpu_progress.setVisible(True); self.gpu_progress.setValue(0)
+        self.gpu_progress_label.setVisible(True); self.gpu_progress_label.setText("")
         self._gpu_installer = _GPUInstallWorker()
-        self._gpu_installer.progress.connect(lambda m: self.gpu_progress_label.setText(m))
+        self._gpu_installer.progress.connect(self._on_gpu_dl_progress)
         self._gpu_installer.finished.connect(self._on_gpu_installed)
         self._gpu_installer.start()
+    
+    def _on_gpu_dl_progress(self, pct: int, msg: str):
+        if pct >= 0:
+            self.gpu_progress.setValue(pct)
+        self.gpu_progress_label.setText(msg)
     
     def _on_gpu_installed(self, ok: bool, msg: str):
         self.gpu_progress.setVisible(False)
