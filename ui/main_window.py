@@ -295,11 +295,15 @@ class MainWindow(QMainWindow):
         
         self.worker = TranscribeWorker(files, self.router, self.config)
         self.worker.progress.connect(self._on_transcribe_progress)
+        self.worker.stage_progress.connect(self._on_stage_progress)
         self.worker.finished.connect(self._on_transcribe_finished)
         self.worker.song_done.connect(self._on_song_done)
         
         self.trans_progress.setVisible(True)
-        self.trans_progress.setMaximum(len(files))
+        if len(files) <= 1:
+            self.trans_progress.setRange(0, 0)  # 单首歌：脉冲模式
+        else:
+            self.trans_progress.setMaximum(len(files))
         self.trans_progress.setValue(0)
         self.status_label.setText(f"识别中... 0/{len(files)}")
         self.worker.start()
@@ -307,6 +311,9 @@ class MainWindow(QMainWindow):
     def _on_transcribe_progress(self, current: int, total: int, filename: str):
         self.trans_progress.setValue(current)
         self.status_label.setText(f"识别中... {current}/{total} - {filename}")
+    
+    def _on_stage_progress(self, msg: str):
+        self.status_label.setText(msg)
     
     def _on_song_done(self, file_path: str, lrc_path: str, success: bool):
         self.song_list_panel.update_song_status(file_path, success)
@@ -326,6 +333,7 @@ class MainWindow(QMainWindow):
     
     def _on_transcribe_finished(self, results: dict):
         self.trans_progress.setVisible(False)
+        self.trans_progress.setRange(0, 100)  # 恢复正常模式
         self.trans_progress.setValue(0)
         success = sum(1 for v in results.values() if v["success"])
         failed = len(results) - success

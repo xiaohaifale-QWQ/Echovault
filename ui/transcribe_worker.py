@@ -15,6 +15,7 @@ class TranscribeWorker(QThread):
     """后台转录线程"""
     
     progress = pyqtSignal(int, int, str)     # current, total, filename
+    stage_progress = pyqtSignal(str)          # 当前阶段描述
     song_done = pyqtSignal(str, str, bool)    # file_path, lrc_path, success
     finished = pyqtSignal(dict)               # {file_path: {"success": bool, "lrc_path": str, "error": str}}
     
@@ -34,6 +35,10 @@ class TranscribeWorker(QThread):
             
             self.progress.emit(i, total, filename)
             
+            prefix = f"[{i}/{total}] " if total > 1 else ""
+            def on_stage(stage: str):
+                self.stage_progress.emit(f"{prefix}{stage}")
+            
             try:
                 lrc_path = transcribe_and_save_lrc(
                     audio_path=file_path,
@@ -41,6 +46,7 @@ class TranscribeWorker(QThread):
                     language=self.config.asr.language,
                     output_dir=self.config.output_lrc_dir,
                     overwrite=True,
+                    progress_callback=on_stage,
                 )
                 self._results[file_path] = {"success": True, "lrc_path": lrc_path, "error": None}
                 self.song_done.emit(file_path, lrc_path, True)

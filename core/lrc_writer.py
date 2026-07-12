@@ -224,6 +224,7 @@ def transcribe_and_save_lrc(
     language: Optional[str] = None,
     output_dir: Optional[str] = None,
     overwrite: bool = False,
+    progress_callback=None,
 ) -> str:
     """
     一站式：音频 → 识别 → 后处理 → 保存 LRC
@@ -236,23 +237,32 @@ def transcribe_and_save_lrc(
         language: 语言代码
         output_dir: LRC 输出目录
         overwrite: 是否覆盖已有文件
+        progress_callback: 进度回调 callable(stage: str)
     
     Returns:
         str: 保存的 LRC 文件路径
     """
     from .audio_utils import convert_to_whisper_format, cleanup_temp_files
     
+    song_name = os.path.basename(audio_path)
+    
     # 1. 转换音频格式
+    if progress_callback:
+        progress_callback(f"🎵 转换音频... {song_name}")
     wav_path = convert_to_whisper_format(audio_path)
     
     try:
         # 2. ASR 识别
+        if progress_callback:
+            progress_callback(f"🎤 语音识别中... {song_name}")
         result = router.transcribe(wav_path, language=language)
         
         if result.is_empty:
             raise RuntimeError("未能识别出任何歌词内容")
         
-        # 3. 转换为 LRC
+        # 3. 转换为 LRC + 后处理
+        if progress_callback:
+            progress_callback(f"✍️ 后处理中... {song_name}")
         lrc = segments_to_lrc(result, title=title, artist=artist)
         
         # 4. 保存
