@@ -1,4 +1,4 @@
-"""
+﻿"""
 琳琅乐府 主窗口
 
 三栏布局：
@@ -404,10 +404,22 @@ class MainWindow(QMainWindow):
     def _on_settings(self):
         """打开设置对话框"""
         dialog = SettingsDialog(self.config, self)
+        dialog.restart_requested.connect(self._do_restart)
         if dialog.exec():
             # 设置已保存，重建 router
             self.router = get_router(self.config)
             self._refresh_statusbar()
+    
+    def _do_restart(self):
+        """重新启动应用"""
+        import subprocess, os
+        script = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "main.py")
+        subprocess.Popen(
+            [sys.executable, script],
+            creationflags=0x00000008 if sys.platform == "win32" else 0,
+        )
+        from PyQt6.QtWidgets import QApplication
+        QApplication.quit()
     
     def _on_about(self):
         """关于对话框"""

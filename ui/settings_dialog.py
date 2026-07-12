@@ -276,6 +276,8 @@ class _DownloadWorker(QThread):
 
 
 class SettingsDialog(QDialog):
+    restart_requested = pyqtSignal()  # GPU 安装完成后请求重启
+    
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent); self.config = config
         self._setup_ui(); self._load_config()
@@ -479,16 +481,7 @@ class SettingsDialog(QDialog):
             self.gpu_check.setChecked(True)
             self._save()
             QMessageBox.information(self, "安装完成", msg + "\n\n点击确定后将重启应用。")
-            # 先关闭对话框，再定时重启（模态对话框内不能直接 quit）
-            self.accept()
-            from PyQt6.QtCore import QTimer
-            from PyQt6.QtWidgets import QApplication
-            import subprocess as _sp
-            script = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "main.py")
-            def _restart():
-                _sp.Popen([sys.executable, script], creationflags=0x00000008 if sys.platform == "win32" else 0)
-                QApplication.quit()
-            QTimer.singleShot(300, _restart)
+            self.done(42)  # 特殊返回码：请求重启
         else:
             self.btn_install_gpu.setEnabled(True)
             QMessageBox.critical(self, "安装失败", msg)
