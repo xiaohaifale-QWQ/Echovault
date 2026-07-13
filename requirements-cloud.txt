@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# Groq Whisper 云端识别
+groq>=0.9.0,<1

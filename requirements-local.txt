@@ -1,0 +1,8 @@
+-r requirements.txt
+
+# OpenAI Whisper 本地识别。PyTorch 会作为依赖安装 CPU 版本；
+# CUDA 版本请按 README 中的 GPU 指引单独安装。
+openai-whisper>=20231117
+
+# 人声分离仍属于实验功能，暂不放入默认本地安装。
+# demucs>=4.0.1,<5

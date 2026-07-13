@@ -1,20 +1,18 @@
-# AI 识别
-openai-whisper>=20231117        # 本地 Whisper（离线备选）
-groq>=0.9.0                     # Groq API 客户端（默认在线方案）
-
-# 音频处理
-pydub>=0.25.1
-mutagen>=1.47.0
-
-# 人声分离（可选）
-demucs>=4.0.1
+# Echovault 基础运行依赖
+#
+# ffmpeg 是系统程序，不是 Python 包。安装说明见 README.md。
+# 云端和本地 ASR 引擎分别放在 requirements-cloud.txt 与
+# requirements-local.txt，避免基础安装自动拉取大型 AI 依赖。
 
 # 桌面 GUI
-PyQt6>=6.6.0
+PyQt6>=6.6.0,<7
 
-# 文件同步
-aiohttp>=3.9.0
-zeroconf>=0.131.0               # mDNS 设备发现
+# 音频与元数据
+pydub>=0.25.1,<1
+mutagen>=1.47.0,<2
+opencc-python-reimplemented>=0.1.7,<1
 
-# 工具
-ffmpeg（系统安装，非 pip）
+# 文件同步与 LocalSend
+aiohttp>=3.9.0,<4
+zeroconf>=0.131.0,<1
+cryptography>=42.0.0,<49
