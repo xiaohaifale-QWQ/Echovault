@@ -8,7 +8,9 @@
 """
 
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -24,6 +26,20 @@ WHISPER_SAMPLE_RATE = 16000
 WHISPER_CHANNELS = 1  # mono
 
 
+def find_ffmpeg() -> Optional[str]:
+    """Find ffmpeg in a bundled application or on the system PATH."""
+    candidates = []
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        candidates.append(Path(bundle_root) / "ffmpeg.exe")
+        candidates.append(Path(bundle_root) / "ffmpeg")
+    candidates.append(Path(sys.executable).resolve().parent / "ffmpeg.exe")
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return shutil.which("ffmpeg")
+
+
 def is_supported(file_path: str) -> bool:
     """检查文件是否为支持的音频格式"""
     ext = Path(file_path).suffix.lower()
@@ -37,6 +53,10 @@ def get_audio_info(file_path: str) -> dict:
     Returns:
         dict: {"duration": float, "sample_rate": int, "channels": int, "format": str}
     """
+    ffmpeg_path = find_ffmpeg()
+    if not ffmpeg_path:
+        raise RuntimeError("未找到 ffmpeg。请先安装 ffmpeg 并确保 ffmpeg 命令已加入 PATH。")
+    AudioSegment.converter = ffmpeg_path
     audio = AudioSegment.from_file(file_path)
     return {
         "duration": len(audio) / 1000.0,          # 毫秒 → 秒
@@ -65,7 +85,10 @@ def convert_to_whisper_format(
     Returns:
         str: 转换后的 WAV 文件路径
     """
-    args = ["ffmpeg", "-y", "-i", file_path]
+    ffmpeg_path = find_ffmpeg()
+    if not ffmpeg_path:
+        raise RuntimeError("未找到 ffmpeg。请先安装 ffmpeg 并确保 ffmpeg 命令已加入 PATH。")
+    args = [ffmpeg_path, "-y", "-i", file_path]
     
     # 裁剪
     if start_time is not None:

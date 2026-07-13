@@ -6,7 +6,7 @@ def test_report_explains_missing_ffmpeg_and_groq(monkeypatch, tmp_path):
     config = AppConfig()
     config.asr.provider = "groq"
     config.groq_api_key = ""
-    monkeypatch.setattr("core.environment.shutil.which", lambda _name: None)
+    monkeypatch.setattr("core.environment.find_ffmpeg", lambda: None)
     monkeypatch.setattr("core.environment._module_available", lambda name: name != "groq")
 
     report = build_environment_report(config, cache_root=tmp_path)
@@ -21,7 +21,7 @@ def test_local_provider_requires_model_file(monkeypatch, tmp_path):
     config = AppConfig()
     config.asr.provider = "local"
     config.asr.local_model = "tiny"
-    monkeypatch.setattr("core.environment.shutil.which", lambda _name: "C:/ffmpeg.exe")
+    monkeypatch.setattr("core.environment.find_ffmpeg", lambda: "C:/ffmpeg.exe")
     monkeypatch.setattr("core.environment._module_available", lambda _name: True)
 
     missing = build_environment_report(config, cache_root=tmp_path)

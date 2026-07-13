@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
-import shutil
 import sys
 from pathlib import Path
+
+from core.audio_utils import find_ffmpeg
 
 
 BASE_PACKAGES = {
@@ -28,7 +29,7 @@ def _module_available(module_name: str) -> bool:
 def build_environment_report(config, cache_root: str | Path | None = None) -> dict:
     """Return a serializable report for the currently selected ASR provider."""
     packages = {name: _module_available(module) for name, module in BASE_PACKAGES.items()}
-    ffmpeg_path = shutil.which("ffmpeg")
+    ffmpeg_path = find_ffmpeg()
     provider = config.asr.provider
     cache = Path(cache_root) if cache_root else Path.home() / ".cache" / "whisper"
 

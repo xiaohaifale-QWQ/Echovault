@@ -12,10 +12,7 @@ def test_missing_ffmpeg_has_actionable_error_and_cleans_temp(tmp_path, monkeypat
     temp_root = Path(tempfile.gettempdir())
     before = set(temp_root.glob("echovault_*.wav"))
 
-    def missing_ffmpeg(*_args, **_kwargs):
-        raise FileNotFoundError("ffmpeg")
-
-    monkeypatch.setattr("core.audio_utils.subprocess.run", missing_ffmpeg)
+    monkeypatch.setattr("core.audio_utils.find_ffmpeg", lambda: None)
 
     with pytest.raises(RuntimeError, match="未找到 ffmpeg"):
         convert_to_whisper_format(str(audio))
