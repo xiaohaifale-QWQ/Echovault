@@ -16,6 +16,13 @@ from .base import ASRProvider, Segment, TranscriptionResult
 logger = logging.getLogger(__name__)
 
 
+def _field(value, name: str, default=None):
+    """Read one field from dict responses or SDK model objects."""
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
 class GroqWhisperProvider(ASRProvider):
     """Groq Cloud Whisper API 实现"""
     
@@ -79,13 +86,13 @@ class GroqWhisperProvider(ASRProvider):
         detected_lang = getattr(response, "language", "unknown")
         duration = getattr(response, "duration", 0.0)
         
-        raw_segments = getattr(response, "segments", [])
+        raw_segments = getattr(response, "segments", []) or []
         for seg in raw_segments:
             segments.append(Segment(
-                start_time=seg.get("start", 0.0),
-                end_time=seg.get("end", 0.0),
-                text=seg.get("text", "").strip(),
-                confidence=seg.get("avg_logprob", 0.0),  # Groq 返回的是 logprob
+                start_time=_field(seg, "start", 0.0),
+                end_time=_field(seg, "end", 0.0),
+                text=_field(seg, "text", "").strip(),
+                confidence=_field(seg, "avg_logprob", 0.0),  # Groq 返回的是 logprob
             ))
         
         return TranscriptionResult(
