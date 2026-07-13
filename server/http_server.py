@@ -12,8 +12,6 @@
 - 浏览音乐库
 """
 
-import os
-import json
 import logging
 from pathlib import Path
 from typing import Optional
@@ -28,6 +26,17 @@ except ImportError:
     web = None
 
 
+def resolve_library_path(root_dir: str | Path, requested_path: str) -> Path:
+    """Resolve a requested path and ensure it remains inside the library root."""
+    root = Path(root_dir).expanduser().resolve()
+    candidate = (root / requested_path).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("requested path is outside the music library") from exc
+    return candidate
+
+
 class SyncHTTPServer:
     """文件同步 HTTP 服务"""
     
@@ -37,7 +46,7 @@ class SyncHTTPServer:
         if not _HAS_AIOHTTP:
             raise RuntimeError("aiohttp 未安装。请运行: pip install aiohttp")
         
-        self.music_dir = music_dir
+        self.music_dir = str(Path(music_dir).expanduser().resolve())
         self.port = port
         self._app: Optional[web.Application] = None
         self._runner: Optional[web.AppRunner] = None
@@ -66,7 +75,6 @@ class SyncHTTPServer:
         self._app.router.add_get("/", self._handle_index)
         self._app.router.add_get("/api/files", self._handle_list_files)
         self._app.router.add_get("/download/{path:.*}", self._handle_download)
-        self._app.router.add_static("/static", self.music_dir, show_index=True)
     
     async def _handle_index(self, request: web.Request) -> web.Response:
         """首页 — 简单 Web 管理页面"""
@@ -137,7 +145,7 @@ class SyncHTTPServer:
                     })
         
         return web.json_response({
-            "root": str(root),
+            "root": root.name,
             "count": len(files),
             "files": files[:500],  # 限制数量
         })
@@ -145,14 +153,12 @@ class SyncHTTPServer:
     async def _handle_download(self, request: web.Request) -> web.Response:
         """下载文件"""
         file_path = request.match_info.get("path", "")
-        full_path = os.path.join(self.music_dir, file_path)
-        
-        # 安全检查：防止路径遍历
-        full_path = os.path.normpath(full_path)
-        if not full_path.startswith(os.path.normpath(self.music_dir)):
+        try:
+            full_path = resolve_library_path(self.music_dir, file_path)
+        except ValueError:
             raise web.HTTPForbidden()
         
-        if not os.path.isfile(full_path):
+        if not full_path.is_file():
             raise web.HTTPNotFound()
         
         return web.FileResponse(full_path)
