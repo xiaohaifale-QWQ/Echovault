@@ -36,20 +36,25 @@ class LocalWhisperProvider(ASRProvider):
     
     @property
     def display_name(self) -> str:
-        dev = "GPU" if self._use_gpu else "CPU"
+        dev = "GPU" if self._device == "cuda" else "CPU"
         return f"本地 Whisper ({self._model_name}, {dev})"
     
     def _get_model(self):
         if self._model is None:
             try: import whisper
             except ImportError: raise RuntimeError("openai-whisper not installed")
-            try: import torch
-            except ImportError: self._device = "cpu"
+            try:
+                import torch
+            except ImportError:
+                self._device = "cpu"
             else:
-                self._device = "cuda" if (self._use_gpu and torch.cuda.is_available()) else "cpu"
+                cuda_available = torch.cuda.is_available()
+                self._device = "cuda" if self._use_gpu and cuda_available else "cpu"
+                if self._use_gpu and not cuda_available:
+                    logger.warning("GPU 已启用，但当前 PyTorch 不支持 CUDA；回退到 CPU")
             logger.info(f"Loading '{self._model_name}' (device:{self._device})...")
             from core.whisper_loader import load_hf_whisper
-            self._model = load_hf_whisper(self._model_name)
+            self._model = load_hf_whisper(self._model_name, device=self._device)
             logger.info("Model loaded")
         
         return self._model

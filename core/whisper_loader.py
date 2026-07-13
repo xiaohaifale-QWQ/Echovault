@@ -1,7 +1,11 @@
-"""Load whisper model from HF pytorch_model.bin format"""
-import torch, os, re
+"""Load Whisper models from official or HuggingFace-style checkpoints."""
 
-def load_hf_whisper(model_name, cache_dir=None):
+import os
+
+import torch
+
+
+def load_hf_whisper(model_name, cache_dir=None, device="cpu"):
     if cache_dir is None:
         cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
     
@@ -14,7 +18,7 @@ def load_hf_whisper(model_name, cache_dir=None):
     
     # Already whisper format
     if "dims" in ckpt:
-        return whisper.load_model(model_name)
+        return whisper.load_model(model_name, device=device, download_root=cache_dir)
     
     # Infer dimensions from HF state dict
     conv1 = ckpt["model.encoder.conv1.weight"]
@@ -46,4 +50,4 @@ def load_hf_whisper(model_name, cache_dir=None):
     
     model = whisper.model.Whisper(dims)
     model.load_state_dict(ckpt, strict=False)
-    return model.to("cpu")
+    return model.to(device)
