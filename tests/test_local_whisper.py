@@ -1,3 +1,6 @@
+import sys
+from types import ModuleType, SimpleNamespace
+
 from core.asr.local_whisper import LocalWhisperProvider
 
 
@@ -22,8 +25,12 @@ def test_gpu_request_falls_back_to_cpu_when_cuda_unavailable(monkeypatch):
         captured["device"] = device
         return fake_model
 
-    monkeypatch.setattr("torch.cuda.is_available", lambda: False)
-    monkeypatch.setattr("core.whisper_loader.load_hf_whisper", fake_loader)
+    fake_torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))
+    fake_loader_module = ModuleType("core.whisper_loader")
+    fake_loader_module.load_hf_whisper = fake_loader
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "whisper", ModuleType("whisper"))
+    monkeypatch.setitem(sys.modules, "core.whisper_loader", fake_loader_module)
     provider = LocalWhisperProvider(model_name="tiny", use_gpu=True)
 
     result = provider.transcribe("audio.wav", language="zh")
@@ -41,8 +48,12 @@ def test_cuda_model_uses_fp16_when_available(monkeypatch):
         captured["device"] = device
         return fake_model
 
-    monkeypatch.setattr("torch.cuda.is_available", lambda: True)
-    monkeypatch.setattr("core.whisper_loader.load_hf_whisper", fake_loader)
+    fake_torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True))
+    fake_loader_module = ModuleType("core.whisper_loader")
+    fake_loader_module.load_hf_whisper = fake_loader
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "whisper", ModuleType("whisper"))
+    monkeypatch.setitem(sys.modules, "core.whisper_loader", fake_loader_module)
     provider = LocalWhisperProvider(model_name="tiny", use_gpu=True)
 
     provider.transcribe("audio.wav")
