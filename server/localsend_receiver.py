@@ -1,6 +1,7 @@
 """LocalSend HTTPS receiver + HTTP browse server"""
 
 import os, json, uuid, socket, struct, ssl, hashlib, logging, tempfile, threading, datetime
+import html, shutil, urllib.parse
 from pathlib import Path
 from typing import Optional, Callable
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -8,6 +9,30 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 logger = logging.getLogger(__name__)
 MULTICAST_GROUP, MULTICAST_PORT, HTTP_PORT, BROWSE_PORT = "224.0.0.167", 53317, 53317, 8899
 PROTOCOL_VERSION, DEVICE_TYPE = "2.0", "desktop"
+
+
+def _safe_file_link(file_name: str) -> tuple[str, str]:
+    """Return an HTML-safe label and a URL-encoded download path."""
+    return html.escape(file_name), "/download/" + urllib.parse.quote(file_name, safe="")
+
+
+def _stream_to_file(source, destination: Path, length: int, on_chunk=None) -> int:
+    """Copy exactly ``length`` bytes from a request stream to disk."""
+    received = 0
+    with open(destination, "wb") as output:
+        while received < length:
+            chunk = source.read(min(65536, length - received))
+            if not chunk:
+                break
+            output.write(chunk)
+            received += len(chunk)
+            if on_chunk:
+                on_chunk(received)
+        output.flush()
+        os.fsync(output.fileno())
+    if received != length:
+        raise EOFError(f"incomplete upload: expected {length}, received {received}")
+    return received
 
 class LocalSendReceiver:
     def __init__(self, save_dir: str, alias: str = "MusicSync",
@@ -115,20 +140,35 @@ class LocalSendReceiver:
                 fi = se["files"].get(fid)
                 if not fi or fi["token"] != tok: s._json({"message":"bad token"},403); return
                 length = int(s.headers.get("Content-Length",0))
-                chunks, recv, total, keys = [], 0, len(se["files"]), list(se["files"].keys())
+                if length <= 0 or (fi["size"] and length != fi["size"]):
+                    s._json({"message":"size mismatch"},400); return
+                if shutil.disk_usage(r.save_dir).free < length:
+                    s._json({"message":"insufficient storage"},507); return
+                total, keys = len(se["files"]), list(se["files"].keys())
                 idx = keys.index(fid)+1 if fid in keys else 0; fn = fi["name"]
-                while recv < length:
-                    ck = s.rfile.read(min(65536, length-recv))
-                    if not ck: break
-                    chunks.append(ck); recv += len(ck)
-                    if r.on_progress and length > 0:
-                        r.on_progress(idx, total, f"{fn} ({int(recv*100/length)}%)")
-                data = b"".join(chunks); safe = Path(fn).name; fp = r.save_dir / safe
+                safe = Path(fn).name; fp = r.save_dir / safe
                 if fp.exists():
                     st, su = fp.stem, fp.suffix; c = 1
                     while fp.exists(): fp = r.save_dir / f"{st} ({c}){su}"; c += 1
-                fp.write_bytes(data)
-                logger.info(f"received: {safe} ({len(data)}B)")
+                temp_handle = tempfile.NamedTemporaryFile(
+                    prefix=".echovault-upload-", suffix=".part", dir=r.save_dir, delete=False
+                )
+                temp_path = Path(temp_handle.name); temp_handle.close()
+
+                def report_progress(recv):
+                    if r.on_progress and length > 0:
+                        r.on_progress(idx, total, f"{fn} ({int(recv*100/length)}%)")
+
+                try:
+                    received = _stream_to_file(s.rfile, temp_path, length, report_progress)
+                    os.replace(temp_path, fp)
+                except EOFError as exc:
+                    if temp_path.exists(): temp_path.unlink()
+                    logger.warning(str(exc)); s._json({"message":"incomplete upload"},400); return
+                except OSError as exc:
+                    if temp_path.exists(): temp_path.unlink()
+                    logger.error(f"upload failed: {exc}"); s._json({"message":"write failed"},500); return
+                logger.info(f"received: {safe} ({received}B)")
                 if r.on_file_received: r.on_file_received(str(fp))
                 s.send_response(200); s.end_headers()
             def _cancel(s):
@@ -160,7 +200,8 @@ class LocalSendReceiver:
                     for f in sorted(r.save_dir.iterdir()):
                         if f.is_file():
                             sz = f"{f.stat().st_size/1024:.0f}KB" if f.stat().st_size>1024 else f"{f.stat().st_size}B"
-                            items += f'<li><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{f.name}</span><span style="color:#888;font-size:12px;margin:0 12px">{sz}</span><a style="color:#1976D2;text-decoration:none;font-size:13px" href="/download/{f.name}">下载</a></li>'
+                            label, href = _safe_file_link(f.name)
+                            items += f'<li><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label}</span><span style="color:#888;font-size:12px;margin:0 12px">{sz}</span><a style="color:#1976D2;text-decoration:none;font-size:13px" href="{href}">下载</a></li>'
                 html = f"""<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MusicSync</title><style>
 *{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:-apple-system,sans-serif;background:#f5f5f5;color:#333}}
 .h{{background:#1976D2;color:#fff;padding:16px}}.h h1{{font-size:20px;font-weight:500}}.h p{{font-size:13px;opacity:.85;margin-top:4px}}
@@ -174,12 +215,17 @@ li{{display:flex;align-items:center;padding:10px 0;border-bottom:1px solid #eee;
                 s.send_response(200); s.send_header("Content-Type","text/html; charset=utf-8"); s.end_headers()
                 s.wfile.write(html.encode())
             def _dl(s, fn):
-                fp = r.save_dir / Path(fn).name
+                decoded_name = urllib.parse.unquote(fn)
+                fp = r.save_dir / Path(decoded_name).name
                 if not fp.exists(): s.send_response(404); s.end_headers(); return
-                d = fp.read_bytes(); s.send_response(200)
+                s.send_response(200)
                 s.send_header("Content-Type","application/octet-stream")
-                s.send_header("Content-Disposition",f'attachment; filename="{fp.name}"')
-                s.send_header("Content-Length",str(len(d))); s.end_headers(); s.wfile.write(d)
+                quoted_name = urllib.parse.quote(fp.name, safe="")
+                s.send_header("Content-Disposition",f"attachment; filename*=UTF-8''{quoted_name}")
+                s.send_header("Content-Length",str(fp.stat().st_size)); s.end_headers()
+                with open(fp, "rb") as source:
+                    for chunk in iter(lambda: source.read(65536), b""):
+                        s.wfile.write(chunk)
         self._browse_server = HTTPServer(("0.0.0.0", BROWSE_PORT), B)
         threading.Thread(target=self._browse_server.serve_forever, daemon=True).start()
         logger.info(f"Browse: http://{self._get_local_ip()}:{BROWSE_PORT}")
