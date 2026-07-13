@@ -175,12 +175,11 @@ class SyncEngine:
                 elif info_b.mtime > info_a.mtime + 1:
                     diffs.append(FileDiff(info_b, DiffType.NEWER_IN_B, other_file=info_a))
                 else:
-                    # 时间相同，如果要求内容比较则计算 MD5
-                    if compare_content and info_a.size != info_b.size:
-                        # 大小不同，肯定有差异
+                    # 时间接近但大小不同，必须视为冲突，不能静默忽略。
+                    if info_a.size != info_b.size:
                         diffs.append(FileDiff(info_a, DiffType.CONFLICT, other_file=info_b))
                     elif compare_content:
-                        # 计算 MD5
+                        # 大小和时间都接近时，严格模式再计算内容哈希。
                         md5_a = info_a.compute_md5(dir_a)
                         md5_b = info_b.compute_md5(dir_b)
                         if md5_a != md5_b:

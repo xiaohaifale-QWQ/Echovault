@@ -433,7 +433,7 @@ def cmd_sync(args):
         if not dir_a or not dir_b:
             logger.error("Please specify --dir-a and --dir-b")
             sys.exit(1)
-        diff = engine.compare_directories(dir_a, dir_b)
+        diff = engine.compare_directories(dir_a, dir_b, compare_content=args.strict)
         if args.json_output:
             items = []
             for d in diff:
@@ -631,7 +631,9 @@ def main():
     # sync
     sp = sub.add_parser("sync", help="File sync")
     s2 = sp.add_subparsers(dest="sync_action", required=True)
-    x = s2.add_parser("compare", help="Compare folders"); x.add_argument("--dir-a"); x.add_argument("--dir-b"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_sync)
+    x = s2.add_parser("compare", help="Compare folders"); x.add_argument("--dir-a"); x.add_argument("--dir-b")
+    x.add_argument("--strict", action="store_true", help="Compare content hashes when needed")
+    x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_sync)
     x = s2.add_parser("serve", help="HTTP file server"); x.add_argument("--folder", "-f"); x.set_defaults(func=cmd_sync)
 
     # rename
