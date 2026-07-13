@@ -298,6 +298,10 @@ def cmd_config(args):
         c = config_manager.load()
         data = {
             "music_dirs": c.music_dirs, "output_lrc_dir": c.output_lrc_dir,
+            "api_keys": {
+                "groq_configured": bool(c.groq_api_key),
+                "xunfei_configured": bool(c.xunfei_api_key),
+            },
             "asr": {
                 "provider": c.asr.provider, "local_model": c.asr.local_model,
                 "language": c.asr.language, "use_vocal_separation": c.asr.use_vocal_separation,
@@ -319,12 +323,15 @@ def cmd_config(args):
             c.music_dirs = [args.value]
         elif keys[0] == "groq_api_key":
             c.groq_api_key = args.value
+        elif keys[0] == "xunfei_api_key":
+            c.xunfei_api_key = args.value
         else:
             logger.error(f"Unknown config key: {args.key}")
             sys.exit(1)
         config_manager.config = c
         config_manager.save()
-        print(f"OK: {args.key} = {args.value}")
+        shown_value = "***" if args.key in ("groq_api_key", "xunfei_api_key") else args.value
+        print(f"OK: {args.key} = {shown_value}")
 
     elif args.config_action == "path":
         print(config_manager.config_path)

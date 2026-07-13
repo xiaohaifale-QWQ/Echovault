@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+CONFIG_SCHEMA_VERSION = 1
+
+
 @dataclass
 class ASRConfig:
     """ASR 识别配置"""
@@ -81,8 +84,11 @@ class ConfigManager:
     def _serialize(self) -> dict:
         c = self.config
         return {
+            "schema_version": CONFIG_SCHEMA_VERSION,
             "music_dirs": c.music_dirs,
             "output_lrc_dir": c.output_lrc_dir,
+            "groq_api_key": c.groq_api_key,
+            "xunfei_api_key": c.xunfei_api_key,
             "asr": {
                 "provider": c.asr.provider,
                 "local_model": c.asr.local_model,
@@ -102,6 +108,8 @@ class ConfigManager:
         c = self.config
         c.music_dirs = data.get("music_dirs", [])
         c.output_lrc_dir = data.get("output_lrc_dir")
+        c.groq_api_key = os.environ.get("GROQ_API_KEY") or data.get("groq_api_key", "")
+        c.xunfei_api_key = os.environ.get("XUNFEI_API_KEY") or data.get("xunfei_api_key", "")
         asr_data = data.get("asr", {})
         c.asr.provider = asr_data.get("provider", "groq")
         c.asr.local_model = asr_data.get("local_model", "base")

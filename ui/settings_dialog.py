@@ -508,6 +508,8 @@ class SettingsDialog(QDialog):
         c.asr.use_gpu = self.gpu_check.isChecked()
         key = self.api_input.text().strip(); c.groq_api_key = key
         if key: os.environ["GROQ_API_KEY"] = key
+        xunfei_key = self.xunfei_input.text().strip(); c.xunfei_api_key = xunfei_key
+        if xunfei_key: os.environ["XUNFEI_API_KEY"] = xunfei_key
         d = self.lrc_input.text().strip(); c.output_lrc_dir = d if d else None
         config_manager.config = c; config_manager.save()
         self.accept()
