@@ -334,12 +334,12 @@ class SyncEngine:
         
         # 先处理冲突
         for conflict in plan.files_with_conflict:
-            if self.conflict_resolution == ConflictResolution.SKIP:
-                stats["skipped"] += 1
-            elif self.conflict_resolution == ConflictResolution.NEWEST:
-                # 自动选最新的覆盖
-                pass  # 在 plan 生成阶段已处理
-            # MANUAL 模式由 UI 处理
+            # 冲突没有可靠的自动胜出方。MANUAL 应由调用方在执行前处理；
+            # 如果仍传入执行器，安全起见统一跳过而不是覆盖任一侧。
+            stats["skipped"] += 1
+            current += 1
+            if progress_callback:
+                progress_callback(current, total, conflict.file.relative_path)
         
         # 复制文件
         for src, dst in plan.files_to_copy:

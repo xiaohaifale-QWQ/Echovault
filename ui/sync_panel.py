@@ -106,7 +106,6 @@ class SyncPanel(QWidget):
         sl.addWidget(QLabel("冲突:"))
         self.conflict_combo = QComboBox()
         self.conflict_combo.addItem("手动", ConflictResolution.MANUAL.value)
-        self.conflict_combo.addItem("最新", ConflictResolution.NEWEST.value)
         self.conflict_combo.addItem("跳过", ConflictResolution.SKIP.value)
         sl.addWidget(self.conflict_combo)
         sl.addStretch()
@@ -208,8 +207,33 @@ class SyncPanel(QWidget):
         self.engine.conflict_resolution = ConflictResolution(self.conflict_combo.currentData())
         self._plan = self.engine.create_plan(self._diffs, d, a, b)
         if self._plan.is_empty: return QMessageBox.information(self, "提示", "无变化。")
-        r = QMessageBox.question(self, "确认", f"{self._plan.total_operations} 个操作，继续？")
+        if (self._plan.files_with_conflict and
+                self.engine.conflict_resolution == ConflictResolution.MANUAL):
+            return QMessageBox.warning(
+                self,
+                "存在冲突",
+                f"有 {len(self._plan.files_with_conflict)} 个冲突文件。"
+                "请先人工处理，或选择“跳过”后再执行。",
+            )
+        summary = (
+            f"复制 {len(self._plan.files_to_copy)} 个文件\n"
+            f"删除 {len(self._plan.files_to_delete)} 个文件\n"
+            f"跳过冲突 {len(self._plan.files_with_conflict)} 个\n\n继续执行？"
+        )
+        r = QMessageBox.question(self, "确认同步计划", summary)
         if r != QMessageBox.StandardButton.Yes: return
+        if self._plan.files_to_delete:
+            preview = "\n".join(Path(path).name for path in self._plan.files_to_delete[:10])
+            if len(self._plan.files_to_delete) > 10:
+                preview += f"\n……另有 {len(self._plan.files_to_delete) - 10} 个文件"
+            r = QMessageBox.warning(
+                self,
+                "确认删除",
+                "镜像同步将永久删除以下文件：\n\n" + preview + "\n\n确定继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if r != QMessageBox.StandardButton.Yes: return
         self.worker = SyncWorker(self.engine, self._plan)
         self.worker.progress.connect(self._on_sp)
         self.worker.finished.connect(self._on_sf)
