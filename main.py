@@ -6,7 +6,7 @@
     python main.py gui                   # 启动图形界面
     python main.py <命令> [参数]          # CLI 模式
 
-CLI 命令: list | info | transcribe | lyrics | config | model | gpu | sync | rename | mark | serve
+CLI 命令: list | info | transcribe | lyrics | config | model | gpu | sync | rename | mark | serve | doctor
 详细文档: CLI.md
 """
 
@@ -36,6 +36,7 @@ from core.asr.router import ASRRouter, get_router
 from core.audio_utils import is_supported, SUPPORTED_FORMATS
 from core.lrc_writer import transcribe_and_save_lrc
 from core.lrc_parser import parse_lrc_file
+from core.environment import build_environment_report
 from services.library_service import InstrumentalStore, scan_audio
 
 logging.basicConfig(
@@ -534,6 +535,25 @@ def cmd_serve(args):
 
 
 # ============================================================
+# doctor
+# ============================================================
+
+def cmd_doctor(args):
+    report = build_environment_report(config_manager.load())
+    if args.json_output:
+        print(_json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(f"Python: {report['python']}")
+        print(f"ffmpeg: {report['ffmpeg']['path'] or 'NOT FOUND'}")
+        print(f"Provider: {report['provider']['name']}")
+        print(f"Ready: {'YES' if report['ready_for_transcription'] else 'NO'}")
+        for issue in report["issues"]:
+            print(f"- {issue}")
+    if not report["ready_for_transcription"]:
+        sys.exit(1)
+
+
+# ============================================================
 # GUI
 # ============================================================
 
@@ -650,6 +670,11 @@ def main():
     s2 = sp.add_subparsers(dest="serve_action", required=True)
     x = s2.add_parser("http", help="HTTP file server"); x.set_defaults(func=cmd_serve)
     x = s2.add_parser("localsend", help="LocalSend (needs GUI)"); x.set_defaults(func=cmd_serve)
+
+    # doctor
+    sp = sub.add_parser("doctor", help="Check runtime environment")
+    sp.add_argument("--json", dest="json_output", action="store_true")
+    sp.set_defaults(func=cmd_doctor)
 
     args = p.parse_args()
     if args.command is None:

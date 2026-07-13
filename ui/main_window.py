@@ -23,6 +23,7 @@ from PyQt6.QtGui import QAction, QIcon
 
 from core.config import config_manager, AppConfig
 from core.asr.router import ASRRouter, get_router
+from core.environment import build_environment_report
 from services.library_service import scan_audio
 
 from ui.library_panel import LibraryPanel
@@ -52,6 +53,10 @@ class MainWindow(QMainWindow):
         # 恢复上次的音乐目录
         if self.config.music_dirs:
             self.library_panel.set_root(self.config.music_dirs[0])
+
+        report = build_environment_report(self.config)
+        if not report["ffmpeg"]["available"]:
+            self.status_label.setText("未检测到 ffmpeg，歌词识别暂不可用")
     
     def _setup_ui(self):
         """初始化 UI 布局"""
