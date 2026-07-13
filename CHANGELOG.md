@@ -16,6 +16,8 @@
 
 ### Changed
 
+- Chinese transcription output is normalized to Simplified Chinese for `zh`,
+  `zh-TW`, `Chinese`, and other common Chinese language identifiers.
 - API keys now persist in the user configuration and are redacted in CLI output.
 - Configuration and LRC files are written atomically.
 - Local Whisper explicitly loads models on CPU or CUDA and safely falls back to CPU.
