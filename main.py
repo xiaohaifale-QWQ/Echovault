@@ -606,7 +606,7 @@ def main():
 
     # lyrics
     sp = sub.add_parser("lyrics", help="Lyrics operations")
-    s2 = sp.add_subparsers(dest="lyrics_action")
+    s2 = sp.add_subparsers(dest="lyrics_action", required=True)
     x = s2.add_parser("show", help="Show lyrics")
     x.add_argument("file"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_lyrics)
     x = s2.add_parser("search", help="Search lyrics")
@@ -614,27 +614,27 @@ def main():
 
     # config
     sp = sub.add_parser("config", help="Configuration")
-    s2 = sp.add_subparsers(dest="config_action")
+    s2 = sp.add_subparsers(dest="config_action", required=True)
     x = s2.add_parser("show", help="Show config"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_config)
     x = s2.add_parser("set", help="Set config"); x.add_argument("key"); x.add_argument("value"); x.set_defaults(func=cmd_config)
     x = s2.add_parser("path", help="Config file path"); x.set_defaults(func=cmd_config)
 
     # model
     sp = sub.add_parser("model", help="Model management")
-    s2 = sp.add_subparsers(dest="model_action")
+    s2 = sp.add_subparsers(dest="model_action", required=True)
     x = s2.add_parser("list", help="List models"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_model)
     x = s2.add_parser("info", help="Model detail"); x.add_argument("model_name"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_model)
     x = s2.add_parser("download", help="Download model"); x.add_argument("model_name"); x.set_defaults(func=cmd_model)
 
     # gpu
     sp = sub.add_parser("gpu", help="GPU management")
-    s2 = sp.add_subparsers(dest="gpu_action")
+    s2 = sp.add_subparsers(dest="gpu_action", required=True)
     x = s2.add_parser("scan", help="Scan GPU"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_gpu)
     x = s2.add_parser("status", help="GPU status"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_gpu)
 
     # sync
     sp = sub.add_parser("sync", help="File sync")
-    s2 = sp.add_subparsers(dest="sync_action")
+    s2 = sp.add_subparsers(dest="sync_action", required=True)
     x = s2.add_parser("compare", help="Compare folders"); x.add_argument("--dir-a"); x.add_argument("--dir-b"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_sync)
     x = s2.add_parser("serve", help="HTTP file server"); x.add_argument("--folder", "-f"); x.set_defaults(func=cmd_sync)
 
@@ -648,7 +648,7 @@ def main():
 
     # serve
     sp = sub.add_parser("serve", help="Start services")
-    s2 = sp.add_subparsers(dest="serve_action")
+    s2 = sp.add_subparsers(dest="serve_action", required=True)
     x = s2.add_parser("http", help="HTTP file server"); x.set_defaults(func=cmd_serve)
     x = s2.add_parser("localsend", help="LocalSend (needs GUI)"); x.set_defaults(func=cmd_serve)
 
