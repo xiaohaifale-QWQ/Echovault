@@ -1,0 +1,22 @@
+[project]
+name = "echovault"
+version = "0.2.0.dev0"
+description = "AI-assisted lyrics recognition and local-first music synchronization"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "xiaohaifale" }]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E701", "E702"]
