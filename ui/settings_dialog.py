@@ -1,5 +1,5 @@
 """设置对话框"""
-import os, subprocess, sys, hashlib
+import os, subprocess, sys
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QCheckBox, QPushButton,
@@ -7,29 +7,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from core.config import AppConfig, config_manager
-
-
-# Whisper 模型下载 URL (OpenAI 官方 + 各镜像)
-_GH_RELEASE = "https://github.com/xiaohaifale-QWQ/echovault-models/releases/download/v1.0"
-
-
-def _file_sha256(path: str) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as file_handle:
-        for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _official_model_sha256(model: str) -> str:
-    """Extract the expected digest embedded in OpenAI Whisper's model URL."""
-    try:
-        import whisper
-        url = whisper._MODELS[model]
-    except (ImportError, KeyError):
-        return ""
-    parts = url.rstrip("/").split("/")
-    return parts[-2] if len(parts) >= 2 and len(parts[-2]) == 64 else ""
+from core.model_download import DownloadCancelled, ModelDownloadError, download_model
 
 class _GPUDetectWorker(QThread):
     """后台扫描显卡"""
@@ -162,142 +140,24 @@ class _DownloadWorker(QThread):
         self.requestInterruption()
 
     def run(self):
-        import os as _os
         try:
-            try: import whisper
-            except ImportError:
-                self.progress.emit(0, "安装 openai-whisper...")
-                subprocess.check_call([
-                    sys.executable, "-m", "pip", "install", "openai-whisper", "-q",
-                    "-i", "https://pypi.tuna.tsinghua.edu.cn/simple",
-                    "--trusted-host", "pypi.tuna.tsinghua.edu.cn"
-                ])
-
-            cache = _os.path.join(_os.path.expanduser("~"), ".cache", "whisper")
-            model_file = _os.path.join(cache, f"{self.model}.pt")
-            
-            expected_hash = _official_model_sha256(self.model)
-            if _os.path.exists(model_file) and _os.path.getsize(model_file) > 100000:
-                if not expected_hash or _file_sha256(model_file) == expected_hash:
-                    self.finished.emit(True, f"{self.model} 模型已缓存")
-                    return
-                _os.remove(model_file)
-
-            _os.makedirs(cache, exist_ok=True)
-            
-            if self._cancelled or self.isInterruptionRequested():
-                self.finished.emit(False, "下载已取消")
-                return
-
-            if self.model == "medium":
-                ok = self._download_medium(cache)
-            else:
-                url = f"{_GH_RELEASE}/{self.model}.pt"
-                ok = self._download_file(url, model_file)
-            
-            if self._cancelled or self.isInterruptionRequested():
-                self.finished.emit(False, "下载已取消")
-                return
-
-            if not ok:
-                self.finished.emit(False, "下载失败, 请检查网络")
-                return
-
-            if expected_hash and _file_sha256(model_file) != expected_hash:
-                _os.remove(model_file)
-                self.finished.emit(False, "模型 SHA-256 校验失败，请重新下载")
-                return
-            
-            self.finished.emit(True, f"{self.model} 模型下载完成")
-
-        except subprocess.CalledProcessError:
-            self.finished.emit(False, "pip 安装失败")
-        except Exception as e:
-            self.finished.emit(False, str(e))
-
-    def _download_medium(self, cache):
-        p1_url = f"{_GH_RELEASE}/medium.part1"
-        p2_url = f"{_GH_RELEASE}/medium.part2"
-        p1_file = os.path.join(cache, "medium.part1")
-        p2_file = os.path.join(cache, "medium.part2")
-        model_file = os.path.join(cache, "medium.pt")
-        import os as _os
-        
-        if not _os.path.exists(p1_file) or _os.path.getsize(p1_file) < 100000:
-            self.progress.emit(0, "下载 medium 分片 1/2...")
-            if not self._download_file(p1_url, p1_file):
-                return False
-        if not _os.path.exists(p2_file) or _os.path.getsize(p2_file) < 100000:
-            self.progress.emit(50, "下载 medium 分片 2/2...")
-            if not self._download_file(p2_url, p2_file):
-                return False
-        
-        self.progress.emit(95, "合并分片...")
-        with open(model_file, "wb") as out:
-            for p in [p1_file, p2_file]:
-                with open(p, "rb") as inp:
-                    while True:
-                        chunk = inp.read(1048576)
-                        if not chunk: break
-                        out.write(chunk)
-        _os.remove(p1_file); _os.remove(p2_file)
-        return True
-
-    def _download_file(self, url, save_path):
-        import urllib.request, socket
-        socket.setdefaulttimeout(30)
-        partial_path = save_path + ".part"
-        try:
-            for attempt in range(5):
-                try:
-                    existing = os.path.getsize(partial_path) if os.path.exists(partial_path) else 0
-                    headers = {"User-Agent": "Echovault/1.0"}
-                    if existing:
-                        headers["Range"] = f"bytes={existing}-"
-                    req = urllib.request.Request(url, headers=headers)
-                    resp = urllib.request.urlopen(req, timeout=60)
-                    break
-                except Exception as e:
-                    if attempt == 4: raise
-                    wait = 2 ** attempt
-                    self.progress.emit(0, f"重试 {attempt+2}/5 (等待{wait}s)...")
-                    import time; time.sleep(wait)
-            resumed = existing > 0 and getattr(resp, "status", 200) == 206
-            if not resumed:
-                existing = 0
-            content_length = int(resp.headers.get("Content-Length", 0))
-            total = existing + content_length if content_length else 0
-            received = existing
-            import time as _time; start = _time.time()
-            mode = "ab" if resumed else "wb"
-            with open(partial_path, mode) as f:
-                while True:
-                    if self._cancelled or self.isInterruptionRequested():
-                        raise InterruptedError("用户取消")
-                    chunk = resp.read(131072)
-                    if not chunk: break
-                    f.write(chunk); received += len(chunk)
-                    if total > 0:
-                        elapsed = _time.time() - start
-                        speed = received / elapsed if elapsed > 0 else 0
-                        pct = int(received * 100 / total)
-                        mb_done = received / 1048576
-                        mb_total = total / 1048576
-                        mb_remain = mb_total - mb_done
-                        eta = mb_remain / (speed / 1048576) if speed > 0 else 0
-                        if speed > 1048576:
-                            speed_str = f"{speed/1048576:.1f} MB/s"
-                        else:
-                            speed_str = f"{speed/1024:.0f} KB/s"
-                        eta_str = f" 剩余 {eta:.0f}s" if eta < 120 else f" 剩余 {eta/60:.1f}min"
-                        self.progress.emit(pct, f"{speed_str} | {mb_done:.1f}/{mb_total:.1f} MB ({pct}%){eta_str}")
-            if total > 0 and received < total:
-                self.progress.emit(99, f"下载不完整 ({received/1048576:.0f}/{total/1048576:.0f}MB), 重试中...")
-                return False
-            os.replace(partial_path, save_path); return True
-        except Exception:
-            # 保留 .part 文件，下一次下载可继续。
-            return False
+            result = download_model(
+                self.model,
+                progress=lambda percent, message: self.progress.emit(percent, message),
+                cancelled=lambda: self._cancelled or self.isInterruptionRequested(),
+            )
+            message = (
+                f"{self.model} 模型已缓存并通过校验"
+                if result.cached
+                else f"{self.model} 模型已从 GitHub Release 下载完成"
+            )
+            self.finished.emit(True, message)
+        except DownloadCancelled:
+            self.finished.emit(False, "下载已取消")
+        except ModelDownloadError as exc:
+            self.finished.emit(False, str(exc))
+        except Exception as exc:
+            self.finished.emit(False, f"下载失败: {exc}")
 
 
 class SettingsDialog(QDialog):
