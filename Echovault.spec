@@ -1,10 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller specification for the cloud-first Windows MVP."""
+"""PyInstaller specification for the Windows desktop application."""
 
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 
 project_root = Path(SPECPATH)
@@ -18,10 +18,11 @@ if not ffmpeg_path or not Path(ffmpeg_path).is_file():
 hidden_imports = [
     "groq",
     "opencc",
+    "torch",
     "zeroconf",
-]
+] + collect_submodules("whisper") + collect_submodules("tiktoken_ext")
 
-datas = collect_data_files("certifi")
+datas = collect_data_files("certifi") + collect_data_files("whisper")
 binaries = [(ffmpeg_path, ".")]
 
 a = Analysis(
@@ -36,14 +37,11 @@ a = Analysis(
     excludes=[
         "demucs",
         "matplotlib",
-        "numpy",
         "pandas",
         "PIL",
         "psutil",
-        "torch",
         "torchaudio",
         "torchvision",
-        "whisper",
     ],
     noarchive=False,
 )
@@ -60,7 +58,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    console=os.environ.get("ECHOVAULT_CONSOLE") == "1",
     disable_windowed_traceback=False,
 )
 

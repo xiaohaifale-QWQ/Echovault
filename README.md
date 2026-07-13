@@ -75,11 +75,11 @@ python main.py --help
 
 ### 模型下载
 
-本地 Whisper 模型下载仍属于实验功能。默认下载源为独立仓库：
+本地 Whisper 模型直接从独立的 GitHub Release 下载：
 
-**github.com/xiaohaifale-QWQ/echovault-models/releases**
+**https://github.com/xiaohaifale-QWQ/echovault-models/releases/tag/v1.0**
 
-软件会使用 `.part` 文件断点续传，并按 OpenAI 模型清单校验 SHA-256。模型源尚未完整发布时，建议先使用 Groq 云端模式。
+软件会使用 `.download` 临时文件断点续传，并按 Release 资产清单校验文件大小和 SHA-256；校验失败的损坏文件会删除。目前 `tiny`、`base`、`small` 可下载，`medium` 因 Release 缺少 `medium.part2` 会在下载前停止，避免浪费磁盘空间。
 
 ---
 
@@ -155,9 +155,9 @@ python main.py doctor --json
 - 添加 / 删除歌词行
 
 ### GPU 加速
-- 默认 CPU 模式（软件轻量）
+- Windows 目录版内置 CPU Whisper 运行时，可直接离线识别
 - 扫描显卡 → 显示型号
-- 可选安装 PyTorch CUDA（大型依赖，建议在虚拟环境中操作）
+- 源码环境可选安装 PyTorch CUDA（大型依赖，建议在虚拟环境中操作）
 - CUDA 不可用时明确回退 CPU
 
 ### 文件同步
@@ -203,6 +203,7 @@ Echovault/
 │   ├── lrc_writer.py      # 识别->LRC + 后处理
 │   ├── metadata.py        # mutagen 元数据
 │   ├── sync_engine.py     # 同步引擎
+│   ├── model_download.py  # GitHub Release 模型下载器
 │   └── whisper_loader.py  # HF 模型加载器
 ├── services/
 │   └── library_service.py # GUI/CLI 共用音乐库业务逻辑
@@ -220,7 +221,7 @@ Echovault/
 │   ├── sync_panel.py      # 同步面板
 │   └── transcribe_worker.py  # QThread 后台识别
 ├── tests/                  # pytest 自动化测试
-├── Echovault.spec          # Windows 云端 MVP 打包配置
+├── Echovault.spec          # Windows 云端 + 本地 CPU 打包配置
 ├── build.ps1               # 可复现构建脚本
 ├── requirements.txt        # 基础依赖
 ├── requirements-cloud.txt  # Groq 云端模式
@@ -244,7 +245,8 @@ Echovault/
 - [x] 停止识别 + 取消下载按钮
 - [x] pytest 核心回归测试
 - [x] Windows PyInstaller 构建配置和 CI
-- [ ] 完成本地模型 Release 发布与真实机器验收
+- [x] GitHub Release 模型下载、续传与资产校验
+- [ ] 补齐 medium 模型的第二个 Release 分片
 - [ ] GPU CUDA 独立安装包
 - [ ] macOS 打包
 - [ ] AI 歌词翻译
@@ -255,8 +257,8 @@ Echovault/
 
 | 问题 | 状态 | 说明 |
 |------|------|------|
-| 本地模型源未完整发布 | 进行中 | 下载器已支持续传和校验，仍需上传并实机验收模型文件 |
-| CUDA 依赖体积大 | 已知限制 | 云端 MVP 不打包 Torch；本地/GPU 模式单独安装 |
+| medium 模型不完整 | 进行中 | Release v1.0 缺少 `medium.part2`，软件会阻止无效下载 |
+| CUDA 依赖体积大 | 已知限制 | Windows 包内置 CPU 推理；CUDA 仍需在源码环境单独安装 |
 | Groq 会上传音频 | 设计行为 | 对隐私敏感的用户应选择本地 Whisper |
 | Windows 打包 | 待实机验收 | 已提供 spec、构建脚本和 CI，需在干净机器验证 |
 

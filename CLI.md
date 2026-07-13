@@ -257,7 +257,7 @@ python main.py model list [--json]
 ```json
 [
   {"name": "tiny", "size": "~144 MB", "desc": "Fastest", "installed": true, "path": "..."},
-  {"name": "base", "size": "~277 MB", "desc": "Recommended", "installed": false, "path": null}
+  {"name": "base", "size": "~139 MB", "desc": "Recommended", "installed": false, "path": null}
 ]
 ```
 
@@ -273,7 +273,7 @@ python main.py model info <name> [--json]
 python main.py model download <name>
 ```
 
-下载指定模型到本地缓存（`~/.cache/whisper/`），带实时进度条。
+从 [Echovault 模型 Release v1.0](https://github.com/xiaohaifale-QWQ/echovault-models/releases/tag/v1.0) 下载指定模型到本地缓存（`~/.cache/whisper/`），支持实时进度、断点续传、文件大小及 SHA-256 校验。目前 `medium` 因 Release 缺少 `medium.part2` 暂不可下载。
 
 ---
 

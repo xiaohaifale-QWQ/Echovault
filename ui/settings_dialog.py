@@ -196,7 +196,12 @@ class SettingsDialog(QDialog):
         af.addRow("默认语言:", self.lang_combo)
 
         self.model_combo = QComboBox()
-        for t, v in [("tiny (~144 MB, 最快)", "tiny"), ("base (~277 MB, 推荐)", "base"), ("small (~922 MB)", "small"), ("medium (~2.9 GB, 更准)", "medium")]:
+        for t, v in [
+            ("tiny (~144 MB, 最快)", "tiny"),
+            ("base (~139 MB, 推荐)", "base"),
+            ("small (~922 MB)", "small"),
+            ("medium (Release 缺少 part2，暂不可下载)", "medium"),
+        ]:
             self.model_combo.addItem(t, v)
         self.model_combo.setVisible(False); af.addRow("本地模型:", self.model_combo)
 
@@ -333,6 +338,10 @@ class SettingsDialog(QDialog):
         self.gpu_info_label.setText(info)
         has_gpu = info.startswith("✅")
         cuda_ready = "CUDA 已就绪" in info
+        if getattr(sys, "frozen", False):
+            self.btn_install_gpu.setText("打包版内置 CPU 推理运行时")
+            self.btn_install_gpu.setEnabled(False)
+            return
         if cuda_ready:
             self.btn_install_gpu.setText("CUDA 已安装 ✓")
             self.btn_install_gpu.setEnabled(False)

@@ -1,5 +1,6 @@
 param(
-    [switch]$InstallDependencies
+    [switch]$InstallDependencies,
+    [string]$Python = "python"
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,10 +8,13 @@ $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $ProjectRoot
 
 if ($InstallDependencies) {
-    python -m pip install -r requirements-cloud.txt -r requirements-dev.txt
+    & $Python -m pip install -r requirements-cloud.txt -r requirements-local.txt -r requirements-dev.txt
+    if ($LASTEXITCODE -ne 0) {
+        throw "Dependency installation failed with exit code $LASTEXITCODE"
+    }
 }
 
-$PyInstallerAvailable = python -c "import PyInstaller; print('yes')" 2>$null
+$PyInstallerAvailable = & $Python -c "import PyInstaller; print('yes')" 2>$null
 if ($LASTEXITCODE -ne 0 -or $PyInstallerAvailable -ne "yes") {
     throw "PyInstaller is not installed. Run: python -m pip install -r requirements-dev.txt"
 }
@@ -21,7 +25,7 @@ if (-not $FfmpegCommand) {
 }
 
 $env:ECHOVAULT_FFMPEG = $FfmpegCommand.Source
-python -m PyInstaller --clean --noconfirm Echovault.spec
+& $Python -m PyInstaller --clean --noconfirm Echovault.spec
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed with exit code $LASTEXITCODE"
 }

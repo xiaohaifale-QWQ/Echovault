@@ -9,6 +9,8 @@
 - Runtime `doctor` command for ffmpeg, dependency, Provider, and model diagnostics.
 - Long-audio chunking with merged LRC timestamps.
 - Resumable, SHA-256-verified Whisper model downloads.
+- Offline model downloads use the Echovault GitHub Release manifest directly.
+- The Windows directory build includes the CPU Whisper runtime for offline recognition.
 - Streamed LocalSend uploads and browser downloads.
 - Pytest regression suite, Windows PyInstaller build, and GitHub Actions CI.
 
@@ -29,6 +31,8 @@
 
 ### Known limitations
 
-- The packaged Windows MVP is cloud-first and intentionally excludes Torch/Whisper.
-- The standalone local model release source still requires real-device validation.
+- The packaged Windows application includes Torch/Whisper CPU support; CUDA remains a
+  separate source-environment setup.
+- Release v1.0 is missing `medium.part2`; the application blocks that download before
+  allocating model storage.
 - The Windows directory bundle includes ffmpeg and is therefore relatively large.
