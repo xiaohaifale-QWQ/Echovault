@@ -12,6 +12,25 @@ from core.config import AppConfig, config_manager
 # Whisper 模型下载 URL (OpenAI 官方 + 各镜像)
 _GH_RELEASE = "https://github.com/xiaohaifale-QWQ/echovault-models/releases/download/v1.0"
 
+
+def _file_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as file_handle:
+        for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _official_model_sha256(model: str) -> str:
+    """Extract the expected digest embedded in OpenAI Whisper's model URL."""
+    try:
+        import whisper
+        url = whisper._MODELS[model]
+    except (ImportError, KeyError):
+        return ""
+    parts = url.rstrip("/").split("/")
+    return parts[-2] if len(parts) >= 2 and len(parts[-2]) == 64 else ""
+
 class _GPUDetectWorker(QThread):
     """后台扫描显卡"""
     result_ready = pyqtSignal(str)  # GPU 名称 或 错误信息
@@ -157,9 +176,12 @@ class _DownloadWorker(QThread):
             cache = _os.path.join(_os.path.expanduser("~"), ".cache", "whisper")
             model_file = _os.path.join(cache, f"{self.model}.pt")
             
+            expected_hash = _official_model_sha256(self.model)
             if _os.path.exists(model_file) and _os.path.getsize(model_file) > 100000:
-                self.finished.emit(True, f"{self.model} 模型已缓存")
-                return
+                if not expected_hash or _file_sha256(model_file) == expected_hash:
+                    self.finished.emit(True, f"{self.model} 模型已缓存")
+                    return
+                _os.remove(model_file)
 
             _os.makedirs(cache, exist_ok=True)
             
@@ -180,6 +202,11 @@ class _DownloadWorker(QThread):
             if not ok:
                 self.finished.emit(False, "下载失败, 请检查网络")
                 return
+
+            if expected_hash and _file_sha256(model_file) != expected_hash:
+                _os.remove(model_file)
+                self.finished.emit(False, "模型 SHA-256 校验失败，请重新下载")
+                return
             
             self.finished.emit(True, f"{self.model} 模型下载完成")
 
@@ -187,14 +214,6 @@ class _DownloadWorker(QThread):
             self.finished.emit(False, "pip 安装失败")
         except Exception as e:
             self.finished.emit(False, str(e))
-
-    def _load_model(self, model_file):
-        """加载模型，绕过 SHA256 校验"""
-        import whisper, torch, hashlib
-        actual = hashlib.sha256(open(model_file, "rb").read()).hexdigest()
-        whisper._MODELS[self.model] = whisper._MODELS.get(self.model,
-            f"https://openaipublic.azureedge.net/main/whisper/models/{actual}/{self.model}.pt")
-        whisper.load_model(self.model)
 
     def _download_medium(self, cache):
         p1_url = f"{_GH_RELEASE}/medium.part1"
@@ -225,25 +244,33 @@ class _DownloadWorker(QThread):
         return True
 
     def _download_file(self, url, save_path):
-        import urllib.request, ssl, socket
-        ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+        import urllib.request, socket
         socket.setdefaulttimeout(30)
-        tmp = save_path + ".tmp"
+        partial_path = save_path + ".part"
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Echovault/1.0"})
             for attempt in range(5):
                 try:
-                    resp = urllib.request.urlopen(req, context=ctx, timeout=60)
+                    existing = os.path.getsize(partial_path) if os.path.exists(partial_path) else 0
+                    headers = {"User-Agent": "Echovault/1.0"}
+                    if existing:
+                        headers["Range"] = f"bytes={existing}-"
+                    req = urllib.request.Request(url, headers=headers)
+                    resp = urllib.request.urlopen(req, timeout=60)
                     break
                 except Exception as e:
                     if attempt == 4: raise
                     wait = 2 ** attempt
                     self.progress.emit(0, f"重试 {attempt+2}/5 (等待{wait}s)...")
                     import time; time.sleep(wait)
-            total = int(resp.headers.get("Content-Length", 0))
-            received = 0
+            resumed = existing > 0 and getattr(resp, "status", 200) == 206
+            if not resumed:
+                existing = 0
+            content_length = int(resp.headers.get("Content-Length", 0))
+            total = existing + content_length if content_length else 0
+            received = existing
             import time as _time; start = _time.time()
-            with open(tmp, "wb") as f:
+            mode = "ab" if resumed else "wb"
+            with open(partial_path, mode) as f:
                 while True:
                     if self._cancelled or self.isInterruptionRequested():
                         raise InterruptedError("用户取消")
@@ -266,10 +293,10 @@ class _DownloadWorker(QThread):
                         self.progress.emit(pct, f"{speed_str} | {mb_done:.1f}/{mb_total:.1f} MB ({pct}%){eta_str}")
             if total > 0 and received < total:
                 self.progress.emit(99, f"下载不完整 ({received/1048576:.0f}/{total/1048576:.0f}MB), 重试中...")
-                os.remove(tmp); return False
-            os.replace(tmp, save_path); return True
-        except Exception as e:
-            if os.path.exists(tmp): os.remove(tmp)
+                return False
+            os.replace(partial_path, save_path); return True
+        except Exception:
+            # 保留 .part 文件，下一次下载可继续。
             return False
 
 
