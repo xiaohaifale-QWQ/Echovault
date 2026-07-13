@@ -80,20 +80,26 @@ def convert_to_whisper_format(
         "-sample_fmt", "s16",              # 16-bit PCM
     ])
     
+    created_temp = output_path is None
     if output_path:
         args.append(output_path)
     else:
-        # 生成临时文件
-        suffix = f"_whisper{start_time or 0:.0f}_{end_time or 'end'}.wav"
-        output_path = os.path.join(
-            tempfile.gettempdir(),
-            f"music_sync_{Path(file_path).stem}{suffix}"
-        )
+        # 使用唯一临时文件名，避免同名歌曲或并发任务互相覆盖。
+        fd, output_path = tempfile.mkstemp(prefix="echovault_", suffix=".wav")
+        os.close(fd)
         args.append(output_path)
     
     try:
         subprocess.run(args, check=True, capture_output=True, text=True)
+    except FileNotFoundError as e:
+        if created_temp and os.path.exists(output_path):
+            os.remove(output_path)
+        raise RuntimeError(
+            "未找到 ffmpeg。请先安装 ffmpeg 并确保 ffmpeg 命令已加入 PATH。"
+        ) from e
     except subprocess.CalledProcessError as e:
+        if created_temp and os.path.exists(output_path):
+            os.remove(output_path)
         raise RuntimeError(f"音频转换失败: {e.stderr}") from e
     
     return output_path
@@ -119,10 +125,14 @@ def split_audio(file_path: str, max_duration: float = 600.0) -> list[str]:
         return [convert_to_whisper_format(file_path)]
     
     chunks = []
-    for start in range(0, int(duration), int(max_duration)):
-        end = min(start + max_duration, duration)
-        chunk_path = convert_to_whisper_format(file_path, start_time=start, end_time=end)
-        chunks.append(chunk_path)
+    try:
+        for start in range(0, int(duration), int(max_duration)):
+            end = min(start + max_duration, duration)
+            chunk_path = convert_to_whisper_format(file_path, start_time=start, end_time=end)
+            chunks.append(chunk_path)
+    except Exception:
+        cleanup_temp_files(chunks)
+        raise
     
     return chunks
 

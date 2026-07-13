@@ -210,8 +210,16 @@ def save_lrc(
         raise FileExistsError(f"LRC 文件已存在: {lrc_path}")
     
     content = lrc.to_string()
-    with open(lrc_path, "w", encoding="utf-8") as f:
-        f.write(content)
+    temp_path = lrc_path.with_suffix(lrc_path.suffix + ".tmp")
+    try:
+        with open(temp_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        temp_path.replace(lrc_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
     
     return str(lrc_path)
 
@@ -242,20 +250,43 @@ def transcribe_and_save_lrc(
     Returns:
         str: 保存的 LRC 文件路径
     """
-    from .audio_utils import convert_to_whisper_format, cleanup_temp_files
+    from .audio_utils import cleanup_temp_files, split_audio
     
     song_name = os.path.basename(audio_path)
     
-    # 1. 转换音频格式
+    # 1. 转换并切分音频。10 分钟 16kHz 单声道 WAV 约 19 MB，
+    # 可控制云端接口文件大小，也能降低本地识别的峰值内存。
     if progress_callback:
         progress_callback(f"🎵 转换音频... {song_name}")
-    wav_path = convert_to_whisper_format(audio_path)
+    wav_paths = split_audio(audio_path, max_duration=600.0)
     
     try:
         # 2. ASR 识别
-        if progress_callback:
-            progress_callback(f"🎤 语音识别中... {song_name}")
-        result = router.transcribe(wav_path, language=language)
+        combined_segments = []
+        detected_language = "unknown"
+        total_duration = 0.0
+        for index, wav_path in enumerate(wav_paths):
+            if progress_callback:
+                part = f" ({index + 1}/{len(wav_paths)})" if len(wav_paths) > 1 else ""
+                progress_callback(f"🎤 语音识别中{part}... {song_name}")
+            chunk_result = router.transcribe(wav_path, language=language)
+            offset = index * 600.0
+            for segment in chunk_result.segments:
+                combined_segments.append(Segment(
+                    start_time=segment.start_time + offset,
+                    end_time=segment.end_time + offset,
+                    text=segment.text,
+                    confidence=segment.confidence,
+                ))
+            if detected_language == "unknown":
+                detected_language = chunk_result.language
+            total_duration = max(total_duration, offset + chunk_result.duration)
+
+        result = TranscriptionResult(
+            segments=combined_segments,
+            language=detected_language,
+            duration=total_duration,
+        )
         
         if result.is_empty:
             raise RuntimeError("未能识别出任何歌词内容")
@@ -272,4 +303,4 @@ def transcribe_and_save_lrc(
     
     finally:
         # 5. 清理临时文件
-        cleanup_temp_files([wav_path])
+        cleanup_temp_files(wav_paths)
