@@ -20,19 +20,23 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 def _configure_utf8_stream(stream):
-    """Configure a console stream when present; windowed executables use None."""
-    if stream is None or getattr(stream, "encoding", None) == "utf-8":
-        return
+    """Return a writable UTF-8 stream, including in windowed executables."""
+    if stream is None:
+        return open(os.devnull, "w", encoding="utf-8")
+    if getattr(stream, "encoding", None) == "utf-8":
+        return stream
     try:
         stream.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, OSError, ValueError):
         pass
+    return stream
 
 
 # Force UTF-8 console output while remaining compatible with PyInstaller's
-# windowed mode, where sys.stdout and sys.stderr are both None.
-_configure_utf8_stream(sys.stdout)
-_configure_utf8_stream(sys.stderr)
+# windowed mode, where sys.stdout and sys.stderr are both None. Whisper/tqdm still
+# writes progress output in GUI mode, so a writable null stream is required.
+sys.stdout = _configure_utf8_stream(sys.stdout)
+sys.stderr = _configure_utf8_stream(sys.stderr)
 
 from core.config import config_manager, AppConfig, update_config_value
 from core.asr.router import ASRRouter, get_router
@@ -326,7 +330,7 @@ def cmd_config(args):
 
 _MODELS = {
     "tiny":   {"size": "~144 MB", "desc": "Fastest, decent accuracy"},
-    "base":   {"size": "~277 MB", "desc": "Recommended, balanced"},
+    "base":   {"size": "~139 MB", "desc": "Recommended, balanced"},
     "small":  {"size": "~922 MB", "desc": "Better, slower"},
     "medium": {"size": "~2.9 GB", "desc": "Best, very slow"},
 }

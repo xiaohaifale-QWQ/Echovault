@@ -12,12 +12,19 @@ class FakeStream:
 
 
 def test_configure_utf8_stream_accepts_windowed_mode_none():
-    _configure_utf8_stream(None)
+    stream = _configure_utf8_stream(None)
+
+    try:
+        assert stream.writable()
+        stream.write("hidden windowed output")
+    finally:
+        stream.close()
 
 
 def test_configure_utf8_stream_reconfigures_console():
     stream = FakeStream()
 
-    _configure_utf8_stream(stream)
+    result = _configure_utf8_stream(stream)
 
+    assert result is stream
     assert stream.options == {"encoding": "utf-8", "errors": "replace"}
