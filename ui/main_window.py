@@ -23,7 +23,7 @@ from PyQt6.QtGui import QAction, QIcon
 
 from core.config import config_manager, AppConfig
 from core.asr.router import ASRRouter, get_router
-from core.audio_utils import is_supported, SUPPORTED_FORMATS
+from services.library_service import scan_audio
 
 from ui.library_panel import LibraryPanel
 from ui.song_list_panel import SongListPanel
@@ -220,24 +220,7 @@ class MainWindow(QMainWindow):
         """文件夹被选中 → 扫描歌曲加载到列表"""
         self.status_label.setText(f"扫描中: {folder_path}...")
         
-        audio_files = []
-        for ext in SUPPORTED_FORMATS:
-            audio_files.extend(
-                str(p) for p in Path(folder_path).rglob(f"*{ext}")
-            )
-        
-        songs = []
-        for f in sorted(audio_files):
-            pf = Path(f)
-            lrc_path = pf.with_suffix(".lrc")
-            songs.append({
-                "path": f,
-                "name": pf.name,
-                "folder": str(pf.parent.relative_to(folder_path)) if pf.parent != Path(folder_path) else "",
-                "size": pf.stat().st_size,
-                "has_lrc": lrc_path.exists(),
-                "lrc_path": str(lrc_path) if lrc_path.exists() else None,
-            })
+        songs = scan_audio(folder_path)
         
         self.song_list_panel.load_songs(songs, root_dir=folder_path)
         self._refresh_statusbar()

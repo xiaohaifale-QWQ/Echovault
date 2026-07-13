@@ -36,6 +36,7 @@ from core.asr.router import ASRRouter, get_router
 from core.audio_utils import is_supported, SUPPORTED_FORMATS
 from core.lrc_writer import transcribe_and_save_lrc
 from core.lrc_parser import parse_lrc_file
+from services.library_service import InstrumentalStore, scan_audio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,18 +51,7 @@ logger = logging.getLogger("linlangyuefu")
 # ============================================================
 
 def _scan_audio(folder):
-    songs = []
-    folder_p = Path(folder)
-    for ext in SUPPORTED_FORMATS:
-        for p in folder_p.rglob("*" + ext):
-            lrc_p = p.with_suffix(".lrc")
-            songs.append({
-                "path": str(p), "name": p.name,
-                "folder": str(p.parent.relative_to(folder_p)) if p.parent != folder_p else "",
-                "size": p.stat().st_size, "has_lrc": lrc_p.exists(),
-                "lrc_path": str(lrc_p) if lrc_p.exists() else None,
-            })
-    return sorted(songs, key=lambda s: s["name"].lower())
+    return scan_audio(folder)
 
 
 def _fmt_size(b):
@@ -189,8 +179,7 @@ def cmd_transcribe(args):
             logger.error(f"Unsupported format: {target.suffix}")
             sys.exit(1)
     elif target.is_dir():
-        for ext in SUPPORTED_FORMATS:
-            files.extend(str(p) for p in target.rglob("*" + ext))
+        files.extend(song["path"] for song in scan_audio(target) if not song["instrumental"])
         if not files:
             logger.error("No supported audio files found")
             sys.exit(1)
@@ -509,21 +498,21 @@ def cmd_rename(args):
 # ============================================================
 
 def cmd_mark(args):
-    fp = args.file
-    folder = str(Path(fp).parent)
-    inst_file = os.path.join(folder, ".musicsync_instrumental.json")
-    data = {}
-    if os.path.exists(inst_file):
-        with open(inst_file, "r", encoding="utf-8") as f:
-            data = _json.load(f)
+    fp = Path(args.file).expanduser().resolve()
+    if not fp.is_file():
+        logger.error(f"File not found: {fp}")
+        sys.exit(1)
+    root = Path(args.folder).expanduser().resolve() if args.folder else fp.parent
+    store = InstrumentalStore(root)
+    try:
+        store.set_marked(fp, args.mark)
+    except ValueError as exc:
+        logger.error(str(exc))
+        sys.exit(1)
     if args.mark:
-        data[fp] = True
         print(f"OK: marked as instrumental: {Path(fp).name}")
     else:
-        data.pop(fp, None)
         print(f"OK: unmarked: {Path(fp).name}")
-    with open(inst_file, "w", encoding="utf-8") as f:
-        _json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 # ============================================================
@@ -651,7 +640,8 @@ def main():
 
     # mark
     sp = sub.add_parser("mark", help="Mark instrumental")
-    sp.add_argument("file"); sp.add_argument("--unmark", dest="mark", action="store_false"); sp.set_defaults(func=cmd_mark, mark=True)
+    sp.add_argument("file"); sp.add_argument("--folder", help="Music library root")
+    sp.add_argument("--unmark", dest="mark", action="store_false"); sp.set_defaults(func=cmd_mark, mark=True)
 
     # serve
     sp = sub.add_parser("serve", help="Start services")

@@ -1,10 +1,11 @@
 """Song list with filters + rename + instrumental marking"""
-import os, json
+import os
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
     QLabel, QLineEdit, QHBoxLayout, QAbstractItemView, QComboBox, QMessageBox, QPushButton, QMenu)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush, QAction
+from services.library_service import InstrumentalStore
 
 COLOR_HAS_LRC = QColor(76, 175, 80)
 COLOR_INST = QColor(255, 152, 0)
@@ -19,7 +20,8 @@ class SongListPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._songs = []; self._instrumental = set(); self._auto_inst = set(); self._inst_file = None
+        self._songs = []; self._instrumental = set(); self._auto_inst = set()
+        self._instrumental_store = None
         self._setup_ui()
         self.lyric_filter.setCurrentIndex(2)  # default "no lyrics"
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -61,18 +63,12 @@ class SongListPanel(QWidget):
 
     def _load_instrumental(self, root_dir):
         """Load instrumental markers from JSON file in root directory"""
-        self._inst_file = Path(root_dir) / ".musicsync_instrumental.json"
-        self._instrumental = set()
-        if self._inst_file.exists():
-            try:
-                data = json.loads(self._inst_file.read_text(encoding="utf-8"))
-                self._instrumental = set(data.get("instrumental", []))
-            except: pass
+        self._instrumental_store = InstrumentalStore(root_dir)
+        self._instrumental = self._instrumental_store.absolute_paths()
 
     def _save_instrumental(self):
-        if self._inst_file:
-            data = {"instrumental": sorted(self._instrumental)}
-            self._inst_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        if self._instrumental_store:
+            self._instrumental_store.replace(self._instrumental)
 
     def _build_fmt_items(self):
         formats = sorted(set(Path(s["name"]).suffix.upper().lstrip(".") for s in self._songs))
