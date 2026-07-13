@@ -19,17 +19,20 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Force UTF-8 stdout to handle non-GBK characters in file names
-if sys.stdout.encoding != "utf-8":
+def _configure_utf8_stream(stream):
+    """Configure a console stream when present; windowed executables use None."""
+    if stream is None or getattr(stream, "encoding", None) == "utf-8":
+        return
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
+        stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError, ValueError):
         pass
-if sys.stderr.encoding != "utf-8":
-    try:
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+
+
+# Force UTF-8 console output while remaining compatible with PyInstaller's
+# windowed mode, where sys.stdout and sys.stderr are both None.
+_configure_utf8_stream(sys.stdout)
+_configure_utf8_stream(sys.stderr)
 
 from core.config import config_manager, AppConfig, update_config_value
 from core.asr.router import ASRRouter, get_router
