@@ -51,6 +51,7 @@ python main.py <命令> [参数] [--json]
 | `rename` | 重命名歌曲 | 双击改名 |
 | `mark` | 标记纯音乐 | 右键标记 |
 | `serve http` | HTTP 文件浏览 | — |
+| `doctor` | 检查 ffmpeg、依赖、Provider 与模型 | 启动状态提示 |
 | `gui` | 启动 GUI | — |
 
 ---
@@ -306,10 +307,10 @@ python main.py gpu status [--json]
 #### 3.8.1 `sync compare` — 对比文件夹差异
 
 ```bash
-python main.py sync compare --dir-a <path> --dir-b <path> [--json]
+python main.py sync compare --dir-a <path> --dir-b <path> [--strict] [--json]
 ```
 
-对比两个文件夹的文件差异（文件名、大小、修改时间）。
+对比两个文件夹的文件差异（相对路径、大小、修改时间）。`--strict` 会在大小和时间均接近时继续计算内容哈希。
 
 **JSON 输出:**
 ```json
@@ -318,12 +319,12 @@ python main.py sync compare --dir-a <path> --dir-b <path> [--json]
   "dir_b": "/sdcard/Music/",
   "count": 5,
   "diff": [
-    {"file": "song.mp3", "type": "only_a", "size_a": 4294061, "size_b": 0}
+    {"file": "song.mp3", "type": "only_in_a", "size_a": 4294061, "size_b": 0}
   ]
 }
 ```
 
-差异类型: `only_a`(仅在A) / `only_b`(仅在B) / `newer_a`(A较新) / `newer_b`(B较新) / `conflict`(冲突)
+差异类型: `only_in_a`(仅在A) / `only_in_b`(仅在B) / `newer_in_a`(A较新) / `newer_in_b`(B较新) / `conflict`(冲突)
 
 #### 3.8.2 `sync serve` — HTTP 文件服务
 
@@ -354,8 +355,9 @@ python main.py rename "E:/music/old_name.mp3" "new_name.mp3"
 ### 3.10 `mark` — 标记纯音乐
 
 ```bash
-python main.py mark <file>              # 标记为纯音乐
-python main.py mark <file> --unmark     # 取消标记
+python main.py mark <file>                         # 以文件所在目录作为音乐库根目录
+python main.py mark <file> --folder <library>     # 指定音乐库根目录
+python main.py mark <file> --folder <library> --unmark
 ```
 
 标记持久化存储在 `.musicsync_instrumental.json`。
@@ -369,6 +371,15 @@ python main.py serve http        # HTTP 文件浏览服务
 python main.py serve localsend   # LocalSend 接收（需 GUI）
 ```
 
+### 3.12 `doctor` — 环境诊断
+
+```bash
+python main.py doctor
+python main.py doctor --json
+```
+
+检查基础依赖、ffmpeg、当前 ASR Provider、API Key 或本地模型是否可用。环境未达到识别条件时退出码为 1。
+
 ---
 
 ## 四、AI Agent 使用指南
@@ -377,7 +388,7 @@ python main.py serve localsend   # LocalSend 接收（需 GUI）
 
 ```bash
 # 1. 检查环境
-python main.py config show --json
+python main.py doctor --json
 python main.py gpu status --json
 python main.py model list --json
 
@@ -525,7 +536,7 @@ python main.py mark "E:/music/instrumental.mp3"
   "count": "number",
   "diff": [{
     "file": "string",
-    "type": "only_a | only_b | newer_a | newer_b | conflict",
+    "type": "only_in_a | only_in_b | newer_in_a | newer_in_b | conflict",
     "size_a": "number",
     "size_b": "number"
   }]
