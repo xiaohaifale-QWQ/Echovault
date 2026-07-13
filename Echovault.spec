@@ -4,7 +4,7 @@
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files
 
 
 project_root = Path(SPECPATH)
@@ -19,7 +19,6 @@ hidden_imports = [
     "groq",
     "opencc",
     "zeroconf",
-    *collect_submodules("mutagen"),
 ]
 
 datas = collect_data_files("certifi")
@@ -37,7 +36,10 @@ a = Analysis(
     excludes=[
         "demucs",
         "matplotlib",
+        "numpy",
         "pandas",
+        "PIL",
+        "psutil",
         "torch",
         "torchaudio",
         "torchvision",
