@@ -31,7 +31,7 @@ if sys.stderr.encoding != "utf-8":
     except Exception:
         pass
 
-from core.config import config_manager, AppConfig
+from core.config import config_manager, AppConfig, update_config_value
 from core.asr.router import ASRRouter, get_router
 from core.audio_utils import is_supported, SUPPORTED_FORMATS
 from core.lrc_writer import transcribe_and_save_lrc
@@ -303,20 +303,10 @@ def cmd_config(args):
 
     elif args.config_action == "set":
         c = config_manager.load()
-        keys = args.key.split(".")
-        if keys[0] == "asr" and len(keys) == 2:
-            setattr(c.asr, keys[1], args.value if keys[1] in ("provider", "local_model", "language") else
-                    args.value.lower() in ("true", "1", "yes"))
-        elif keys[0] == "output_lrc_dir":
-            c.output_lrc_dir = None if args.value.lower() in ("none", "null") else args.value
-        elif keys[0] == "music_dirs":
-            c.music_dirs = [args.value]
-        elif keys[0] == "groq_api_key":
-            c.groq_api_key = args.value
-        elif keys[0] == "xunfei_api_key":
-            c.xunfei_api_key = args.value
-        else:
-            logger.error(f"Unknown config key: {args.key}")
+        try:
+            update_config_value(c, args.key, args.value)
+        except ValueError as exc:
+            logger.error(str(exc))
             sys.exit(1)
         config_manager.config = c
         config_manager.save()

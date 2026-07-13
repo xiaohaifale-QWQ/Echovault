@@ -11,6 +11,9 @@ from typing import Optional
 
 
 CONFIG_SCHEMA_VERSION = 1
+SUPPORTED_PROVIDERS = {"groq", "local"}
+SUPPORTED_LOCAL_MODELS = {"tiny", "base", "small", "medium", "large"}
+SUPPORTED_LANGUAGES = {"zh", "en", "ja", "ko"}
 
 
 @dataclass
@@ -121,6 +124,41 @@ class ConfigManager:
         c.sync.conflict_resolution = sync_data.get("conflict_resolution", "manual")
         c.sync.auto_sync_interval_minutes = sync_data.get("auto_sync_interval_minutes", 0)
         c.sync.remote_dir = sync_data.get("remote_dir", "")
+
+
+def update_config_value(config: AppConfig, key: str, value: str) -> None:
+    """Validate and update one CLI-addressable configuration value."""
+    if key == "asr.provider":
+        if value not in SUPPORTED_PROVIDERS:
+            raise ValueError(f"不支持的 Provider: {value}")
+        config.asr.provider = value
+    elif key == "asr.local_model":
+        if value not in SUPPORTED_LOCAL_MODELS:
+            raise ValueError(f"不支持的本地模型: {value}")
+        config.asr.local_model = value
+    elif key == "asr.language":
+        normalized = value.lower()
+        if normalized in {"none", "null", "auto"}:
+            config.asr.language = None
+        elif normalized in SUPPORTED_LANGUAGES:
+            config.asr.language = normalized
+        else:
+            raise ValueError(f"不支持的语言: {value}")
+    elif key in {"asr.use_vocal_separation", "asr.use_gpu"}:
+        normalized = value.lower()
+        if normalized not in {"true", "1", "yes", "false", "0", "no"}:
+            raise ValueError(f"无效的布尔值: {value}")
+        setattr(config.asr, key.split(".", 1)[1], normalized in {"true", "1", "yes"})
+    elif key == "output_lrc_dir":
+        config.output_lrc_dir = None if value.lower() in {"none", "null"} else value
+    elif key == "music_dirs":
+        config.music_dirs = [value]
+    elif key == "groq_api_key":
+        config.groq_api_key = value
+    elif key == "xunfei_api_key":
+        config.xunfei_api_key = value
+    else:
+        raise ValueError(f"未知配置项: {key}")
 
 
 # 全局单例

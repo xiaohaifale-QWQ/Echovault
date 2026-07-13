@@ -1,6 +1,8 @@
 import json
 
-from core.config import CONFIG_SCHEMA_VERSION, ConfigManager
+import pytest
+
+from core.config import CONFIG_SCHEMA_VERSION, AppConfig, ConfigManager, update_config_value
 
 
 def test_config_roundtrip_persists_api_keys(tmp_path):
@@ -34,3 +36,22 @@ def test_environment_api_key_takes_precedence(tmp_path, monkeypatch):
 
     assert loaded.groq_api_key == "environment-secret"
     assert loaded.xunfei_api_key == "environment-xunfei"
+
+
+def test_update_config_value_validates_provider_and_booleans():
+    config = AppConfig()
+
+    update_config_value(config, "asr.provider", "local")
+    update_config_value(config, "asr.use_gpu", "yes")
+    update_config_value(config, "asr.language", "auto")
+
+    assert config.asr.provider == "local"
+    assert config.asr.use_gpu is True
+    assert config.asr.language is None
+
+    with pytest.raises(ValueError, match="Provider"):
+        update_config_value(config, "asr.provider", "xunfei")
+    with pytest.raises(ValueError, match="布尔值"):
+        update_config_value(config, "asr.use_gpu", "maybe")
+    with pytest.raises(ValueError, match="未知配置项"):
+        update_config_value(config, "asr.unknown", "value")
