@@ -81,8 +81,16 @@ class ConfigManager:
         """保存配置到文件"""
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         data = self._serialize()
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        temp_path = self.config_path.with_suffix(self.config_path.suffix + ".tmp")
+        try:
+            with open(temp_path, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            temp_path.replace(self.config_path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
     
     def _serialize(self) -> dict:
         c = self.config

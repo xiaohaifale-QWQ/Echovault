@@ -21,6 +21,7 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
 
     raw = json.loads(path.read_text(encoding="utf-8"))
     assert raw["schema_version"] == CONFIG_SCHEMA_VERSION
+    assert not path.with_suffix(".json.tmp").exists()
 
 
 def test_environment_api_key_takes_precedence(tmp_path, monkeypatch):

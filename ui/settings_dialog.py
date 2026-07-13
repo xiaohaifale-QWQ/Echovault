@@ -322,6 +322,9 @@ class SettingsDialog(QDialog):
         self.api_input.setEchoMode(QLineEdit.EchoMode.Password); af.addRow("Groq Key:", self.api_input)
         kh = QLabel('<a href="https://console.groq.com/keys" style="color:#1976D2">免费获取 Groq Key</a>')
         kh.setOpenExternalLinks(True); kh.setStyleSheet("font-size:11px"); af.addRow("", kh)
+        key_notice = QLabel("Key 将以明文保存在当前用户的本机配置中")
+        key_notice.setStyleSheet("font-size:10px;color:#888")
+        af.addRow("", key_notice)
 
         # 保留字段以兼容已有配置，讯飞 Provider 实现前不在界面中展示。
         self.xunfei_input = QLineEdit()
