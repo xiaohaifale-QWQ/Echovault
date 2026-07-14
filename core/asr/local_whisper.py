@@ -43,10 +43,10 @@ class LocalWhisperProvider(ASRProvider):
         elif self._device == "cpu":
             dev = "CPU"
         elif self._worker_command:
-            dev = "GPU runtime"
+            dev = "GPU 运行时"
         else:
-            dev = "checking"
-        return f"Local Whisper ({self._model_name}, {dev})"
+            dev = "检测中"
+        return f"本地 Whisper ({self._model_name}, {dev})"
 
     def _get_model(self):
         if self._model is None:
@@ -62,9 +62,7 @@ class LocalWhisperProvider(ASRProvider):
                 cuda_available = torch.cuda.is_available()
                 self._device = "cuda" if self._use_gpu and cuda_available else "cpu"
                 if self._use_gpu and not cuda_available:
-                    logger.warning(
-                        "GPU requested but current PyTorch has no CUDA support; using CPU"
-                    )
+                    logger.warning("已启用 GPU，但当前 PyTorch 不支持 CUDA；回退到 CPU")
             logger.info("Loading '%s' (device:%s)...", self._model_name, self._device)
             from core.whisper_loader import load_hf_whisper
 
@@ -74,7 +72,7 @@ class LocalWhisperProvider(ASRProvider):
 
     def _get_worker_client(self) -> WorkerClient:
         if not self._worker_command:
-            raise RuntimeError("External ASR worker is not configured")
+            raise RuntimeError("未配置外置 ASR Worker")
         if self._worker_client is None:
             self._worker_client = self._worker_client_factory(self._worker_command)
         return self._worker_client
@@ -150,7 +148,7 @@ class LocalWhisperProvider(ASRProvider):
                 timeout=60 * 60,
             )
         except WorkerClientError as exc:
-            raise RuntimeError(f"External local recognition runtime is unavailable: {exc}") from exc
+            raise RuntimeError(f"外置本地识别运行时不可用: {exc}") from exc
         self._device = str(payload.get("device", "cpu"))
         result = self._result_from_payload(payload)
         if not result.is_empty:

@@ -69,7 +69,7 @@ def test_external_worker_result_is_converted_to_transcription_result():
     result = provider.transcribe("audio.wav", language="zh")
 
     assert provider.is_available() is True
-    assert provider.display_name == "Local Whisper (medium, GPU)"
+    assert provider.display_name == "本地 Whisper (medium, GPU)"
     assert result.segments[0].text == "worker lyric"
 
 
