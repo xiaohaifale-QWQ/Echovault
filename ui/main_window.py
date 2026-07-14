@@ -393,6 +393,13 @@ class MainWindow(QMainWindow):
         chunk_total: int,
     ):
         self.trans_progress.setValue(song_percent)
+        if chunk_total:
+            segment_label = (
+                f"第 {chunk_index}/{chunk_total} 段" if chunk_index else f"共 {chunk_total} 段"
+            )
+            self.trans_progress.setFormat(f"本首进度 %p% · {segment_label}")
+        else:
+            self.trans_progress.setFormat("本首进度 %p%")
         if total > 1:
             overall = int(((current - 1) + song_percent / 100) / total * 100)
             self.total_trans_progress.setValue(overall)

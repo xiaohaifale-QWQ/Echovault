@@ -24,6 +24,7 @@ from .lrc_parser import LRCFile, LyricLine
 MIN_GAP_MERGE = 1.5  # 小于此间隔（秒）的相邻句合并
 MAX_LINE_CHARS = 40  # 单行最大字符数（超过则拆分）
 MAX_LINE_DURATION = 8.0  # 单行最大时长（秒）
+RECOGNITION_CHUNK_DURATION = 15.0  # 真实进度更新粒度（秒）
 
 # 常见中文歌词同音字修正（可扩展）
 _COMMON_CORRECTIONS = {
@@ -321,13 +322,23 @@ def transcribe_and_save_lrc(
 
     song_name = os.path.basename(audio_path)
 
-    # 1. 转换并切分音频。10 分钟 16kHz 单声道 WAV 约 19 MB，
-    # 可控制云端接口文件大小，也能降低本地识别的峰值内存。
+    # 1. 转换并切分音频。每段约 15 秒，每完成一段都意味着模型完成了
+    # 一次真实推理，因此 UI 能显示真实可观察的识别进度而不是计时器动画。
     if progress_callback:
         progress_callback(RecognitionProgress(0, "prepare", f"正在转换音频… {song_name}"))
-    wav_paths = split_audio(audio_path, max_duration=600.0)
+    wav_paths = split_audio(audio_path, max_duration=RECOGNITION_CHUNK_DURATION)
 
     try:
+        if progress_callback:
+            progress_callback(
+                RecognitionProgress(
+                    5,
+                    "prepare",
+                    f"音频已切为 {len(wav_paths)} 段，准备识别… {song_name}",
+                    0,
+                    len(wav_paths),
+                )
+            )
         # 2. ASR 识别
         combined_segments = []
         detected_language = "unknown"
@@ -336,15 +347,18 @@ def transcribe_and_save_lrc(
             if progress_callback:
                 progress_callback(
                     RecognitionProgress(
-                        15 + int(75 * index / len(wav_paths)),
+                        5 + int(85 * index / len(wav_paths)),
                         "transcribe",
-                        f"正在识别第 {index + 1}/{len(wav_paths)} 段… {song_name}",
+                        (
+                            f"正在识别第 {index + 1}/{len(wav_paths)} 段"
+                            f"（约 {RECOGNITION_CHUNK_DURATION:.0f} 秒）… {song_name}"
+                        ),
                         index + 1,
                         len(wav_paths),
                     )
                 )
             chunk_result = router.transcribe(wav_path, language=language)
-            offset = index * 600.0
+            offset = index * RECOGNITION_CHUNK_DURATION
             for segment in chunk_result.segments:
                 combined_segments.append(
                     Segment(
@@ -360,7 +374,7 @@ def transcribe_and_save_lrc(
             if progress_callback:
                 progress_callback(
                     RecognitionProgress(
-                        15 + int(75 * (index + 1) / len(wav_paths)),
+                        5 + int(85 * (index + 1) / len(wav_paths)),
                         "transcribe",
                         f"已完成第 {index + 1}/{len(wav_paths)} 段… {song_name}",
                         index + 1,
