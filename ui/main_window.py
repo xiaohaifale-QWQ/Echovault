@@ -405,13 +405,25 @@ class MainWindow(QMainWindow):
     
     def _do_restart(self):
         """重新启动应用"""
-        import subprocess, os, sys, logging
-        script = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "main.py")
-        cmd = [sys.executable, script]
+        import logging
+        import os
+        import subprocess
+        import sys
+
+        if getattr(sys, "frozen", False):
+            # PyInstaller directory builds have no adjacent main.py. Relaunch the
+            # executable itself instead of trying to invoke a nonexistent script.
+            cmd = [sys.executable]
+            cwd = os.path.dirname(sys.executable)
+        else:
+            script = os.path.abspath(sys.argv[0])
+            cmd = [sys.executable, script]
+            cwd = os.path.dirname(script)
         logging.getLogger("linlangyuefu").info(f"重启: {cmd}")
         try:
             subprocess.Popen(
                 cmd,
+                cwd=cwd,
                 creationflags=0x00000008 if sys.platform == "win32" else 0,
             )
             logging.getLogger("linlangyuefu").info("新进程已启动，退出旧进程")
