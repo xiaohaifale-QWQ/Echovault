@@ -16,6 +16,19 @@ from core.runtime_setup import RuntimeSetupResult, RuntimeSetupService
 from core.process_utils import hidden_window_kwargs
 from core.voice_cache import clear_voice_cache, voice_cache_dir
 
+
+class _CurrentPageStack(QStackedWidget):
+    """只按当前页计算尺寸，避免隐藏页撑出大块空白。"""
+
+    def sizeHint(self):
+        current = self.currentWidget()
+        return current.sizeHint() if current else super().sizeHint()
+
+    def minimumSizeHint(self):
+        current = self.currentWidget()
+        return current.minimumSizeHint() if current else super().minimumSizeHint()
+
+
 class _GPUDetectWorker(QThread):
     """后台扫描显卡"""
     result_ready = pyqtSignal(str)  # GPU 名称 或 错误信息
@@ -231,7 +244,7 @@ class SettingsDialog(QDialog):
         l = QVBoxLayout(self)
 
         # 设置分类由顶栏“设置”菜单选择；对话框仅展示被选中的单个分类。
-        self.settings_stack = QStackedWidget()
+        self.settings_stack = _CurrentPageStack()
         recognition_page, recognition_layout = self._create_settings_section("语音识别")
         lyrics_page, lyrics_layout = self._create_settings_section("歌词输出")
         shortcut_page, shortcut_layout = self._create_settings_section("快捷键")
@@ -242,6 +255,7 @@ class SettingsDialog(QDialog):
         self.settings_stack.setCurrentIndex(section_index)
 
         ag = QGroupBox("语音识别 (ASR)"); af = QFormLayout(ag)
+        self.asr_form = af
         self.provider_combo = QComboBox()
         self.provider_combo.addItem("云端", "cloud")
         self.provider_combo.addItem("本地", "local")
@@ -258,15 +272,22 @@ class SettingsDialog(QDialog):
         af.addRow(self.cloud_provider_label, self.cloud_provider_combo)
 
         self.api_input = QLineEdit(); self.api_input.setPlaceholderText("输入 API Key...")
-        self.api_input.setEchoMode(QLineEdit.EchoMode.Password); af.addRow("Groq Key:", self.api_input)
+        self.api_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.groq_input_label = QLabel("Groq Key:")
+        af.addRow(self.groq_input_label, self.api_input)
         self.groq_key_status = QLabel("已在密钥管理中配置 ✓")
         self.groq_key_status.setStyleSheet("color:#248A4A;font-weight:600")
-        af.addRow("Groq Key:", self.groq_key_status)
-        kh = QLabel('<a href="https://console.groq.com/keys" style="color:#1976D2">免费获取 Groq Key</a>')
-        kh.setOpenExternalLinks(True); kh.setStyleSheet("font-size:11px"); af.addRow("", kh)
-        key_notice = QLabel("Key 将以明文保存在当前用户的本机配置中")
-        key_notice.setStyleSheet("font-size:10px;color:#888")
-        af.addRow("", key_notice)
+        self.groq_status_label = QLabel("Groq Key:")
+        af.addRow(self.groq_status_label, self.groq_key_status)
+        self.groq_key_link = QLabel(
+            '<a href="https://console.groq.com/keys" style="color:#1976D2">免费获取 Groq Key</a>'
+        )
+        self.groq_key_link.setOpenExternalLinks(True)
+        self.groq_key_link.setStyleSheet("font-size:11px")
+        af.addRow("", self.groq_key_link)
+        self.groq_key_notice = QLabel("Key 将以明文保存在当前用户的本机配置中")
+        self.groq_key_notice.setStyleSheet("font-size:10px;color:#888")
+        af.addRow("", self.groq_key_notice)
 
         self.xunfei_key_label = QLabel("讯飞 Key:")
         self.xunfei_key_status = QLabel("已在密钥管理中配置 ✓")
@@ -294,7 +315,9 @@ class SettingsDialog(QDialog):
             ("medium (~2.85 GB, 更准确)", "medium"),
         ]:
             self.model_combo.addItem(t, v)
-        self.model_combo.setVisible(False); af.addRow("本地模型:", self.model_combo)
+        self.model_combo.setVisible(False)
+        self.local_model_label = QLabel("本地模型:")
+        af.addRow(self.local_model_label, self.model_combo)
 
         # 下载按钮行
         dl_btn_row = QHBoxLayout()
@@ -304,15 +327,18 @@ class SettingsDialog(QDialog):
         self.btn_cancel_dl.setStyleSheet("color:#c0392b;")
         self.btn_cancel_dl.clicked.connect(self._on_cancel_download); dl_btn_row.addWidget(self.btn_cancel_dl)
         dl_btn_row.addStretch()
+        self.download_buttons_row = af.rowCount()
         af.addRow("", dl_btn_row)
         
         # 进度条行
         self.dl_bar = QProgressBar(); self.dl_bar.setVisible(False); self.dl_bar.setMaximum(100)
+        self.download_progress_row = af.rowCount()
         af.addRow("", self.dl_bar)
         
         # 速度/进度信息行
         self.dl_label = QLabel(""); self.dl_label.setStyleSheet("font-size:11px;color:#666;padding:2px 0")
         self.dl_label.setVisible(False)
+        self.download_message_row = af.rowCount()
         af.addRow("", self.dl_label)
 
         self.vocal_check = QCheckBox("启用 Demucs 人声分离 (每首多花 1-3 分钟，提升准确率)")
@@ -354,7 +380,6 @@ class SettingsDialog(QDialog):
         self.gpu_check.setEnabled(False)
         gf.addRow("", self.gpu_check)
         recognition_layout.addWidget(self.gpu_group)
-        recognition_layout.addStretch()
 
         lg = QGroupBox("歌词输出"); lf = QFormLayout(lg)
         dr = QHBoxLayout(); self.lrc_input = QLineEdit()
@@ -430,19 +455,36 @@ class SettingsDialog(QDialog):
     def _on_prov(self, idx):
         is_local = self.provider_combo.itemData(idx) == "local"
         is_groq = self.cloud_provider_combo.currentData() == "groq"
+        is_xunfei = not is_local and not is_groq
         self.cloud_provider_label.setVisible(not is_local)
         self.cloud_provider_combo.setVisible(not is_local)
-        self.api_input.setVisible(not is_local and is_groq and not bool(self.config.groq_api_key))
-        self.groq_key_status.setVisible(not is_local and is_groq and bool(self.config.groq_api_key))
-        self.xunfei_key_label.setVisible(not is_local and not is_groq)
-        self.xunfei_key_status.setVisible(not is_local and not is_groq)
-        self.xunfei_notice.setVisible(not is_local and not is_groq)
-        self.model_combo.setVisible(is_local)
+        show_groq_input = not is_local and is_groq and not bool(self.config.groq_api_key)
+        show_groq_status = not is_local and is_groq and bool(self.config.groq_api_key)
+        self._set_asr_row_visible(self.api_input, show_groq_input)
+        self._set_asr_row_visible(self.groq_key_status, show_groq_status)
+        self._set_asr_row_visible(self.groq_key_link, show_groq_input)
+        self._set_asr_row_visible(self.groq_key_notice, show_groq_input)
+        self._set_asr_row_visible(self.xunfei_key_status, is_xunfei)
+        self._set_asr_row_visible(self.xunfei_notice, is_xunfei)
+        self._set_asr_row_visible(self.model_combo, is_local)
         self.btn_dl.setVisible(is_local)
         self.btn_cancel_dl.setVisible(False)
         self.dl_bar.setVisible(False)
         self.dl_label.setVisible(False)
+        self.asr_form.setRowVisible(self.download_buttons_row, is_local)
+        self.asr_form.setRowVisible(self.download_progress_row, False)
+        self.asr_form.setRowVisible(self.download_message_row, False)
         self.gpu_group.setVisible(is_local)
+        self.settings_stack.updateGeometry()
+        if self.isVisible():
+            self.adjustSize()
+
+    def _set_asr_row_visible(self, field: QWidget, visible: bool):
+        """隐藏字段时连同 QFormLayout 的标签一起隐藏，避免残留空行。"""
+        label = self.asr_form.labelForField(field)
+        if label:
+            label.setVisible(visible)
+        field.setVisible(visible)
 
     def _refresh_cloud_provider_state(self):
         self.cloud_provider_combo.setItemText(
@@ -458,6 +500,9 @@ class SettingsDialog(QDialog):
         self.btn_dl.setVisible(False); self.btn_cancel_dl.setVisible(True)
         self.dl_bar.setVisible(True); self.dl_bar.setValue(0)
         self.dl_label.setVisible(True); self.dl_label.setText("")
+        self.asr_form.setRowVisible(self.download_buttons_row, True)
+        self.asr_form.setRowVisible(self.download_progress_row, True)
+        self.asr_form.setRowVisible(self.download_message_row, True)
         self.worker = _DownloadWorker(model)
         self.worker.progress.connect(self._on_dl_progress)
         self.worker.finished.connect(self._on_dl_done)
@@ -477,6 +522,8 @@ class SettingsDialog(QDialog):
         self.btn_dl.setVisible(True); self.btn_cancel_dl.setVisible(False)
         self.btn_cancel_dl.setEnabled(True)
         self.dl_bar.setVisible(False); self.dl_label.setVisible(False)
+        self.asr_form.setRowVisible(self.download_progress_row, False)
+        self.asr_form.setRowVisible(self.download_message_row, False)
         if ok: QMessageBox.information(self, "完成", msg)
         elif "取消" in msg:
             pass  # 用户主动取消，不弹错误框
