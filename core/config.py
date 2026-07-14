@@ -50,6 +50,8 @@ class AppConfig:
     groq_api_key: str = ""
     xunfei_api_key: str = ""
     ai_model_api_key: str = ""
+    ai_base_url: str = "https://api.deepseek.com"
+    ai_model_name: str = "deepseek-chat"
 
     def __post_init__(self):
         # 从环境变量读取 API Key
@@ -111,6 +113,8 @@ class ConfigManager:
             "groq_api_key": c.groq_api_key,
             "xunfei_api_key": c.xunfei_api_key,
             "ai_model_api_key": c.ai_model_api_key,
+            "ai_base_url": c.ai_base_url,
+            "ai_model_name": c.ai_model_name,
             "asr": {
                 "provider": c.asr.provider,
                 "local_model": c.asr.local_model,
@@ -144,6 +148,8 @@ class ConfigManager:
         c.ai_model_api_key = os.environ.get("ECHOVAULT_AI_API_KEY") or data.get(
             "ai_model_api_key", ""
         )
+        c.ai_base_url = data.get("ai_base_url", "https://api.deepseek.com")
+        c.ai_model_name = data.get("ai_model_name", "deepseek-chat")
         asr_data = data.get("asr", {})
         c.asr.provider = asr_data.get("provider", "groq")
         c.asr.local_model = asr_data.get("local_model", "base")
@@ -192,6 +198,10 @@ def update_config_value(config: AppConfig, key: str, value: str) -> None:
         config.xunfei_api_key = value
     elif key == "ai_model_api_key":
         config.ai_model_api_key = value
+    elif key == "ai_base_url":
+        config.ai_base_url = value.rstrip("/")
+    elif key == "ai_model_name":
+        config.ai_model_name = value
     else:
         raise ValueError(f"未知配置项: {key}")
 

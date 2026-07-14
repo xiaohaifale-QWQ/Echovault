@@ -51,8 +51,32 @@ python main.py <命令> [参数] [--json]
 | `rename` | 重命名歌曲 | 双击改名 |
 | `mark` | 标记纯音乐 | 右键标记 |
 | `serve http` | HTTP 文件浏览 | — |
+| `library list/add/remove/select-all` | 管理音乐/视频素材文件夹与详情页全选范围 | 素材库 |
+| `video timeline/calibrate/aggregate` | 视频时间轴导出、时间校准、按时间汇总 | 视频模式 |
+| `ai chat` | 使用内置手册与提示词咨询 DeepSeek 助手 | AI 模式 |
 | `doctor` | 检查 ffmpeg、依赖、Provider 与模型 | 启动状态提示 |
 | `gui` | 启动 GUI | — |
+
+### 3.0 素材库、视频与 AI 助手
+
+```powershell
+# 查看/添加/移除素材库文件夹
+python main.py library list --mode music --json
+python main.py library add E:\music --mode music
+python main.py library remove E:\music --mode music
+
+# 设置详情页显示当前目录或本模式全部目录
+python main.py library select-all on --mode music
+python main.py library select-all off --mode video
+
+# 设置视频时间校准、导出时间轴并按时间汇总
+python main.py video calibrate E:\video --source 2026-07-15T10:00:00 --target 2026-07-15T12:00:00
+python main.py video timeline E:\video
+python main.py video aggregate E:\video
+
+# DeepSeek 内置助手：自动携带软件手册和系统提示词
+python main.py ai chat "如何使用本地模型？"
+```
 
 ---
 

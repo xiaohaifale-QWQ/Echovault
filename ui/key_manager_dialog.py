@@ -41,7 +41,11 @@ class KeyManagerDialog(QDialog):
         self.ai_input = self._key_input(config.ai_model_api_key)
         form.addRow("Groq API Key:", self.groq_input)
         form.addRow("讯飞 API Key:", self.xunfei_input)
-        form.addRow("AI 模型 API Key:", self.ai_input)
+        form.addRow("DeepSeek API Key:", self.ai_input)
+        self.ai_base_url = QLineEdit(config.ai_base_url)
+        self.ai_model_name = QLineEdit(config.ai_model_name)
+        form.addRow("AI 接口地址:", self.ai_base_url)
+        form.addRow("AI 模型名称:", self.ai_model_name)
         layout.addLayout(form)
 
         future = QLabel("AI 模式尚未启用；此处只预先保存密钥，不会发起任何 AI 请求。")
@@ -67,6 +71,8 @@ class KeyManagerDialog(QDialog):
         self.config.groq_api_key = self.groq_input.text().strip()
         self.config.xunfei_api_key = self.xunfei_input.text().strip()
         self.config.ai_model_api_key = self.ai_input.text().strip()
+        self.config.ai_base_url = self.ai_base_url.text().strip().rstrip("/") or "https://api.deepseek.com"
+        self.config.ai_model_name = self.ai_model_name.text().strip() or "deepseek-chat"
         for name, value in (
             ("GROQ_API_KEY", self.config.groq_api_key),
             ("XUNFEI_API_KEY", self.config.xunfei_api_key),

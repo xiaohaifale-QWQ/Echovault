@@ -298,7 +298,9 @@ def cmd_config(args):
             "api_keys": {
                 "groq_configured": bool(c.groq_api_key),
                 "xunfei_configured": bool(c.xunfei_api_key),
+                "deepseek_configured": bool(c.ai_model_api_key),
             },
+            "ai": {"base_url": c.ai_base_url, "model": c.ai_model_name},
             "asr": {
                 "provider": c.asr.provider, "local_model": c.asr.local_model,
                 "language": c.asr.language, "use_vocal_separation": c.asr.use_vocal_separation,
@@ -317,12 +319,76 @@ def cmd_config(args):
             sys.exit(1)
         config_manager.config = c
         config_manager.save()
-        shown_value = "***" if args.key in ("groq_api_key", "xunfei_api_key") else args.value
+        shown_value = "***" if args.key in ("groq_api_key", "xunfei_api_key", "ai_model_api_key") else args.value
         print(f"OK: {args.key} = {shown_value}")
 
     elif args.config_action == "path":
         print(config_manager.config_path)
 
+
+def cmd_library(args):
+    config = config_manager.load()
+    directories_attr = "video_dirs" if args.mode == "video" else "music_dirs"
+    select_all_attr = "video_select_all" if args.mode == "video" else "music_select_all"
+    directories = list(getattr(config, directories_attr))
+    if args.library_action == "list":
+        _out({"mode": args.mode, "directories": directories, "select_all": getattr(config, select_all_attr)}, args)
+        return
+    if args.library_action == "add":
+        directory = str(Path(args.folder).expanduser().resolve())
+        if not Path(directory).is_dir():
+            raise SystemExit(f"Folder not found: {directory}")
+        if directory not in directories:
+            directories.append(directory)
+    elif args.library_action == "remove":
+        directory = str(Path(args.folder).expanduser().resolve())
+        directories = [item for item in directories if item != directory]
+    elif args.library_action == "select-all":
+        setattr(config, select_all_attr, args.enabled == "on")
+    setattr(config, directories_attr, directories)
+    config_manager.config = config
+    config_manager.save()
+    _out({"mode": args.mode, "directories": directories, "select_all": getattr(config, select_all_attr)}, args)
+
+
+def cmd_ai(args):
+    from core.ai_assistant import AISettings, chat
+
+    config = config_manager.load()
+    try:
+        answer = chat(
+            AISettings(config.ai_model_api_key, config.ai_base_url, config.ai_model_name),
+            args.question,
+        )
+    except RuntimeError as exc:
+        logger.error(str(exc))
+        raise SystemExit(1) from exc
+    _out({"answer": answer} if args.json_output else answer, args)
+
+
+def cmd_video(args):
+    from core.video_aggregation import aggregate_videos_by_time, write_video_transcript_timeline
+
+    folder = str(Path(args.folder).expanduser().resolve())
+    config = config_manager.load()
+    offset = config.video_time_offsets.get(folder, 0)
+    if args.video_action == "calibrate":
+        from datetime import datetime
+
+        source = datetime.fromisoformat(args.source)
+        target = datetime.fromisoformat(args.target)
+        offset = int((target - source).total_seconds())
+        config.video_time_offsets[folder] = offset
+        config_manager.config = config
+        config_manager.save()
+        path = write_video_transcript_timeline(folder, offset)
+        _out({"offset_seconds": offset, "timeline": str(path)}, args)
+    elif args.video_action == "timeline":
+        path = write_video_transcript_timeline(folder, offset)
+        _out({"timeline": str(path), "offset_seconds": offset}, args)
+    else:
+        result = aggregate_videos_by_time(folder, offset)
+        _out({"output_dir": str(result.output_dir), "video": str(result.video_path)}, args)
 
 # ============================================================
 # model
@@ -632,6 +698,26 @@ def main():
     x = s2.add_parser("show", help="Show config"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_config)
     x = s2.add_parser("set", help="Set config"); x.add_argument("key"); x.add_argument("value"); x.set_defaults(func=cmd_config)
     x = s2.add_parser("path", help="Config file path"); x.set_defaults(func=cmd_config)
+
+    # library
+    sp = sub.add_parser("library", help="Material library folders and selection scope")
+    s2 = sp.add_subparsers(dest="library_action", required=True)
+    x = s2.add_parser("list", help="List material folders"); x.add_argument("--mode", choices=["music", "video"], default="music"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_library)
+    x = s2.add_parser("add", help="Add a material folder"); x.add_argument("folder"); x.add_argument("--mode", choices=["music", "video"], default="music"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_library)
+    x = s2.add_parser("remove", help="Remove a material folder"); x.add_argument("folder"); x.add_argument("--mode", choices=["music", "video"], default="music"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_library)
+    x = s2.add_parser("select-all", help="Set detail-list scope"); x.add_argument("enabled", choices=["on", "off"]); x.add_argument("--mode", choices=["music", "video"], default="music"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_library)
+
+    # video
+    sp = sub.add_parser("video", help="Video material operations")
+    s2 = sp.add_subparsers(dest="video_action", required=True)
+    x = s2.add_parser("timeline", help="Export video transcript timeline"); x.add_argument("folder"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_video)
+    x = s2.add_parser("calibrate", help="Set a video-folder time offset"); x.add_argument("folder"); x.add_argument("--source", required=True, help="YYYY-MM-DDTHH:MM:SS"); x.add_argument("--target", required=True, help="YYYY-MM-DDTHH:MM:SS"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_video)
+    x = s2.add_parser("aggregate", help="Aggregate videos by calibrated time"); x.add_argument("folder"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_video)
+
+    # ai
+    sp = sub.add_parser("ai", help="Built-in DeepSeek assistant")
+    s2 = sp.add_subparsers(dest="ai_action", required=True)
+    x = s2.add_parser("chat", help="Ask the assistant with the built-in manual"); x.add_argument("question"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_ai)
 
     # model
     sp = sub.add_parser("model", help="Model management")

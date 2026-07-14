@@ -11,6 +11,8 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     manager.config.groq_api_key = "groq-secret"
     manager.config.xunfei_api_key = "xunfei-secret"
     manager.config.ai_model_api_key = "ai-secret"
+    manager.config.ai_base_url = "https://example.invalid"
+    manager.config.ai_model_name = "test-model"
     manager.config.music_dirs = ["D:/Music"]
     manager.config.video_dirs = ["D:/Video"]
     manager.config.music_select_all = True
@@ -23,6 +25,8 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     assert loaded.groq_api_key == "groq-secret"
     assert loaded.xunfei_api_key == "xunfei-secret"
     assert loaded.ai_model_api_key == "ai-secret"
+    assert loaded.ai_base_url == "https://example.invalid"
+    assert loaded.ai_model_name == "test-model"
     assert loaded.music_dirs == ["D:/Music"]
     assert loaded.video_dirs == ["D:/Video"]
     assert loaded.music_select_all is True

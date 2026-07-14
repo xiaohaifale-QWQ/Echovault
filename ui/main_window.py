@@ -34,6 +34,7 @@ from ui.song_list_panel import SongListPanel
 from ui.detail_panel import DetailPanel
 from ui.settings_dialog import SettingsDialog
 from ui.key_manager_dialog import KeyManagerDialog
+from ui.ai_chat_panel import AIChatPanel
 from ui.sync_panel import SyncPanel
 
 
@@ -101,7 +102,15 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 2)
         splitter.setSizes([700, 400])
         
-        self.setCentralWidget(splitter)
+        self.ai_chat_panel = AIChatPanel(self.config)
+        self.ai_chat_panel.setVisible(False)
+        outer_splitter = QSplitter(Qt.Orientation.Horizontal)
+        outer_splitter.addWidget(self.ai_chat_panel)
+        outer_splitter.addWidget(splitter)
+        outer_splitter.setStretchFactor(0, 1)
+        outer_splitter.setStretchFactor(1, 4)
+        outer_splitter.setSizes([0, 1280])
+        self.setCentralWidget(outer_splitter)
     
     def _setup_menubar(self):
         """菜单栏"""
@@ -155,10 +164,9 @@ class MainWindow(QMainWindow):
         key_action.triggered.connect(self._on_key_manager)
         menubar.addAction(key_action)
 
-        ai_mode_action = QAction("AI 模式", self)
-        ai_mode_action.setEnabled(False)
-        ai_mode_action.setToolTip("AI 功能即将推出")
-        menubar.addAction(ai_mode_action)
+        self.ai_mode_action = QAction("AI 模式", self)
+        self.ai_mode_action.triggered.connect(self._show_ai_mode_menu)
+        menubar.addAction(self.ai_mode_action)
         
         # 帮助菜单
         help_menu = menubar.addMenu("帮助(&H)")
@@ -578,6 +586,27 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self.router = get_router(self.config)
             self._refresh_statusbar()
+
+    def _show_ai_mode_menu(self):
+        menu = QMenu(self)
+        enabled = self.ai_chat_panel.isVisible()
+        toggle = menu.addAction("关闭" if enabled else "启动")
+        toggle.triggered.connect(self._toggle_ai_mode)
+        rect = self.menuBar().actionGeometry(self.ai_mode_action)
+        menu.exec(self.menuBar().mapToGlobal(rect.bottomLeft()))
+
+    def _toggle_ai_mode(self):
+        if self.ai_chat_panel.isVisible():
+            self.ai_chat_panel.setVisible(False)
+            return
+        if not self.config.ai_model_api_key:
+            QMessageBox.information(
+                self,
+                "AI 模式",
+                "请先在“密钥管理”中填写 DeepSeek API Key，然后再启动 AI 模式。",
+            )
+            return
+        self.ai_chat_panel.setVisible(True)
     
     def _do_restart(self):
         """重新启动应用"""

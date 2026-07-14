@@ -24,7 +24,8 @@
 | GPU | 自动诊断显卡与运行时；可安装并启用匹配的外置 GPU 推理运行时，无法使用时安全回退 CPU。 |
 | 视频时间 | 读取视频时间元数据；左、右时间可精确编辑到秒；使用小时偏移快速校准并导出视频文字时间轴。 |
 | LRC | 生成、繁转简、编辑、时间戳调整、歌词预览与同名 LRC 自动刷新。 |
-| 密钥管理 | 顶栏集中管理 Groq、讯飞和未来 AI 模型 Key；Key 仅保存在当前 Windows 用户的本机配置中。 |
+| 密钥管理 | 顶栏集中管理 Groq、讯飞和 DeepSeek Key；Key 仅保存在当前 Windows 用户的本机配置中。 |
+| AI 助手 | 可展开的最左侧聊天栏，默认调用 DeepSeek，并在每次对话中加载内置使用手册与系统提示词。 |
 | 同步 | LocalSend 接收端、文件夹差异比较、单向/双向/镜像同步与冲突确认。 |
 | CLI | 支持识别、配置、模型、GPU 和环境诊断命令，并提供 JSON 输出。 |
 
@@ -33,7 +34,7 @@
 - 使用本地 Whisper 时，音频与模型均在本机处理。
 - 使用 Groq 在线识别时，待识别音频会发送给 Groq API；请只对允许上传的素材使用该模式。
 - API Key 不写入项目、源码、Git 或日志，保存在 `~/.music-lyrics-sync/config.json`。该文件属于当前 Windows 用户，应妥善保护。
-- “AI 模式”入口目前只是界面占位，不会调用任何 AI 服务。
+- AI 模式默认调用 DeepSeek；只有手动启动 AI 模式并发送消息时才会发起请求。
 
 ## 快速开始（源码运行）
 
@@ -90,11 +91,15 @@ Groq 连接失败时会区分 Key 无效、调用额度不足和 `api.groq.com:4
 
 - **Groq API Key**：用于 Groq 在线转写。
 - **讯飞 API Key**：可在本机保存，预留给后续引擎接入。
-- **AI 模型 API Key**：可在本机保存，预留给后续 AI 功能。
+- **DeepSeek API Key**：用于内置 AI 助手。默认接口为 `https://api.deepseek.com`，默认模型为 `deepseek-chat`，也可在密钥管理中改为其他 OpenAI 兼容接口。
 
 保存后偏好设置不会再次显示 Groq Key 输入框，只显示配置状态。清空某一项并保存即可删除该本机 Key。
 
-### 4. 视频时间校准与汇总
+### 4. AI 模式
+
+点击顶栏“AI 模式”，在弹出的菜单中选择“启动”。已填写 DeepSeek Key 时，主窗口最左侧会出现聊天栏；再次点击“AI 模式 → 关闭”即可收起。AI 每次请求都会读取内置的 Echovault 使用手册和系统提示词，因此可以介绍软件、解释界面或给出 CLI 操作建议。
+
+### 5. 视频时间校准与汇总
 
 视频模式中选择参考视频后：
 
@@ -104,7 +109,7 @@ Groq 连接失败时会区分 Key 无效、调用额度不足和 `api.groq.com:4
 4. 修改左侧时间时，右侧会保留已选小时偏移自动重算。
 5. 使用“汇总”或“导出”在当前素材文件夹的子目录中生成按时间排列的结果与 `视频文字时间轴.csv`。
 
-### 5. 模型下载
+### 6. 模型下载
 
 本地模型由软件从独立 Release 下载：
 
@@ -131,6 +136,17 @@ python main.py config set asr.language zh
 # 诊断 GPU
 python main.py gpu scan
 python main.py gpu status
+
+# 管理素材库与详情页全选范围
+python main.py library add E:\\music --mode music
+python main.py library select-all on --mode music
+
+# 视频时间校准、导出与汇总
+python main.py video calibrate E:\\video --source 2026-07-15T10:00:00 --target 2026-07-15T12:00:00
+python main.py video timeline E:\\video
+
+# 内置 DeepSeek 助手
+python main.py ai chat "这个软件如何离线识别？"
 ```
 
 完整参数参见 [CLI.md](CLI.md)。
