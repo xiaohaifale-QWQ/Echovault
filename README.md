@@ -79,7 +79,7 @@ python main.py --help
 
 **https://github.com/xiaohaifale-QWQ/echovault-models/releases/tag/v1.0**
 
-软件会使用 `.download` 临时文件断点续传，并按 Release 资产清单校验文件大小和 SHA-256；校验失败的损坏文件会删除。目前 `tiny`、`base`、`small` 可下载，`medium` 因 Release 缺少 `medium.part2` 会在下载前停止，避免浪费磁盘空间。
+软件会使用 `.download` 临时文件断点续传，并按 Release 资产清单校验文件大小和 SHA-256；校验失败的损坏文件会删除。`medium` 会分别下载并校验两个分片，原子合并成 `medium.pt` 后自动删除分片。下载与合并期间需要约 6 GB 可用空间，完成后模型约占 2.85 GB。
 
 ---
 
@@ -246,7 +246,7 @@ Echovault/
 - [x] pytest 核心回归测试
 - [x] Windows PyInstaller 构建配置和 CI
 - [x] GitHub Release 模型下载、续传与资产校验
-- [ ] 补齐 medium 模型的第二个 Release 分片
+- [x] medium 双分片下载、校验、合并与自动清理
 - [ ] GPU CUDA 独立安装包
 - [ ] macOS 打包
 - [ ] AI 歌词翻译
@@ -257,7 +257,7 @@ Echovault/
 
 | 问题 | 状态 | 说明 |
 |------|------|------|
-| medium 模型不完整 | 进行中 | Release v1.0 缺少 `medium.part2`，软件会阻止无效下载 |
+| medium 下载峰值空间较大 | 已知限制 | 合并时需同时保留两个分片和临时完整模型，约需 6 GB 可用空间 |
 | CUDA 依赖体积大 | 已知限制 | Windows 包内置 CPU 推理；CUDA 仍需在源码环境单独安装 |
 | Groq 会上传音频 | 设计行为 | 对隐私敏感的用户应选择本地 Whisper |
 | Windows 打包 | 待实机验收 | 已提供 spec、构建脚本和 CI，需在干净机器验证 |

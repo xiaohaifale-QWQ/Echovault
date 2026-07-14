@@ -10,6 +10,8 @@
 - Long-audio chunking with merged LRC timestamps.
 - Resumable, SHA-256-verified Whisper model downloads.
 - Offline model downloads use the Echovault GitHub Release manifest directly.
+- Medium model downloads verify both release parts, atomically assemble the full
+  checkpoint, and remove temporary parts after success.
 - The Windows directory build includes the CPU Whisper runtime for offline recognition.
 - Streamed LocalSend uploads and browser downloads.
 - Pytest regression suite, Windows PyInstaller build, and GitHub Actions CI.
@@ -35,6 +37,5 @@
 
 - The packaged Windows application includes Torch/Whisper CPU support; CUDA remains a
   separate source-environment setup.
-- Release v1.0 is missing `medium.part2`; the application blocks that download before
-  allocating model storage.
+- Medium assembly temporarily requires about 6 GB of free disk space.
 - The Windows directory bundle includes ffmpeg and is therefore relatively large.
