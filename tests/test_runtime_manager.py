@@ -226,3 +226,20 @@ def test_transfer_status_displays_rate_amount_and_remaining_time():
 
     assert status == "2.0 MB/s | 已下载 6.0 MB/10.0 MB | 预计剩余 00:02"
     assert "测速中" in _format_transfer_status(1024, 2048, 1024, 0.1)
+
+
+def test_runtime_metadata_accepts_utf8_bom(tmp_path):
+    runtime = tmp_path / "runtimes" / "cuda-cu132"
+    worker = runtime / "bin" / "echovault-asr-worker.exe"
+    worker.parent.mkdir(parents=True)
+    worker.write_bytes(b"worker")
+    (runtime / "runtime.json").write_text(
+        json.dumps({"worker_path": "bin/echovault-asr-worker.exe"}),
+        encoding="utf-8-sig",
+    )
+    (tmp_path / "runtimes" / "active.json").write_text(
+        json.dumps({"active_runtime": "cuda-cu132"}),
+        encoding="utf-8",
+    )
+
+    assert active_worker_command(tmp_path) == [str(worker)]

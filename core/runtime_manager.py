@@ -589,7 +589,7 @@ def _required_relative_path(value: Mapping[str, Any], key: str) -> str:
 
 def _read_json(path: Path) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
