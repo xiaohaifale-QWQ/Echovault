@@ -298,7 +298,7 @@ def cmd_config(args):
             "music_dirs": c.music_dirs, "output_lrc_dir": c.output_lrc_dir,
             "api_keys": {
                 "groq_configured": bool(c.groq_api_key),
-                "xunfei_configured": bool(c.xunfei_api_key),
+                "xunfei_configured": c.has_xunfei_credentials,
                 "deepseek_configured": bool(c.ai_model_api_key),
             },
             "ai": {
@@ -324,7 +324,12 @@ def cmd_config(args):
             sys.exit(1)
         config_manager.config = c
         config_manager.save()
-        shown_value = "***" if args.key in ("groq_api_key", "xunfei_api_key", "ai_model_api_key") else args.value
+        shown_value = "***" if args.key in (
+            "groq_api_key",
+            "xunfei_api_key",
+            "xunfei_api_secret",
+            "ai_model_api_key",
+        ) else args.value
         print(f"OK: {args.key} = {shown_value}")
 
     elif args.config_action == "path":

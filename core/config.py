@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-CONFIG_SCHEMA_VERSION = 2
+CONFIG_SCHEMA_VERSION = 3
 SUPPORTED_PROVIDERS = {"groq", "local", "xunfei"}
 SUPPORTED_LOCAL_MODELS = {"tiny", "base", "small", "medium", "large"}
 SUPPORTED_LANGUAGES = {"zh", "en", "ja", "ko"}
@@ -49,7 +49,9 @@ class AppConfig:
     # API Keys（建议通过环境变量设置，这里提供默认值）
     groq_api_key: str = ""
     groq_proxy_url: str = ""
+    xunfei_app_id: str = ""
     xunfei_api_key: str = ""
+    xunfei_api_secret: str = ""
     ai_model_api_key: str = ""
     ai_base_url: str = "https://api.deepseek.com"
     ai_model_name: str = "deepseek-chat"
@@ -61,8 +63,17 @@ class AppConfig:
             self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
         if not self.xunfei_api_key:
             self.xunfei_api_key = os.environ.get("XUNFEI_API_KEY", "")
+        if not self.xunfei_app_id:
+            self.xunfei_app_id = os.environ.get("XUNFEI_APP_ID", "")
+        if not self.xunfei_api_secret:
+            self.xunfei_api_secret = os.environ.get("XUNFEI_API_SECRET", "")
         if not self.ai_model_api_key:
             self.ai_model_api_key = os.environ.get("ECHOVAULT_AI_API_KEY", "")
+
+    @property
+    def has_xunfei_credentials(self) -> bool:
+        """讯飞 WebAPI 需要同时具备 AppID、API Key 与 API Secret。"""
+        return bool(self.xunfei_app_id and self.xunfei_api_key and self.xunfei_api_secret)
 
 
 class ConfigManager:
@@ -114,7 +125,9 @@ class ConfigManager:
             "output_lrc_dir": c.output_lrc_dir,
             "groq_api_key": c.groq_api_key,
             "groq_proxy_url": c.groq_proxy_url,
+            "xunfei_app_id": c.xunfei_app_id,
             "xunfei_api_key": c.xunfei_api_key,
+            "xunfei_api_secret": c.xunfei_api_secret,
             "ai_model_api_key": c.ai_model_api_key,
             "ai_base_url": c.ai_base_url,
             "ai_model_name": c.ai_model_name,
@@ -149,7 +162,11 @@ class ConfigManager:
         c.output_lrc_dir = data.get("output_lrc_dir")
         c.groq_api_key = os.environ.get("GROQ_API_KEY") or data.get("groq_api_key", "")
         c.groq_proxy_url = data.get("groq_proxy_url", "")
+        c.xunfei_app_id = os.environ.get("XUNFEI_APP_ID") or data.get("xunfei_app_id", "")
         c.xunfei_api_key = os.environ.get("XUNFEI_API_KEY") or data.get("xunfei_api_key", "")
+        c.xunfei_api_secret = os.environ.get("XUNFEI_API_SECRET") or data.get(
+            "xunfei_api_secret", ""
+        )
         c.ai_model_api_key = os.environ.get("ECHOVAULT_AI_API_KEY") or data.get(
             "ai_model_api_key", ""
         )
@@ -205,6 +222,10 @@ def update_config_value(config: AppConfig, key: str, value: str) -> None:
         config.groq_proxy_url = value
     elif key == "xunfei_api_key":
         config.xunfei_api_key = value
+    elif key == "xunfei_app_id":
+        config.xunfei_app_id = value
+    elif key == "xunfei_api_secret":
+        config.xunfei_api_secret = value
     elif key == "ai_model_api_key":
         config.ai_model_api_key = value
     elif key == "ai_base_url":

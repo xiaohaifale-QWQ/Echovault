@@ -10,7 +10,9 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     manager = ConfigManager(path)
     manager.config.groq_api_key = "groq-secret"
     manager.config.groq_proxy_url = "http://127.0.0.1:7890"
+    manager.config.xunfei_app_id = "xunfei-app-id"
     manager.config.xunfei_api_key = "xunfei-secret"
+    manager.config.xunfei_api_secret = "xunfei-api-secret"
     manager.config.ai_model_api_key = "ai-secret"
     manager.config.ai_base_url = "https://example.invalid"
     manager.config.ai_model_name = "test-model"
@@ -26,7 +28,10 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
 
     assert loaded.groq_api_key == "groq-secret"
     assert loaded.groq_proxy_url == "http://127.0.0.1:7890"
+    assert loaded.xunfei_app_id == "xunfei-app-id"
     assert loaded.xunfei_api_key == "xunfei-secret"
+    assert loaded.xunfei_api_secret == "xunfei-api-secret"
+    assert loaded.has_xunfei_credentials is True
     assert loaded.ai_model_api_key == "ai-secret"
     assert loaded.ai_base_url == "https://example.invalid"
     assert loaded.ai_model_name == "test-model"
@@ -45,16 +50,25 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
 def test_environment_api_key_takes_precedence(tmp_path, monkeypatch):
     path = tmp_path / "config.json"
     path.write_text(
-        json.dumps({"groq_api_key": "file-secret", "xunfei_api_key": "file-xunfei"}),
+        json.dumps({
+            "groq_api_key": "file-secret",
+            "xunfei_app_id": "file-app-id",
+            "xunfei_api_key": "file-xunfei",
+            "xunfei_api_secret": "file-api-secret",
+        }),
         encoding="utf-8",
     )
     monkeypatch.setenv("GROQ_API_KEY", "environment-secret")
+    monkeypatch.setenv("XUNFEI_APP_ID", "environment-app-id")
     monkeypatch.setenv("XUNFEI_API_KEY", "environment-xunfei")
+    monkeypatch.setenv("XUNFEI_API_SECRET", "environment-api-secret")
 
     loaded = ConfigManager(path).load()
 
     assert loaded.groq_api_key == "environment-secret"
+    assert loaded.xunfei_app_id == "environment-app-id"
     assert loaded.xunfei_api_key == "environment-xunfei"
+    assert loaded.xunfei_api_secret == "environment-api-secret"
 
 
 def test_update_config_value_validates_provider_and_booleans():
@@ -64,12 +78,16 @@ def test_update_config_value_validates_provider_and_booleans():
     update_config_value(config, "asr.use_gpu", "yes")
     update_config_value(config, "asr.language", "auto")
     update_config_value(config, "ai_model_api_key", "local-only-secret")
+    update_config_value(config, "xunfei_app_id", "app-id")
+    update_config_value(config, "xunfei_api_key", "api-key")
+    update_config_value(config, "xunfei_api_secret", "api-secret")
     update_config_value(config, "voice_input_shortcut", "Ctrl+Alt+V")
 
     assert config.asr.provider == "local"
     assert config.asr.use_gpu is True
     assert config.asr.language is None
     assert config.ai_model_api_key == "local-only-secret"
+    assert config.has_xunfei_credentials is True
     assert config.voice_input_shortcut == "Ctrl+Alt+V"
 
     update_config_value(config, "asr.provider", "xunfei")

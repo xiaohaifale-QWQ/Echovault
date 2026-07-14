@@ -56,10 +56,12 @@ def build_environment_report(config, cache_root: str | Path | None = None) -> di
     elif provider == "xunfei":
         provider_details = {
             "name": "xunfei",
+            "app_id_configured": bool(config.xunfei_app_id),
             "api_key_configured": bool(config.xunfei_api_key),
-            "implementation_ready": False,
+            "api_secret_configured": bool(config.xunfei_api_secret),
+            "implementation_ready": True,
         }
-        provider_ready = False
+        provider_ready = config.has_xunfei_credentials
     else:
         provider_details = {"name": provider, "supported": False}
         provider_ready = False

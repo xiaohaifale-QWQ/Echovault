@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QLabel, QDialogButtonBox, QFileDialog, QKeySequenceEdit, QProgressBar, QMessageBox,
     QWidget, QStackedWidget,
 )
-from PyQt6.QtCore import Qt, QUrl, pyqtSignal, QThread
+from PyQt6.QtCore import QUrl, pyqtSignal, QThread
 from PyQt6.QtGui import QDesktopServices, QKeySequence
 from core.config import AppConfig, config_manager
 from core.model_download import DownloadCancelled, ModelDownloadError, download_model
@@ -289,18 +289,14 @@ class SettingsDialog(QDialog):
         self.groq_key_notice.setStyleSheet("font-size:10px;color:#888")
         af.addRow("", self.groq_key_notice)
 
-        self.xunfei_key_label = QLabel("讯飞 Key:")
-        self.xunfei_key_status = QLabel("已在密钥管理中配置 ✓")
+        self.xunfei_key_label = QLabel("讯飞配置:")
+        self.xunfei_key_status = QLabel("")
         self.xunfei_key_status.setStyleSheet("color:#248A4A;font-weight:600")
         af.addRow(self.xunfei_key_label, self.xunfei_key_status)
-        self.xunfei_notice = QLabel("讯飞识别尚待接入；当前可保存并切换服务配置。")
+        self.xunfei_notice = QLabel("")
         self.xunfei_notice.setStyleSheet("font-size:10px;color:#888")
         self.xunfei_notice.setWordWrap(True)
         af.addRow("", self.xunfei_notice)
-
-        # 保留字段以兼容已有配置，讯飞 Provider 实现前不在界面中展示。
-        self.xunfei_input = QLineEdit()
-        self.xunfei_input.setEchoMode(QLineEdit.EchoMode.Password)
 
         self.lang_combo = QComboBox()
         for t, v in [("自动检测", None), ("中文", "zh"), ("英语", "en"), ("日语", "ja"), ("韩语", "ko")]:
@@ -439,7 +435,6 @@ class SettingsDialog(QDialog):
         cloud_index = self.cloud_provider_combo.findData(c.asr.provider)
         self.cloud_provider_combo.setCurrentIndex(cloud_index if cloud_index >= 0 else 0)
         self.api_input.clear()
-        self.xunfei_input.setText(c.xunfei_api_key)
         li = [j for j in range(self.lang_combo.count()) if self.lang_combo.itemData(j) == c.asr.language]
         self.lang_combo.setCurrentIndex(li[0] if li else 0)
         for i in range(self.model_combo.count()):
@@ -491,8 +486,16 @@ class SettingsDialog(QDialog):
             0, "Groq ✓" if self.config.groq_api_key else "Groq"
         )
         self.cloud_provider_combo.setItemText(
-            1, "讯飞 ✓" if self.config.xunfei_api_key else "讯飞"
+            1, "讯飞 ✓" if self.config.has_xunfei_credentials else "讯飞"
         )
+        if self.config.has_xunfei_credentials:
+            self.xunfei_key_status.setText("AppID、API Key、API Secret 已配置 ✓")
+            self.xunfei_key_status.setStyleSheet("color:#248A4A;font-weight:600")
+            self.xunfei_notice.setText("将使用讯飞极速录音转写；音频会上传到讯飞云端识别。")
+        else:
+            self.xunfei_key_status.setText("请在密钥管理中补齐三项")
+            self.xunfei_key_status.setStyleSheet("color:#B54708;font-weight:600")
+            self.xunfei_notice.setText("需要同一应用的 AppID、API Key、API Secret，并开通极速录音转写。")
         self._on_prov(self.provider_combo.currentIndex())
 
     def _on_download(self):
@@ -708,8 +711,6 @@ class SettingsDialog(QDialog):
         if key:
             c.groq_api_key = key
         if key: os.environ["GROQ_API_KEY"] = key
-        xunfei_key = self.xunfei_input.text().strip(); c.xunfei_api_key = xunfei_key
-        if xunfei_key: os.environ["XUNFEI_API_KEY"] = xunfei_key
         d = self.lrc_input.text().strip(); c.output_lrc_dir = d if d else None
         shortcut = self.voice_shortcut_edit.keySequence().toString().strip()
         c.voice_input_shortcut = shortcut or "Ctrl+Shift+Space"

@@ -27,6 +27,13 @@ except ImportError:
     _HAS_LOCAL = False
     LocalWhisperProvider = None
 
+try:
+    from .xunfei_transcription import XunfeiTranscriptionProvider
+    _HAS_XUNFEI = True
+except ImportError:
+    _HAS_XUNFEI = False
+    XunfeiTranscriptionProvider = None
+
 
 class ASRRouter:
     """
@@ -76,6 +83,17 @@ class ASRRouter:
             )
         else:
             logger.warning("openai-whisper 未安装，跳过本地 Provider。安装: pip install openai-whisper")
+
+        if XunfeiTranscriptionProvider is not None:
+            self.register(
+                XunfeiTranscriptionProvider(
+                    app_id=config.xunfei_app_id if config else None,
+                    api_key=config.xunfei_api_key if config else None,
+                    api_secret=config.xunfei_api_secret if config else None,
+                )
+            )
+        else:
+            logger.warning("讯飞在线 Provider 依赖未安装，跳过讯飞 Provider。")
     
     def register(self, provider: ASRProvider):
         """注册一个 Provider"""

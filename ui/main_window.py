@@ -244,7 +244,7 @@ class MainWindow(QMainWindow):
         if provider and provider.is_available():
             self.provider_label.setText(f"引擎: {provider.display_name}")
         elif self.config.asr.provider == "xunfei":
-            self.provider_label.setText("引擎: 讯飞（待接入）")
+            self.provider_label.setText("引擎: 讯飞（请补齐三项密钥）")
         else:
             self.provider_label.setText("引擎: 不可用 (请检查设置)")
     
@@ -476,7 +476,11 @@ class MainWindow(QMainWindow):
             if provider_name == "groq":
                 msg = "Groq 云端引擎不可用。\n\n请确认已设置 Groq API Key。\n免费获取: https://console.groq.com/keys"
             elif provider_name == "xunfei":
-                msg = "讯飞云端引擎尚未接入。\n\n已可保存和选择讯飞 Key；实际识别仍需补充讯飞 AppID/API Secret 接入。"
+                msg = (
+                    "讯飞极速录音转写不可用。\n\n"
+                    "请在“密钥管理”中填写同一讯飞应用的 AppID、API Key、API Secret，"
+                    "并确认已开通极速录音转写服务。"
+                )
             elif provider_name == "local":
                 msg = "本地 Whisper 引擎不可用。\n\n"
                 try: import whisper

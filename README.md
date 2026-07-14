@@ -91,7 +91,7 @@ Groq 连接失败时会区分 Key 无效、调用额度不足和 `api.groq.com:4
 
 - **Groq API Key**：用于 Groq 在线转写。
 - **Groq 代理地址（可选）**：直连无法访问 Groq 时，可填写正在运行的本地 HTTP 代理，例如 `http://127.0.0.1:7890`。
-- **讯飞 API Key**：可在本机保存，预留给后续引擎接入。
+- **讯飞极速录音转写**：在密钥管理中填写同一讯飞应用的 `AppID`、`API Key`、`API Secret`，并在讯飞控制台开通“极速录音转写”。Echovault 会将完整素材转换为 16 kHz 单声道音频后整体上传识别，不会为适配接口而切分歌曲；该服务会将音频上传到讯飞云端。
 - **DeepSeek API Key**：用于内置 AI 助手。默认接口为 `https://api.deepseek.com`，默认模型为 `deepseek-chat`，也可在密钥管理中改为其他 OpenAI 兼容接口。
 
 保存后偏好设置不会再次显示 Groq Key 输入框，只显示配置状态。清空某一项并保存即可删除该本机 Key。

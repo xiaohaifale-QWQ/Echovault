@@ -27,7 +27,11 @@ class KeyManagerDialog(QDialog):
         super().__init__(parent)
         self.config = config
         self._initial_groq_key = config.groq_api_key
-        self._initial_xunfei_key = config.xunfei_api_key
+        self._initial_xunfei_credentials = (
+            config.xunfei_app_id,
+            config.xunfei_api_key,
+            config.xunfei_api_secret,
+        )
         self.setWindowTitle("密钥管理")
         self.setMinimumWidth(520)
 
@@ -44,7 +48,10 @@ class KeyManagerDialog(QDialog):
         self.groq_input = self._key_input(config.groq_api_key)
         self.groq_proxy_input = QLineEdit(config.groq_proxy_url)
         self.groq_proxy_input.setPlaceholderText("可选，例如 http://127.0.0.1:7890")
-        self.xunfei_input = self._key_input(config.xunfei_api_key)
+        self.xunfei_app_id_input = QLineEdit(config.xunfei_app_id)
+        self.xunfei_app_id_input.setPlaceholderText("讯飞开放平台应用 AppID")
+        self.xunfei_api_key_input = self._key_input(config.xunfei_api_key)
+        self.xunfei_api_secret_input = self._key_input(config.xunfei_api_secret)
         self.ai_input = self._key_input(config.ai_model_api_key)
         form.addRow(
             self._provider_label("Groq API Key:", "https://console.groq.com/keys"),
@@ -52,9 +59,15 @@ class KeyManagerDialog(QDialog):
         )
         form.addRow("Groq 代理地址（可选）:", self.groq_proxy_input)
         form.addRow(
-            self._provider_label("讯飞 API Key:", "https://console.xfyun.cn/"),
-            self.xunfei_input,
+            self._provider_label("讯飞 AppID:", "https://console.xfyun.cn/"),
+            self.xunfei_app_id_input,
         )
+        form.addRow("讯飞 API Key:", self.xunfei_api_key_input)
+        form.addRow("讯飞 API Secret:", self.xunfei_api_secret_input)
+        xunfei_hint = QLabel("讯飞语音听写需要三项全部填写；请在同一个讯飞应用的服务页获取。")
+        xunfei_hint.setStyleSheet("font-size:11px;color:#7A838D")
+        xunfei_hint.setWordWrap(True)
+        form.addRow("", xunfei_hint)
         form.addRow(
             self._provider_label("DeepSeek API Key:", "https://platform.deepseek.com/api_keys"),
             self.ai_input,
@@ -94,13 +107,17 @@ class KeyManagerDialog(QDialog):
     def _save(self) -> None:
         self.config.groq_api_key = self.groq_input.text().strip()
         self.config.groq_proxy_url = self.groq_proxy_input.text().strip()
-        self.config.xunfei_api_key = self.xunfei_input.text().strip()
+        self.config.xunfei_app_id = self.xunfei_app_id_input.text().strip()
+        self.config.xunfei_api_key = self.xunfei_api_key_input.text().strip()
+        self.config.xunfei_api_secret = self.xunfei_api_secret_input.text().strip()
         self.config.ai_model_api_key = self.ai_input.text().strip()
         self.config.ai_base_url = self.ai_base_url.text().strip().rstrip("/") or "https://api.deepseek.com"
         self.config.ai_model_name = self.ai_model_name.text().strip() or "deepseek-chat"
         for name, value in (
             ("GROQ_API_KEY", self.config.groq_api_key),
+            ("XUNFEI_APP_ID", self.config.xunfei_app_id),
             ("XUNFEI_API_KEY", self.config.xunfei_api_key),
+            ("XUNFEI_API_SECRET", self.config.xunfei_api_secret),
             ("ECHOVAULT_AI_API_KEY", self.config.ai_model_api_key),
         ):
             if value:
@@ -111,10 +128,11 @@ class KeyManagerDialog(QDialog):
             if self.config.groq_api_key and self.config.groq_api_key != self._initial_groq_key:
                 self.config.asr.provider = "groq"
                 self.asr_provider_saved.emit("groq")
-            elif (
-                self.config.xunfei_api_key
-                and self.config.xunfei_api_key != self._initial_xunfei_key
-            ):
+            elif self.config.has_xunfei_credentials and (
+                self.config.xunfei_app_id,
+                self.config.xunfei_api_key,
+                self.config.xunfei_api_secret,
+            ) != self._initial_xunfei_credentials:
                 self.config.asr.provider = "xunfei"
                 self.asr_provider_saved.emit("xunfei")
             config_manager.config = self.config
