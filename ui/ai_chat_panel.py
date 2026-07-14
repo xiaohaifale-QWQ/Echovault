@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 
 from core.ai_assistant import AISettings, chat
 from core.ai_control import CLICommand, extract_cli_directives, run_cli_command
+from core.asr.provider_selection import select_available_provider
 from core.asr.router import get_router
 from core.config import AppConfig
 from core.voice_cache import new_recording_path, pcm_to_wav, voice_cache_dir
@@ -42,10 +43,11 @@ class AIChatWorker(QThread):
 
 
 class VoiceTranscribeWorker(QThread):
-    """Transcribe one cached microphone recording with the configured ASR engine."""
+    """Transcribe cached microphone audio, preferring a configured online engine."""
 
     completed = pyqtSignal(str)
     failed = pyqtSignal(str)
+    status = pyqtSignal(str)
 
     def __init__(self, config: AppConfig, audio_path: Path, parent=None):
         super().__init__(parent)
@@ -55,7 +57,14 @@ class VoiceTranscribeWorker(QThread):
     def run(self):
         try:
             router = get_router(self._config)
-            result = router.transcribe(str(self._audio_path), language=self._config.asr.language)
+            provider_name = select_available_provider(router)
+            provider = router.get(provider_name)
+            self.status.emit(f"语音输入正在使用 {provider.display_name}…")
+            result = router.transcribe(
+                str(self._audio_path),
+                provider_name=provider_name,
+                language=self._config.asr.language,
+            )
             text = " ".join(segment.text.strip() for segment in result.segments if segment.text.strip())
             if not text:
                 raise RuntimeError("没有识别出可用文字，请检查麦克风输入或识别引擎。")
@@ -222,6 +231,7 @@ class AIChatPanel(QWidget):
         self.voice_button.setEnabled(False)
         self._show_voice_status("录音已保存到本机缓存，正在识别为文字…")
         self._voice_worker = VoiceTranscribeWorker(self.config, recording_path, self)
+        self._voice_worker.status.connect(self._show_voice_status)
         self._voice_worker.completed.connect(self._on_voice_transcribed)
         self._voice_worker.failed.connect(self._on_voice_failed)
         self._voice_worker.start()

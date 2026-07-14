@@ -18,12 +18,13 @@ from PyQt6.QtWidgets import (
     QMessageBox, QFileDialog, QLabel, QWidget, QVBoxLayout,
     QTabWidget, QPushButton, QProgressBar, QStackedWidget,
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut
 
 from core.config import config_manager, AppConfig
 from core.asr.router import ASRRouter, get_router
 from core.environment import build_environment_report
+from core.resource_monitor import format_resource_usage, sample_resource_usage
 from services.library_service import scan_audio
 from core.video_library import scan_videos
 from core.video_aggregation import write_video_transcript_timeline
@@ -227,6 +228,14 @@ class MainWindow(QMainWindow):
         
         self.provider_label = QLabel("")
         self.statusbar.addPermanentWidget(self.provider_label)
+
+        self.resource_label = QLabel("")
+        self.resource_label.setStyleSheet("color:#5B6573;padding-left:10px")
+        self.resource_label.setVisible(False)
+        self.statusbar.addPermanentWidget(self.resource_label)
+        self.resource_timer = QTimer(self)
+        self.resource_timer.setInterval(1000)
+        self.resource_timer.timeout.connect(self._refresh_resource_usage)
         
         self._refresh_statusbar()
     
@@ -320,11 +329,25 @@ class MainWindow(QMainWindow):
             materials, root_dir="" if self.library_panel.select_all else folder_path
         )
         self._refresh_statusbar()
-        
+
         if self.library_panel.mode == "music":
             self.sync_panel.set_dir_a(folder_path)
-        
+
         self.status_label.setText("就绪")
+
+    def _start_resource_monitor(self):
+        """Show live machine usage only while the local ASR engine is working."""
+        self._refresh_resource_usage()
+        self.resource_label.setVisible(True)
+        self.resource_timer.start()
+
+    def _stop_resource_monitor(self):
+        self.resource_timer.stop()
+        self.resource_label.clear()
+        self.resource_label.setVisible(False)
+
+    def _refresh_resource_usage(self):
+        self.resource_label.setText(format_resource_usage(sample_resource_usage()))
 
     def _on_material_mode_changed(self, mode: str):
         self.song_list_panel.set_material_mode(mode)
@@ -510,6 +533,10 @@ class MainWindow(QMainWindow):
         self._transcription_total = len(files)
         self._batch_completed = 0
         self.status_label.setText(f"识别中... 0/{len(files)}")
+        if provider_name == "local":
+            self._start_resource_monitor()
+        else:
+            self._stop_resource_monitor()
         self.worker.start()
     
     def _on_transcribe_progress(self, current: int, total: int, filename: str):
@@ -565,6 +592,7 @@ class MainWindow(QMainWindow):
         self._refresh_statusbar()
     
     def _on_transcribe_finished(self, results: dict):
+        self._stop_resource_monitor()
         self.btn_stop_transcribe.setVisible(False)
         self.btn_stop_transcribe.setEnabled(True)
         self.trans_progress.setVisible(False)
