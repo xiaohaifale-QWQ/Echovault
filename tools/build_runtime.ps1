@@ -13,7 +13,6 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $BuildRoot = Join-Path $ProjectRoot "build\runtime\$RuntimeId"
 $DistRoot = Join-Path $BuildRoot "dist"
 $WorkRoot = Join-Path $BuildRoot "work"
-$SpecRoot = Join-Path $BuildRoot "spec"
 $RuntimeRoot = Join-Path $BuildRoot "runtime"
 $ReleaseRoot = Join-Path $ProjectRoot $OutputDirectory
 
@@ -41,7 +40,7 @@ New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 Push-Location $ProjectRoot
 try {
     & $Python -m PyInstaller --noconfirm --clean EchovaultWorker.spec `
-        --distpath $DistRoot --workpath $WorkRoot --specpath $SpecRoot
+        --distpath $DistRoot --workpath $WorkRoot
     if ($LASTEXITCODE -ne 0) {
         throw "ASR Worker build failed with exit code $LASTEXITCODE."
     }
