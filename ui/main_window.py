@@ -159,6 +159,12 @@ class MainWindow(QMainWindow):
         self.trans_progress.setMaximumHeight(16)
         self.trans_progress.setVisible(False)
         self.statusbar.addWidget(self.trans_progress)
+
+        self.total_trans_progress = QProgressBar()
+        self.total_trans_progress.setMaximumWidth(200)
+        self.total_trans_progress.setMaximumHeight(16)
+        self.total_trans_progress.setVisible(False)
+        self.statusbar.addWidget(self.total_trans_progress)
         
         self.btn_stop_transcribe = QPushButton("停止")
         self.btn_stop_transcribe.setMaximumHeight(18)
@@ -290,23 +296,42 @@ class MainWindow(QMainWindow):
         
         self.worker = TranscribeWorker(files, self.router, self.config)
         self.worker.progress.connect(self._on_transcribe_progress)
+        self.worker.song_progress.connect(self._on_song_progress)
         self.worker.stage_progress.connect(self._on_stage_progress)
         self.worker.finished.connect(self._on_transcribe_finished)
         self.worker.song_done.connect(self._on_song_done)
         
         self.btn_stop_transcribe.setVisible(True)
         self.trans_progress.setVisible(True)
-        if len(files) <= 1:
-            self.trans_progress.setRange(0, 0)  # 单首歌：脉冲模式
-        else:
-            self.trans_progress.setMaximum(len(files))
+        self.trans_progress.setRange(0, 100)
+        self.trans_progress.setFormat("本首进度 %p%")
+        self.total_trans_progress.setVisible(len(files) > 1)
+        self.total_trans_progress.setRange(0, 100)
+        self.total_trans_progress.setFormat("总进度 %p%")
+        self.total_trans_progress.setValue(0)
         self.trans_progress.setValue(0)
         self.status_label.setText(f"识别中... 0/{len(files)}")
         self.worker.start()
     
     def _on_transcribe_progress(self, current: int, total: int, filename: str):
-        self.trans_progress.setValue(current)
         self.status_label.setText(f"识别中... {current}/{total} - {filename}")
+
+    def _on_song_progress(
+        self,
+        current: int,
+        total: int,
+        song_percent: int,
+        filename: str,
+        message: str,
+        chunk_index: int,
+        chunk_total: int,
+    ):
+        self.trans_progress.setValue(song_percent)
+        if total > 1:
+            overall = int(((current - 1) + song_percent / 100) / total * 100)
+            self.total_trans_progress.setValue(overall)
+        chunk = f" · 第 {chunk_index}/{chunk_total} 段" if chunk_total else ""
+        self.status_label.setText(f"{message}{chunk}")
     
     def _on_stage_progress(self, msg: str):
         self.status_label.setText(msg)
@@ -344,6 +369,7 @@ class MainWindow(QMainWindow):
         self.btn_stop_transcribe.setVisible(False)
         self.btn_stop_transcribe.setEnabled(True)
         self.trans_progress.setVisible(False)
+        self.total_trans_progress.setVisible(False)
         self.trans_progress.setRange(0, 100)  # 恢复正常模式
         self.trans_progress.setValue(0)
         success = sum(1 for v in results.values() if v["success"])
