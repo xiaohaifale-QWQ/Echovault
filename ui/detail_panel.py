@@ -53,7 +53,9 @@ class DetailPanel(QWidget):
         has = song.get("has_lrc",False)
         self.lbl_status.setText("已有歌词" if has else "暂无歌词")
         self.lbl_status.setStyleSheet(f"color:{'#4CAF50' if has else '#999'};font-size:12px")
-        self.btn_transcribe.setEnabled(not has)
+        # 已有歌词时仍应允许用户覆盖旧结果重新识别；此前这里把按钮
+        # 标为“重新识别”后又同时禁用，导致该操作无法执行。
+        self.btn_transcribe.setEnabled(True)
         self.btn_transcribe.setText("重新识别" if has else "识别歌词")
         self.btn_edit.setEnabled(has)
         if has and song.get("lrc_path"): self._load(song["lrc_path"])
