@@ -6,6 +6,9 @@ venv/
 *.egg-info/
 dist/
 build/
+release-out/
+release-keys/
 .pytest_cache/
 *.spec
 !Echovault.spec
+!EchovaultWorker.spec
