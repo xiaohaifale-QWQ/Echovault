@@ -1,5 +1,6 @@
 import hashlib
 import io
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,6 +26,11 @@ def test_release_manifest_points_to_owner_repository():
     )
     assert set(model_download.MODEL_ASSETS) == {"tiny", "base", "small"}
     assert all(len(asset.sha256) == 64 for asset in model_download.MODEL_ASSETS.values())
+    assert [asset.file_name for asset in model_download.MEDIUM_ASSETS] == [
+        "medium.part1",
+        "medium.part2",
+    ]
+    assert sum(asset.size for asset in model_download.MEDIUM_ASSETS) == 3_055_735_323
 
 
 def test_file_sha256_streams_complete_file(tmp_path):
@@ -84,8 +90,103 @@ def test_valid_cached_model_skips_network(tmp_path, monkeypatch):
     assert result.cached is True
 
 
-def test_medium_stops_before_downloading_missing_part(tmp_path):
-    with pytest.raises(ModelDownloadError, match="medium.part2"):
+def test_medium_downloads_parts_merges_and_removes_them(tmp_path, monkeypatch):
+    first = b"medium-first-"
+    second = b"medium-second"
+    assets = (
+        ModelAsset("medium.part1", len(first), hashlib.sha256(first).hexdigest()),
+        ModelAsset("medium.part2", len(second), hashlib.sha256(second).hexdigest()),
+    )
+    full_digest = hashlib.sha256(first + second).hexdigest()
+    monkeypatch.setattr(model_download, "MEDIUM_ASSETS", assets)
+    monkeypatch.setattr(model_download, "MEDIUM_RELEASE_SHA256", full_digest)
+    monkeypatch.setitem(model_download.ACCEPTED_MODEL_HASHES, "medium", {full_digest})
+    requests = []
+
+    def opener(request, timeout):
+        requests.append(request.full_url)
+        payload = first if request.full_url.endswith("medium.part1") else second
+        return FakeResponse(payload)
+
+    result = download_model("medium", tmp_path, opener=opener, sleeper=lambda _wait: None)
+
+    assert result.path.read_bytes() == first + second
+    assert requests[0].endswith("medium.part1")
+    assert requests[1].endswith("medium.part2")
+    assert not (tmp_path / "medium.part1").exists()
+    assert not (tmp_path / "medium.part2").exists()
+    assert not (tmp_path / "medium.pt.assembling").exists()
+
+
+def test_medium_reuses_verified_part_and_only_downloads_missing_part(tmp_path, monkeypatch):
+    first = b"already-downloaded"
+    second = b"missing-part"
+    assets = (
+        ModelAsset("medium.part1", len(first), hashlib.sha256(first).hexdigest()),
+        ModelAsset("medium.part2", len(second), hashlib.sha256(second).hexdigest()),
+    )
+    full_digest = hashlib.sha256(first + second).hexdigest()
+    monkeypatch.setattr(model_download, "MEDIUM_ASSETS", assets)
+    monkeypatch.setattr(model_download, "MEDIUM_RELEASE_SHA256", full_digest)
+    monkeypatch.setitem(model_download.ACCEPTED_MODEL_HASHES, "medium", {full_digest})
+    (tmp_path / "medium.part1").write_bytes(first)
+
+    def opener(request, timeout):
+        assert request.full_url.endswith("medium.part2")
+        return FakeResponse(second)
+
+    result = download_model("medium", tmp_path, opener=opener, sleeper=lambda _wait: None)
+
+    assert result.path.read_bytes() == first + second
+
+
+def test_medium_cancellation_removes_assembling_file_but_keeps_verified_parts(
+    tmp_path, monkeypatch
+):
+    first = b"first"
+    second = b"second"
+    assets = (
+        ModelAsset("medium.part1", len(first), hashlib.sha256(first).hexdigest()),
+        ModelAsset("medium.part2", len(second), hashlib.sha256(second).hexdigest()),
+    )
+    full_digest = hashlib.sha256(first + second).hexdigest()
+    monkeypatch.setattr(model_download, "MEDIUM_ASSETS", assets)
+    monkeypatch.setattr(model_download, "MEDIUM_RELEASE_SHA256", full_digest)
+    monkeypatch.setitem(model_download.ACCEPTED_MODEL_HASHES, "medium", {full_digest})
+    (tmp_path / "medium.part1").write_bytes(first)
+    (tmp_path / "medium.part2").write_bytes(second)
+    cancel_merge = False
+
+    def progress(_percent, message):
+        nonlocal cancel_merge
+        if "已校验" in message and "2/2" in message:
+            cancel_merge = True
+
+    with pytest.raises(model_download.DownloadCancelled):
+        download_model(
+            "medium",
+            tmp_path,
+            progress=progress,
+            cancelled=lambda: cancel_merge,
+            opener=lambda *_args, **_kwargs: pytest.fail("network should not be used"),
+        )
+
+    assert (tmp_path / "medium.part1").read_bytes() == first
+    assert (tmp_path / "medium.part2").read_bytes() == second
+    assert not (tmp_path / "medium.pt.assembling").exists()
+
+
+def test_medium_checks_peak_disk_space_before_network(tmp_path, monkeypatch):
+    first = b"first"
+    second = b"second"
+    assets = (
+        ModelAsset("medium.part1", len(first), hashlib.sha256(first).hexdigest()),
+        ModelAsset("medium.part2", len(second), hashlib.sha256(second).hexdigest()),
+    )
+    monkeypatch.setattr(model_download, "MEDIUM_ASSETS", assets)
+    monkeypatch.setattr(model_download.shutil, "disk_usage", lambda _path: SimpleNamespace(free=0))
+
+    with pytest.raises(ModelDownloadError, match="磁盘空间不足"):
         download_model(
             "medium",
             tmp_path,

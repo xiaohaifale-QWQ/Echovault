@@ -200,7 +200,7 @@ class SettingsDialog(QDialog):
             ("tiny (~144 MB, 最快)", "tiny"),
             ("base (~139 MB, 推荐)", "base"),
             ("small (~922 MB)", "small"),
-            ("medium (Release 缺少 part2，暂不可下载)", "medium"),
+            ("medium (~2.85 GB, 更准确)", "medium"),
         ]:
             self.model_combo.addItem(t, v)
         self.model_combo.setVisible(False); af.addRow("本地模型:", self.model_combo)

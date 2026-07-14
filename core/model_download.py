@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import time
 import urllib.error
 import urllib.request
@@ -62,6 +63,20 @@ MODEL_ASSETS = {
     ),
 }
 
+MEDIUM_ASSETS = (
+    ModelAsset(
+        "medium.part1",
+        1_527_867_662,
+        "89b46173a8d88c5c5e635870476d33a6eed8b198b8d5278fe7b3a317953c9744",
+    ),
+    ModelAsset(
+        "medium.part2",
+        1_527_867_661,
+        "36352cde5925c11b1f16b6ff6c7c9b6d43ae5b597e73bb3887df458e048be67d",
+    ),
+)
+MEDIUM_RELEASE_SHA256 = "96d734d68ad5d63c8f41d525f5769788432f6963f32dbe36feefaa33d736a962"
+
 # Existing official OpenAI checkpoints remain valid, even when their hash differs
 # from the checkpoint mirrored in the Echovault release.
 ACCEPTED_MODEL_HASHES = {
@@ -74,14 +89,10 @@ ACCEPTED_MODEL_HASHES = {
         MODEL_ASSETS["small"].sha256,
         "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794",
     },
-    "medium": {"345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1"},
-}
-
-UNAVAILABLE_MODELS = {
-    "medium": (
-        "GitHub Release v1.0 目前只有 medium.part1，缺少 medium.part2。"
-        "为避免浪费约 1.5 GB 空间，本次不会开始下载；补齐第二个分片后即可支持。"
-    )
+    "medium": {
+        MEDIUM_RELEASE_SHA256,
+        "345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1",
+    },
 }
 
 ProgressCallback = Callable[[int, str], None]
@@ -130,11 +141,21 @@ def download_model(
     if model_path.exists():
         progress(0, f"正在校验 {model} 模型...")
         if _is_valid_cached_model(model_path, model):
+            if model == "medium":
+                _cleanup_medium_parts(target_dir)
             return DownloadResult(model_path, cached=True)
         model_path.unlink()
 
-    if model in UNAVAILABLE_MODELS:
-        raise ModelDownloadError(UNAVAILABLE_MODELS[model])
+    if model == "medium":
+        _download_medium_model(
+            target_dir,
+            model_path,
+            progress=progress,
+            cancelled=cancelled,
+            opener=opener,
+            sleeper=sleeper,
+        )
+        return DownloadResult(model_path, cached=False)
     if model not in MODEL_ASSETS:
         raise ModelDownloadError(f"不支持的模型: {model}")
     if cancelled():
@@ -150,6 +171,118 @@ def download_model(
         sleeper=sleeper,
     )
     return DownloadResult(model_path, cached=False)
+
+
+def _asset_is_valid(path: Path, asset: ModelAsset) -> bool:
+    return (
+        path.is_file() and path.stat().st_size == asset.size and file_sha256(path) == asset.sha256
+    )
+
+
+def _cleanup_medium_parts(target_dir: Path) -> None:
+    names = [asset.file_name for asset in MEDIUM_ASSETS]
+    names.extend(f"{asset.file_name}.download" for asset in MEDIUM_ASSETS)
+    names.append("medium.pt.assembling")
+    for name in names:
+        (target_dir / name).unlink(missing_ok=True)
+
+
+def _download_medium_model(
+    target_dir: Path,
+    model_path: Path,
+    *,
+    progress: ProgressCallback,
+    cancelled: CancelCallback,
+    opener: Callable[..., object],
+    sleeper: Callable[[float], None],
+) -> None:
+    assembling_path = target_dir / "medium.pt.assembling"
+    assembling_path.unlink(missing_ok=True)
+    part_paths = [target_dir / asset.file_name for asset in MEDIUM_ASSETS]
+    valid_parts = []
+    remaining_download_bytes = 0
+
+    for index, (asset, part_path) in enumerate(zip(MEDIUM_ASSETS, part_paths, strict=True), 1):
+        if part_path.exists():
+            progress(0, f"正在校验 medium 分片 {index}/{len(MEDIUM_ASSETS)}...")
+        valid = _asset_is_valid(part_path, asset)
+        valid_parts.append(valid)
+        if valid:
+            continue
+        part_path.unlink(missing_ok=True)
+        partial_path = part_path.with_name(part_path.name + ".download")
+        partial_size = partial_path.stat().st_size if partial_path.exists() else 0
+        if partial_size > asset.size:
+            partial_path.unlink()
+            partial_size = 0
+        remaining_download_bytes += asset.size - partial_size
+
+    full_size = sum(asset.size for asset in MEDIUM_ASSETS)
+    safety_margin = 256 * 1024 * 1024
+    required_free = remaining_download_bytes + full_size + safety_margin
+    available_free = shutil.disk_usage(target_dir).free
+    if available_free < required_free:
+        raise ModelDownloadError(
+            "磁盘空间不足：medium 下载和合并还需要约 "
+            f"{required_free / 1024 / 1024 / 1024:.1f} GB，"
+            f"当前可用 {available_free / 1024 / 1024 / 1024:.1f} GB"
+        )
+
+    part_count = len(MEDIUM_ASSETS)
+    for index, (asset, part_path, valid) in enumerate(
+        zip(MEDIUM_ASSETS, part_paths, valid_parts, strict=True)
+    ):
+        start_percent = index * 80 // part_count
+        span = 80 // part_count
+        if valid:
+            progress(start_percent + span, f"medium 分片 {index + 1}/{part_count} 已校验")
+            continue
+
+        def part_progress(percent: int, message: str, *, _index: int = index) -> None:
+            overall = start_percent + percent * span // 100
+            progress(overall, f"medium 分片 {_index + 1}/{part_count} | {message}")
+
+        _download_asset(
+            asset,
+            part_path,
+            progress=part_progress,
+            cancelled=cancelled,
+            opener=opener,
+            sleeper=sleeper,
+        )
+
+    digest = hashlib.sha256()
+    written = 0
+    try:
+        with open(assembling_path, "xb") as output:
+            for part_path in part_paths:
+                with open(part_path, "rb") as part_file:
+                    while True:
+                        if cancelled():
+                            raise DownloadCancelled("下载已取消")
+                        chunk = part_file.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+                        digest.update(chunk)
+                        written += len(chunk)
+                        merge_percent = 80 + min(19, int(written * 19 / full_size))
+                        progress(
+                            merge_percent,
+                            f"正在合并 medium 模型 | {written / 1024 / 1024:.0f}/"
+                            f"{full_size / 1024 / 1024:.0f} MB",
+                        )
+
+        progress(99, "正在校验完整 medium 模型...")
+        if written != full_size or digest.hexdigest() != MEDIUM_RELEASE_SHA256:
+            raise ModelDownloadError("medium 完整模型 SHA-256 校验失败")
+        os.replace(assembling_path, model_path)
+    except Exception:
+        assembling_path.unlink(missing_ok=True)
+        raise
+
+    _cleanup_medium_parts(target_dir)
+    progress(100, "medium 模型下载、合并及校验完成")
 
 
 def _download_asset(
