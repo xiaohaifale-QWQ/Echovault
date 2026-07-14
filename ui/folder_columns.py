@@ -54,6 +54,12 @@ class FolderColumnsBrowser(QWidget):
         roots = [path for path in directories if os.path.isdir(path)]
         self._add_column("素材文件夹", roots, roots=True)
         self._current_folder = roots[0] if roots else ""
+        # Show the first added folder's contents immediately in the right column.
+        if roots:
+            first_root = roots[0]
+            self._add_column(
+                os.path.basename(first_root) or first_root, self._entries_for(first_root)
+            )
 
     def _clear_columns(self) -> None:
         self._columns.clear()
@@ -101,7 +107,7 @@ class FolderColumnsBrowser(QWidget):
         layout.addWidget(listing)
         self._content_layout.insertWidget(self._content_layout.count() - 1, column)
         self._columns.append((None if roots else title, listing))
-        self._content.setMinimumWidth(len(self._columns) * 239)
+        self._content.setFixedWidth(max(238, len(self._columns) * 239))
 
     def _select_item(self, item: QListWidgetItem) -> None:
         path = str(item.data(Qt.ItemDataRole.UserRole) or "")
@@ -124,7 +130,7 @@ class FolderColumnsBrowser(QWidget):
             old_column = old_listing.parentWidget()
             self._content_layout.removeWidget(old_column)
             old_column.deleteLater()
-        self._content.setMinimumWidth(len(self._columns) * 239)
+        self._content.setFixedWidth(max(238, len(self._columns) * 239))
         self._current_folder = path
         self.folder_selected.emit(path)
         self._add_column(os.path.basename(path) or path, self._entries_for(path))
