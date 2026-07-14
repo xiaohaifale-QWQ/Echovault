@@ -27,10 +27,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $TorchReport = & $Python -c "import torch; print('cuda=' + str(torch.version.cuda)); print('available=' + str(torch.cuda.is_available()))"
-if ($Backend -eq "cuda" -and $TorchReport -notmatch "cuda=.+" ) {
+$TorchReportText = $TorchReport -join "`n"
+if ($Backend -eq "cuda" -and $TorchReportText -notmatch "cuda=.+") {
     throw "CUDA runtime build requires a CUDA-enabled Torch wheel in the selected Python environment."
 }
-if ($Backend -eq "cpu" -and $TorchReport -match "cuda=.+") {
+if ($Backend -eq "cpu" -and $TorchReportText -match "cuda=.+") {
     Write-Warning "Building a CPU package with a CUDA Torch environment; use a CPU Torch build to keep the package small."
 }
 
