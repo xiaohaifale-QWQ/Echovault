@@ -21,6 +21,19 @@ from worker.whisper_service import WhisperService, WorkerCommandError
 WORKER_VERSION = "0.1.0"
 
 
+def _write_protocol(message: dict[str, Any]) -> bool:
+    """Write one protocol message without crashing a windowed worker without stdout."""
+    try:
+        stdout = sys.stdout
+        if stdout is None or stdout.closed:
+            return False
+        stdout.write(encode_message(message) + "\n")
+        stdout.flush()
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def _handle(
     request: dict[str, Any],
     service: WhisperService,
@@ -82,21 +95,24 @@ def _handle(
 
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+        except (OSError, ValueError):
+            pass
     logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(levelname)s %(message)s")
     service = WhisperService()
-    for raw in sys.stdin:
+    stdin = sys.stdin
+    if stdin is None:
+        return 0
+    for raw in stdin:
         request_id: str | None = None
         try:
             request = decode_message(raw)
             request_id = request.get("id") if isinstance(request.get("id"), str) else None
 
             def progress(percent: int, message: str) -> None:
-                print(
-                    encode_message(
-                        make_response(request_id, "progress", percent=percent, message=message)
-                    ),
-                    flush=True,
+                _write_protocol(
+                    make_response(request_id, "progress", percent=percent, message=message)
                 )
 
             response, should_stop = _handle(request, service, progress)
@@ -107,7 +123,9 @@ def main() -> int:
             logging.exception("Worker command failed")
             response = make_response(None, "error", code="WORKER_ERROR", message=str(exc))
             should_stop = False
-        print(encode_message(response), flush=True)
+        if not _write_protocol(response):
+            service.release_model()
+            return 0
         if should_stop:
             service.release_model()
             return 0

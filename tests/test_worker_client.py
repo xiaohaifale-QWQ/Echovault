@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from core.asr.worker_client import WorkerClient, WorkerRemoteError
+from worker import asr_worker
 
 
 def _worker_client() -> WorkerClient:
@@ -33,3 +34,18 @@ def test_worker_client_exposes_structured_remote_errors():
         client.close()
 
     assert exc_info.value.code == "UNKNOWN_ACTION"
+
+
+def test_worker_protocol_writer_handles_unavailable_stdout(monkeypatch):
+    class BrokenStdout:
+        closed = False
+
+        def write(self, _text):
+            raise OSError(22, "Invalid argument")
+
+        def flush(self):
+            raise OSError(22, "Invalid argument")
+
+    monkeypatch.setattr(asr_worker.sys, "stdout", BrokenStdout())
+
+    assert not asr_worker._write_protocol({"type": "result"})
