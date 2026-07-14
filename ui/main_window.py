@@ -269,6 +269,12 @@ class MainWindow(QMainWindow):
     def _on_folder_selected(self, folder_path: str):
         """文件夹被选中 → 扫描当前模式的素材"""
         self._selected_material_folder = folder_path
+        if not folder_path:
+            self.song_list_panel.load_songs([], root_dir="")
+            self.library_panel.clear_video_materials()
+            self._refresh_statusbar()
+            self.status_label.setText("已取消添加素材文件夹")
+            return
         self.status_label.setText(f"扫描中: {folder_path}...")
         directories = (
             self.config.video_dirs if self.library_panel.mode == "video" else self.config.music_dirs
@@ -350,7 +356,10 @@ class MainWindow(QMainWindow):
 
     def _on_material_directories_changed(self, mode: str, directories: list[str]):
         if mode == "video":
+            removed = set(self.config.video_dirs) - set(directories)
             self.config.video_dirs = directories
+            for folder_path in removed:
+                self.config.video_time_offsets.pop(str(Path(folder_path).resolve()), None)
         else:
             self.config.music_dirs = directories
         config_manager.save()

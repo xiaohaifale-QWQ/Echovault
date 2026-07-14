@@ -198,6 +198,7 @@ class LibraryPanel(QWidget):
         self.folder_browser = FolderColumnsBrowser()
         self.folder_browser.folder_selected.connect(self.folder_selected)
         self.folder_browser.material_selected.connect(self.material_selected)
+        self.folder_browser.root_removal_requested.connect(self._remove_directory)
         folder_layout.addWidget(self.folder_browser)
         splitter.addWidget(folder_section)
 
@@ -332,6 +333,16 @@ class LibraryPanel(QWidget):
             self.directories_changed.emit(self._mode, list(self._directories[self._mode]))
         self._refresh_folders()
         self.folder_selected.emit(resolved)
+
+    def _remove_directory(self, folder_path: str):
+        """Remove only an added root; it never touches the user's source files."""
+        directories = self._directories[self._mode]
+        if folder_path not in directories:
+            return
+        directories.remove(folder_path)
+        self.directories_changed.emit(self._mode, list(directories))
+        self._refresh_folders()
+        self.folder_selected.emit(directories[0] if directories else "")
 
     def _on_reference_changed(self):
         video = self.reference_combo.currentData(Qt.ItemDataRole.UserRole)

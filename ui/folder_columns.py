@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -27,6 +28,7 @@ class FolderColumnsBrowser(QWidget):
 
     folder_selected = pyqtSignal(str)
     material_selected = pyqtSignal(str)
+    root_removal_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -107,6 +109,10 @@ class FolderColumnsBrowser(QWidget):
             listing.addItem(item)
         listing.itemClicked.connect(self._select_item)
         listing.itemDoubleClicked.connect(self._open_item)
+        listing.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        listing.customContextMenuRequested.connect(
+            lambda position, target=listing: self._show_context_menu(target, position)
+        )
         layout.addWidget(listing)
         self._content_layout.insertWidget(self._content_layout.count() - 1, column)
         self._columns.append((None if roots else title, listing))
@@ -145,3 +151,17 @@ class FolderColumnsBrowser(QWidget):
                 self._scroll.horizontalScrollBar().maximum()
             ),
         )
+
+    def _show_context_menu(self, listing: QListWidget, position) -> None:
+        item = listing.itemAt(position)
+        if not item or not item.data(Qt.ItemDataRole.UserRole + 1):
+            return
+        folder_path = str(item.data(Qt.ItemDataRole.UserRole) or "")
+        if not folder_path:
+            return
+        menu = QMenu(self)
+        remove_action = menu.addAction("取消添加此文件夹")
+        remove_action.triggered.connect(
+            lambda _checked=False, path=folder_path: self.root_removal_requested.emit(path)
+        )
+        menu.exec(listing.mapToGlobal(position))

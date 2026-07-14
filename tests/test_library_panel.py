@@ -106,3 +106,23 @@ def test_select_all_precedes_add_folder_and_mode_text_is_on_the_switch():
     add_folder_index = panel.folder_header.indexOf(panel.btn_add)
     assert select_all_index < add_folder_index
     assert panel.mode_switch.minimumHeight() == 54
+
+
+def test_removing_added_root_keeps_source_files_and_refreshes_roots(tmp_path):
+    _app()
+    root = tmp_path / "music"
+    root.mkdir()
+    source = root / "song.mp3"
+    source.write_bytes(b"audio")
+    panel = LibraryPanel()
+    changes = []
+    selected = []
+    panel.directories_changed.connect(lambda mode, directories: changes.append((mode, directories)))
+    panel.folder_selected.connect(selected.append)
+    panel.set_directories([str(root)], [])
+
+    panel._remove_directory(str(root))
+
+    assert source.is_file()
+    assert changes == [("music", [])]
+    assert selected[-1] == ""
