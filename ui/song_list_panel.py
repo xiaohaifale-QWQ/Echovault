@@ -190,15 +190,27 @@ class SongListPanel(QWidget):
             old_lrc = old_path.with_suffix(".lrc"); new_lrc = new_path.with_suffix(".lrc")
             if old_lrc.exists(): os.rename(str(old_lrc), str(new_lrc))
         except Exception as e: QMessageBox.critical(self, "rename failed", str(e)); return
-        for s in self._songs:
-            if s["path"] == old_str: s["path"] = new_str; s["name"] = new_name
-            if Path(new_lrc).exists(): s["lrc_path"] = str(new_lrc)
-            break
+        self._update_renamed_song(old_str, new_str, new_name, new_lrc)
         self._build_fmt_items(); self._do_refresh()
         for r in range(self.table.rowCount()):
             it = self.table.item(r, 0)
             d = it.data(Qt.ItemDataRole.UserRole) if it else None
             if d and d.get("path") == new_str: self.table.selectRow(r); self.song_selected.emit(d); break
+
+    def _update_renamed_song(self, old_path, new_path, new_name, new_lrc):
+        """Keep the in-memory library record in sync after a successful rename."""
+        for s in self._songs:
+            if s["path"] != old_path:
+                continue
+            s["path"] = new_path
+            s["name"] = new_name
+            s["has_lrc"] = new_lrc.exists()
+            s["lrc_path"] = str(new_lrc) if s["has_lrc"] else None
+            if old_path in self._instrumental:
+                self._instrumental.remove(old_path)
+                self._instrumental.add(new_path)
+                self._save_instrumental()
+            break
 
     def get_selected_songs(self):
         s = []; 
