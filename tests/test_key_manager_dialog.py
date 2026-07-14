@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QLabel
 
 from core.config import AppConfig, config_manager
 from ui.key_manager_dialog import KeyManagerDialog
@@ -29,3 +29,13 @@ def test_key_manager_saves_all_keys_locally(tmp_path, monkeypatch):
     assert config.ai_base_url == "https://example.invalid"
     assert config.ai_model_name == "test-model"
     assert (tmp_path / "config.json").is_file()
+
+
+def test_provider_names_link_to_their_official_consoles():
+    _app()
+    dialog = KeyManagerDialog(AppConfig())
+    links = {label.text() for label in dialog.findChildren(QLabel) if "href=" in label.text()}
+
+    assert any("https://console.groq.com/keys" in link for link in links)
+    assert any("https://console.xfyun.cn/" in link for link in links)
+    assert any("https://platform.deepseek.com/api_keys" in link for link in links)

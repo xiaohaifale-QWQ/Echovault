@@ -96,3 +96,13 @@ def test_select_all_is_tracked_per_material_mode():
 
     assert panel.select_all is True
     assert changes == [("music", True), ("video", True)]
+
+
+def test_select_all_precedes_add_folder_and_mode_text_is_on_the_switch():
+    _app()
+    panel = LibraryPanel()
+
+    select_all_index = panel.folder_header.indexOf(panel.select_all_check)
+    add_folder_index = panel.folder_header.indexOf(panel.btn_add)
+    assert select_all_index < add_folder_index
+    assert panel.mode_switch.minimumHeight() == 54

@@ -41,10 +41,19 @@ class KeyManagerDialog(QDialog):
         self.groq_proxy_input.setPlaceholderText("可选，例如 http://127.0.0.1:7890")
         self.xunfei_input = self._key_input(config.xunfei_api_key)
         self.ai_input = self._key_input(config.ai_model_api_key)
-        form.addRow("Groq API Key:", self.groq_input)
+        form.addRow(
+            self._provider_label("Groq API Key:", "https://console.groq.com/keys"),
+            self.groq_input,
+        )
         form.addRow("Groq 代理地址（可选）:", self.groq_proxy_input)
-        form.addRow("讯飞 API Key:", self.xunfei_input)
-        form.addRow("DeepSeek API Key:", self.ai_input)
+        form.addRow(
+            self._provider_label("讯飞 API Key:", "https://console.xfyun.cn/"),
+            self.xunfei_input,
+        )
+        form.addRow(
+            self._provider_label("DeepSeek API Key:", "https://platform.deepseek.com/api_keys"),
+            self.ai_input,
+        )
         self.ai_base_url = QLineEdit(config.ai_base_url)
         self.ai_model_name = QLineEdit(config.ai_model_name)
         form.addRow("AI 接口地址:", self.ai_base_url)
@@ -69,6 +78,13 @@ class KeyManagerDialog(QDialog):
         field.setEchoMode(QLineEdit.EchoMode.Password)
         field.setPlaceholderText("留空以删除本机保存的密钥")
         return field
+
+    @staticmethod
+    def _provider_label(text: str, url: str) -> QLabel:
+        label = QLabel(f'<a href="{url}">{text}</a>')
+        label.setOpenExternalLinks(True)
+        label.setToolTip("打开服务官网")
+        return label
 
     def _save(self) -> None:
         self.config.groq_api_key = self.groq_input.text().strip()

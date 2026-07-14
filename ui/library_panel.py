@@ -52,10 +52,10 @@ class MaterialModeSwitch(QWidget):
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip("滑动切换音乐模式与视频模式")
-        self.setMinimumHeight(72)
+        self.setMinimumHeight(54)
 
     def sizeHint(self):
-        return QSize(260, 72)
+        return QSize(260, 54)
 
     def setChecked(self, checked: bool):
         checked = bool(checked)
@@ -84,49 +84,27 @@ class MaterialModeSwitch(QWidget):
 
     def paintEvent(self, _event):
         painter = QPainter(self)
-        label_area = self.rect().adjusted(2, 2, -2, -44)
-        label_width = label_area.width() // 2
-        active_label = label_area.adjusted(
-            label_width if self._checked else 0,
-            0,
-            0 if self._checked else -label_width,
-            0,
-        )
+        track = self.rect().adjusted(2, 4, -2, -4)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor("#B8BEC6"))
-        painter.drawRect(active_label)
-        font = painter.font()
-        font.setBold(True)
-        painter.setFont(font)
-        painter.setPen(QColor("#3D4650"))
-        left_label = label_area.adjusted(4, 0, -label_width, 0)
-        right_label = label_area.adjusted(label_width, 0, -4, 0)
-        painter.drawText(left_label, Qt.AlignmentFlag.AlignCenter, "\u97f3\u4e50\u6a21\u5f0f")
-        painter.drawText(right_label, Qt.AlignmentFlag.AlignCenter, "\u89c6\u9891\u6a21\u5f0f")
-        painter.setPen(QColor("#FFFFFF"))
-        painter.drawText(
-            active_label,
-            Qt.AlignmentFlag.AlignCenter,
-            "\u89c6\u9891\u6a21\u5f0f" if self._checked else "\u97f3\u4e50\u6a21\u5f0f",
-        )
-
-        track = self.rect().adjusted(2, 30, -2, -4)
-        painter.setPen(QColor("#B8BEC6"))
-        painter.setBrush(QColor("#E5E7EA"))
         painter.drawRect(track)
-        painter.setPen(QColor("#3D4650"))
+
+        half_width = track.width() // 2
+        knob_width = max(32, half_width - 6)
+        knob_x = track.x() + 3 + (track.width() - knob_width - 6) * self._knob_position
+        painter.setBrush(QColor("#767E87"))
+        painter.setPen(QColor("#626A73"))
+        painter.drawRect(int(knob_x), track.y() + 3, knob_width, track.height() - 6)
+
         font = painter.font()
         font.setBold(True)
         painter.setFont(font)
-        left_rect = track.adjusted(0, 0, -track.width(), 0)
-        right_rect = track.adjusted(track.width(), 0, 0, 0)
+        left_rect = track.adjusted(0, 0, -half_width, 0)
+        right_rect = track.adjusted(half_width, 0, 0, 0)
+        painter.setPen(QColor("#FFFFFF") if not self._checked else QColor("#3D4650"))
         painter.drawText(left_rect, Qt.AlignmentFlag.AlignCenter, "音乐模式")
+        painter.setPen(QColor("#FFFFFF") if self._checked else QColor("#3D4650"))
         painter.drawText(right_rect, Qt.AlignmentFlag.AlignCenter, "视频模式")
-        knob_width = max(32, track.width() // 2 - 6)
-        knob_x = track.x() + 3 + (track.width() - knob_width - 6) * self._knob_position
-        painter.setBrush(QColor("#8B939D"))
-        painter.setPen(QColor("#707780"))
-        painter.drawRect(int(knob_x), track.y() + 3, knob_width, track.height() - 6)
 
 
 class TimeOffsetDash(QLabel):
@@ -204,10 +182,15 @@ class LibraryPanel(QWidget):
         folder_layout = QVBoxLayout(folder_section)
         folder_layout.setContentsMargins(0, 0, 0, 0)
         header = QHBoxLayout()
+        self.folder_header = header
         self.title = QLabel("素材库（音乐模式）")
         self.title.setStyleSheet("font-weight:bold;font-size:13px;padding:4px")
         header.addWidget(self.title)
         header.addStretch()
+        self.select_all_check = QCheckBox("全选")
+        self.select_all_check.setToolTip("勾选后，详情页显示当前模式下所有素材文件夹的内容")
+        self.select_all_check.toggled.connect(self._on_select_all_toggled)
+        header.addWidget(self.select_all_check)
         self.btn_add = QPushButton("添加文件夹")
         self.btn_add.clicked.connect(self._add_directory)
         header.addWidget(self.btn_add)
@@ -221,15 +204,9 @@ class LibraryPanel(QWidget):
         controls = QWidget()
         controls_layout = QVBoxLayout(controls)
         controls_layout.setContentsMargins(4, 4, 4, 4)
-        mode_row = QHBoxLayout()
         self.mode_switch = MaterialModeSwitch()
         self.mode_switch.toggled.connect(self._switch_mode)
-        mode_row.addWidget(self.mode_switch, 1)
-        self.select_all_check = QCheckBox("全选")
-        self.select_all_check.setToolTip("勾选后，详情页显示当前模式下所有素材文件夹的内容")
-        self.select_all_check.toggled.connect(self._on_select_all_toggled)
-        mode_row.addWidget(self.select_all_check)
-        controls_layout.addLayout(mode_row)
+        controls_layout.addWidget(self.mode_switch)
 
         self.video_controls = QWidget()
         video_layout = QVBoxLayout(self.video_controls)
