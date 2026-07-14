@@ -39,6 +39,8 @@ class SyncConfig:
 class AppConfig:
     """应用全局配置"""
     music_dirs: list[str] = field(default_factory=list)
+    video_dirs: list[str] = field(default_factory=list)
+    video_time_offsets: dict[str, int] = field(default_factory=dict)
     output_lrc_dir: Optional[str] = None   # None=与音频同目录
     asr: ASRConfig = field(default_factory=ASRConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
@@ -97,6 +99,8 @@ class ConfigManager:
         return {
             "schema_version": CONFIG_SCHEMA_VERSION,
             "music_dirs": c.music_dirs,
+            "video_dirs": c.video_dirs,
+            "video_time_offsets": c.video_time_offsets,
             "output_lrc_dir": c.output_lrc_dir,
             "groq_api_key": c.groq_api_key,
             "xunfei_api_key": c.xunfei_api_key,
@@ -118,6 +122,13 @@ class ConfigManager:
     def _deserialize(self, data: dict):
         c = self.config
         c.music_dirs = data.get("music_dirs", [])
+        c.video_dirs = [value for value in data.get("video_dirs", []) if isinstance(value, str)]
+        offsets = data.get("video_time_offsets", {})
+        c.video_time_offsets = {
+            key: value
+            for key, value in offsets.items()
+            if isinstance(key, str) and isinstance(value, int)
+        } if isinstance(offsets, dict) else {}
         c.output_lrc_dir = data.get("output_lrc_dir")
         c.groq_api_key = os.environ.get("GROQ_API_KEY") or data.get("groq_api_key", "")
         c.xunfei_api_key = os.environ.get("XUNFEI_API_KEY") or data.get("xunfei_api_key", "")
@@ -161,6 +172,8 @@ def update_config_value(config: AppConfig, key: str, value: str) -> None:
         config.output_lrc_dir = None if value.lower() in {"none", "null"} else value
     elif key == "music_dirs":
         config.music_dirs = [value]
+    elif key == "video_dirs":
+        config.video_dirs = [value]
     elif key == "groq_api_key":
         config.groq_api_key = value
     elif key == "xunfei_api_key":

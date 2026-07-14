@@ -11,6 +11,8 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     manager.config.groq_api_key = "groq-secret"
     manager.config.xunfei_api_key = "xunfei-secret"
     manager.config.music_dirs = ["D:/Music"]
+    manager.config.video_dirs = ["D:/Video"]
+    manager.config.video_time_offsets = {"D:/Video": 120}
 
     manager.save()
     loaded = ConfigManager(path).load()
@@ -18,6 +20,8 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     assert loaded.groq_api_key == "groq-secret"
     assert loaded.xunfei_api_key == "xunfei-secret"
     assert loaded.music_dirs == ["D:/Music"]
+    assert loaded.video_dirs == ["D:/Video"]
+    assert loaded.video_time_offsets == {"D:/Video": 120}
 
     raw = json.loads(path.read_text(encoding="utf-8"))
     assert raw["schema_version"] == CONFIG_SCHEMA_VERSION
