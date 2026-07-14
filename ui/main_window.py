@@ -11,13 +11,12 @@
 """
 
 import os
-from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QMainWindow, QSplitter, QMenuBar, QMenu, QStatusBar,
     QMessageBox, QFileDialog, QLabel, QWidget, QVBoxLayout,
-    QTabWidget, QPushButton, QProgressBar, QInputDialog,
+    QTabWidget, QPushButton, QProgressBar,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
@@ -26,7 +25,7 @@ from core.config import config_manager, AppConfig
 from core.asr.router import ASRRouter, get_router
 from core.environment import build_environment_report
 from services.library_service import scan_audio
-from core.video_library import calibration_offset_seconds, scan_videos, video_timestamp
+from core.video_library import scan_videos
 from core.video_aggregation import write_video_transcript_timeline
 
 from ui.library_panel import LibraryPanel
@@ -257,27 +256,16 @@ class MainWindow(QMainWindow):
         config_manager.save()
 
     def _on_video_calibrate(self, folder_path: str):
-        selected = self.song_list_panel.get_selected_songs()
-        video = selected[0] if selected and selected[0].get("material_type") == "video" else None
-        if not video:
-            QMessageBox.information(self, "时间校准", "请先在素材列表中选中一个作为参考的视频文件。")
+        from ui.video_calibration_dialog import VideoCalibrationDialog
+
+        existing_offset = self.config.video_time_offsets.get(str(Path(folder_path).resolve()), 0)
+        dialog = VideoCalibrationDialog(folder_path, existing_offset, self)
+        if not dialog.selected_video:
+            QMessageBox.information(self, "时间校准", "当前文件夹中没有可用于校准的视频文件。")
             return
-        recorded_start, _source = video_timestamp(video["path"])
-        default_value = recorded_start.strftime("%Y-%m-%d %H:%M:%S")
-        value, accepted = QInputDialog.getText(
-            self,
-            "时间校准",
-            "请输入该参考视频的真实起始日期时间（YYYY-MM-DD HH:MM:SS）：",
-            text=default_value,
-        )
-        if not accepted:
+        if not dialog.exec():
             return
-        try:
-            actual_start = datetime.strptime(value.strip(), "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            QMessageBox.warning(self, "时间校准", "日期格式应为 YYYY-MM-DD HH:MM:SS。")
-            return
-        offset = calibration_offset_seconds(recorded_start, actual_start)
+        offset = dialog.offset_seconds
         self.config.video_time_offsets[str(Path(folder_path).resolve())] = offset
         config_manager.save()
         timeline_path, row_count = write_video_transcript_timeline(folder_path, offset)

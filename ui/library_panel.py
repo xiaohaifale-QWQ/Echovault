@@ -2,9 +2,9 @@
 
 import os
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QSize, Qt, pyqtProperty, pyqtSignal
+from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -14,6 +14,66 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+class MaterialModeSwitch(QWidget):
+    """Animated two-position slide switch used by the material library."""
+
+    toggled = pyqtSignal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._checked = False
+        self._knob_position = 0.0
+        self._animation = QPropertyAnimation(self, b"knob_position", self)
+        self._animation.setDuration(180)
+        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("滑动切换音乐模式与视频模式")
+
+    def sizeHint(self):
+        return QSize(68, 30)
+
+    def isChecked(self):
+        return self._checked
+
+    def setChecked(self, checked: bool):
+        checked = bool(checked)
+        if self._checked == checked:
+            return
+        self._checked = checked
+        self._animation.stop()
+        self._animation.setStartValue(self._knob_position)
+        self._animation.setEndValue(1.0 if checked else 0.0)
+        self._animation.start()
+        self.toggled.emit(checked)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setChecked(not self._checked)
+        super().mouseReleaseEvent(event)
+
+    @pyqtProperty(float)
+    def knob_position(self):
+        return self._knob_position
+
+    @knob_position.setter
+    def knob_position(self, value):
+        self._knob_position = value
+        self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        track = self.rect().adjusted(1, 3, -1, -3)
+        painter.setBrush(QColor("#1976D2") if self._checked else QColor("#43A047"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(track, track.height() / 2, track.height() / 2)
+        diameter = track.height() - 6
+        x_range = track.width() - diameter - 6
+        knob_x = track.x() + 3 + x_range * self._knob_position
+        painter.setBrush(QColor("#FFFFFF"))
+        painter.drawEllipse(int(knob_x), track.y() + 3, diameter, diameter)
 
 
 class LibraryPanel(QWidget):
@@ -65,18 +125,13 @@ class LibraryPanel(QWidget):
         self.video_actions.setVisible(False)
 
         switch_layout = QHBoxLayout()
-        switch_layout.addWidget(QLabel("音乐模式"))
-        self.mode_switch = QCheckBox()
-        self.mode_switch.setToolTip("切换音乐模式与视频模式")
-        self.mode_switch.setStyleSheet(
-            "QCheckBox::indicator{width:42px;height:22px;border-radius:11px;"
-            "background:#90A4AE;}"
-            "QCheckBox::indicator:checked{background:#1976D2;}"
-            "QCheckBox::indicator:unchecked{background:#43A047;}"
-        )
+        self.music_mode_label = QLabel("音乐模式")
+        switch_layout.addWidget(self.music_mode_label)
+        self.mode_switch = MaterialModeSwitch()
         self.mode_switch.toggled.connect(self._switch_mode)
         switch_layout.addWidget(self.mode_switch)
-        switch_layout.addWidget(QLabel("视频模式"))
+        self.video_mode_label = QLabel("视频模式")
+        switch_layout.addWidget(self.video_mode_label)
         switch_layout.addStretch()
         layout.addLayout(switch_layout)
 
@@ -114,6 +169,12 @@ class LibraryPanel(QWidget):
         self.video_actions.setVisible(is_video)
         hint = "选择文件夹即可加载视频素材" if is_video else "选择文件夹即可加载音频素材"
         self.hint.setText(hint)
+        self.music_mode_label.setStyleSheet(
+            "color:#43A047;font-weight:bold" if not is_video else "color:#888"
+        )
+        self.video_mode_label.setStyleSheet(
+            "color:#1976D2;font-weight:bold" if is_video else "color:#888"
+        )
         for path in self._directories[self._mode]:
             root = QTreeWidgetItem([os.path.basename(path) or path])
             root.setData(0, Qt.ItemDataRole.UserRole, path)
