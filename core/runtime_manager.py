@@ -326,6 +326,8 @@ def _download_part(
             status = getattr(response, "status", 200)
             resumed = bool(existing and status == 206)
             received = existing if resumed else 0
+            received_at_start = received
+            started_at = time.monotonic()
             mode = "ab" if resumed else "wb"
             with response, open(partial, mode) as file_handle:
                 while True:
@@ -338,7 +340,16 @@ def _download_part(
                     received += len(chunk)
                     if received > part.size:
                         raise RuntimeManagerError("服务器返回的数据大于运行时分片大小")
-                    progress(min(99, int(received * 100 / part.size)), "GitHub Release 下载中")
+                    progress(
+                        min(99, int(received * 100 / part.size)),
+                        "GitHub Release 下载中 | "
+                        + _format_transfer_status(
+                            received,
+                            part.size,
+                            received - received_at_start,
+                            time.monotonic() - started_at,
+                        ),
+                    )
             if received != part.size:
                 raise RuntimeManagerError("运行时分片下载不完整")
         except RuntimeInstallCancelled:
@@ -505,6 +516,41 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _format_transfer_status(
+    received: int,
+    total: int,
+    transferred_this_attempt: int,
+    elapsed_seconds: float,
+) -> str:
+    """Format download progress without reporting misleading speed during warmup."""
+
+    amount = f"已下载 {_format_bytes(received)}/{_format_bytes(total)}"
+    if elapsed_seconds < 0.2 or transferred_this_attempt <= 0:
+        return f"测速中 | {amount}"
+    speed = transferred_this_attempt / elapsed_seconds
+    remaining = max(0, total - received)
+    return f"{_format_bytes(speed)}/s | {amount} | 预计剩余 {_format_duration(remaining / speed)}"
+
+
+def _format_bytes(value: float) -> str:
+    if value < 1024:
+        return f"{value:.0f} B"
+    if value < 1024**2:
+        return f"{value / 1024:.1f} KB"
+    if value < 1024**3:
+        return f"{value / 1024**2:.1f} MB"
+    return f"{value / 1024**3:.2f} GB"
+
+
+def _format_duration(seconds: float) -> str:
+    rounded = max(0, int(seconds + 0.5))
+    hours, remainder = divmod(rounded, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
 
 
 def _validate_download_url(url: str) -> None:

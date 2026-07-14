@@ -15,6 +15,7 @@ from core.runtime_manager import (
     RuntimeManagerError,
     RuntimePackage,
     RuntimePart,
+    _format_transfer_status,
     active_runtime,
     active_worker_command,
     decode_signature,
@@ -213,3 +214,15 @@ def test_install_runtime_rejects_zip_path_escape(tmp_path):
 
     assert not (tmp_path / "outside.txt").exists()
     assert not (tmp_path / "temp" / "cpu.staging").exists()
+
+
+def test_transfer_status_displays_rate_amount_and_remaining_time():
+    status = _format_transfer_status(
+        6 * 1024 * 1024,
+        10 * 1024 * 1024,
+        4 * 1024 * 1024,
+        2.0,
+    )
+
+    assert status == "2.0 MB/s | 已下载 6.0 MB/10.0 MB | 预计剩余 00:02"
+    assert "测速中" in _format_transfer_status(1024, 2048, 1024, 0.1)
