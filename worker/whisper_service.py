@@ -66,6 +66,7 @@ class WhisperService:
         language: str | None,
         cache_dir: str | None = None,
         *,
+        retry_empty: bool = False,
         progress: ProgressCallback | None = None,
     ) -> dict[str, Any]:
         if not Path(audio_path).is_file():
@@ -76,6 +77,12 @@ class WhisperService:
         options: dict[str, Any] = {"fp16": self._device == "cuda", "verbose": False}
         if language:
             options["language"] = _language_name(language)
+        if retry_empty:
+            options.update(
+                no_speech_threshold=0.9,
+                logprob_threshold=-2.0,
+                condition_on_previous_text=False,
+            )
         progress(25, f"正在使用 {'GPU' if self._device == 'cuda' else 'CPU'} 识别...")
         try:
             result = model.transcribe(audio_path, **options)

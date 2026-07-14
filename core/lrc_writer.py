@@ -375,7 +375,10 @@ def transcribe_and_save_lrc(
         )
 
         if result.is_empty:
-            raise RuntimeError("未能识别出任何歌词内容")
+            raise RuntimeError(
+                "模型未检测到可识别的人声；已自动重试一次。请确认素材包含清晰人声，"
+                "并检查视频是否有音轨。"
+            )
 
         # 3. 转换为 LRC + 后处理
         if progress_callback:

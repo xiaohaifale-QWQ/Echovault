@@ -62,6 +62,7 @@ def _handle(
                 str(request.get("model", "base")),
                 request.get("language") if isinstance(request.get("language"), str) else None,
                 request.get("cache_dir") if isinstance(request.get("cache_dir"), str) else None,
+                retry_empty=bool(request.get("retry_empty")),
                 progress=progress,
             )
         except WorkerCommandError as exc:

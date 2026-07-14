@@ -31,3 +31,21 @@ def test_inline_video_calibration_uses_empty_right_time_as_no_calibration(tmp_pa
     panel._emit_calibration()
     assert emitted[-1][1] == video["captured_at"]
     assert emitted[-1][2] == target
+
+
+def test_double_clicking_folder_opens_a_new_material_column(tmp_path):
+    _app()
+    root = tmp_path / "root"
+    child = root / "child"
+    child.mkdir(parents=True)
+    (child / "audio.mp3").write_bytes(b"")
+    panel = LibraryPanel()
+    panel.set_directories([str(root)], [])
+
+    root_list = panel.folder_browser._columns[0][1]
+    panel.folder_browser._open_item(root_list.item(0))
+    child_list = panel.folder_browser._columns[1][1]
+    panel.folder_browser._open_item(child_list.item(0))
+
+    assert len(panel.folder_browser._columns) == 3
+    assert panel.folder_browser.current_folder == str(child)

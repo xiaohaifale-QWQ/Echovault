@@ -27,15 +27,15 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QSplitter,
-    QTreeWidget,
-    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from ui.folder_columns import FolderColumnsBrowser
+
 
 class MaterialModeSwitch(QWidget):
-    """Full-width animated slide switch with labels painted inside the track."""
+    """Full-width square, neutral-grey slide switch for the two library modes."""
 
     toggled = pyqtSignal(bool)
 
@@ -80,12 +80,11 @@ class MaterialModeSwitch(QWidget):
 
     def paintEvent(self, _event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         track = self.rect().adjusted(2, 4, -2, -4)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#1976D2") if self._checked else QColor("#2E9B5D"))
-        painter.drawRoundedRect(track, track.height() / 2, track.height() / 2)
-        painter.setPen(QColor("#FFFFFF"))
+        painter.setPen(QColor("#B8BEC6"))
+        painter.setBrush(QColor("#E5E7EA"))
+        painter.drawRect(track)
+        painter.setPen(QColor("#3D4650"))
         font = painter.font()
         font.setBold(True)
         painter.setFont(font)
@@ -93,12 +92,11 @@ class MaterialModeSwitch(QWidget):
         right_rect = track.adjusted(track.width() // 2, 0, -8, 0)
         painter.drawText(left_rect, Qt.AlignmentFlag.AlignCenter, "音乐模式")
         painter.drawText(right_rect, Qt.AlignmentFlag.AlignCenter, "视频模式")
-        diameter = track.height() - 8
-        x_range = track.width() - diameter - 8
-        knob_x = track.x() + 4 + x_range * self._knob_position
-        painter.setBrush(QColor("#FFFFFF"))
-        painter.setPen(QColor("#D7E2EA"))
-        painter.drawEllipse(int(knob_x), track.y() + 4, diameter, diameter)
+        knob_width = max(32, track.width() // 2 - 6)
+        knob_x = track.x() + 3 + (track.width() - knob_width - 6) * self._knob_position
+        painter.setBrush(QColor("#8B939D"))
+        painter.setPen(QColor("#707780"))
+        painter.drawRect(int(knob_x), track.y() + 3, knob_width, track.height() - 6)
 
 
 class LibraryPanel(QWidget):
@@ -139,13 +137,9 @@ class LibraryPanel(QWidget):
         self.btn_add.clicked.connect(self._add_directory)
         header.addWidget(self.btn_add)
         folder_layout.addLayout(header)
-        self.tree = QTreeWidget()
-        self.tree.setHeaderHidden(True)
-        self.tree.setAnimated(True)
-        self.tree.setIndentation(16)
-        self.tree.itemClicked.connect(self._on_clicked)
-        self.tree.itemExpanded.connect(self._on_expanded)
-        folder_layout.addWidget(self.tree)
+        self.folder_browser = FolderColumnsBrowser()
+        self.folder_browser.folder_selected.connect(self.folder_selected)
+        folder_layout.addWidget(self.folder_browser)
         splitter.addWidget(folder_section)
 
         controls = QWidget()
@@ -209,7 +203,7 @@ class LibraryPanel(QWidget):
     def set_directories(self, music_dirs: list[str], video_dirs: list[str]):
         self._directories["music"] = self._existing_directories(music_dirs)
         self._directories["video"] = self._existing_directories(video_dirs)
-        self._refresh_tree()
+        self._refresh_folders()
 
     def set_video_materials(self, folder_path: str, videos: list[dict], offset_seconds: int):
         self._calibration_folder = folder_path
@@ -239,24 +233,17 @@ class LibraryPanel(QWidget):
         if self._mode == mode:
             return
         self._mode = mode
-        self._refresh_tree()
+        self._refresh_folders()
         self.mode_changed.emit(mode)
         if self._directories[mode]:
             self.folder_selected.emit(self._directories[mode][0])
 
-    def _refresh_tree(self):
-        self.tree.clear()
+    def _refresh_folders(self):
         is_video = self._mode == "video"
         self.title.setText(f"素材库（{'视频' if is_video else '音乐'}模式）")
         self.btn_add.setText(f"添加{'视频' if is_video else '音乐'}文件夹")
         self.video_controls.setVisible(is_video)
-        for path in self._directories[self._mode]:
-            root = QTreeWidgetItem([os.path.basename(path) or path])
-            root.setData(0, Qt.ItemDataRole.UserRole, path)
-            root.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
-            self.tree.addTopLevelItem(root)
-            self._populate(root, path)
-            root.setExpanded(True)
+        self.folder_browser.set_roots(self._directories[self._mode])
 
     def _add_directory(self):
         kind = "视频" if self._mode == "video" else "音乐"
@@ -267,45 +254,8 @@ class LibraryPanel(QWidget):
         if resolved not in self._directories[self._mode]:
             self._directories[self._mode].append(resolved)
             self.directories_changed.emit(self._mode, list(self._directories[self._mode]))
-        self._refresh_tree()
+        self._refresh_folders()
         self.folder_selected.emit(resolved)
-
-    def _populate(self, parent, path, depth=1):
-        if depth <= 0:
-            return
-        try:
-            entries = sorted(os.scandir(path), key=lambda entry: entry.name.lower())
-        except OSError:
-            return
-        for entry in entries:
-            if entry.is_dir() and not entry.name.startswith("."):
-                child = QTreeWidgetItem([entry.name])
-                child.setData(0, Qt.ItemDataRole.UserRole, entry.path)
-                try:
-                    has_children = any(
-                        item.is_dir() and not item.name.startswith(".")
-                        for item in os.scandir(entry.path)
-                    )
-                except OSError:
-                    has_children = False
-                if has_children:
-                    child.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
-                    child.addChild(QTreeWidgetItem(["..."]))
-                parent.addChild(child)
-
-    def _on_expanded(self, item):
-        path = item.data(0, Qt.ItemDataRole.UserRole)
-        if not path:
-            return
-        while item.childCount() > 0 and item.child(0).text(0) == "...":
-            item.removeChild(item.child(0))
-        if item.childCount() == 0:
-            self._populate(item, path)
-
-    def _on_clicked(self, item, _column):
-        path = item.data(0, Qt.ItemDataRole.UserRole)
-        if path and os.path.isdir(path):
-            self.folder_selected.emit(path)
 
     def _on_reference_changed(self):
         video = self.reference_combo.currentData(Qt.ItemDataRole.UserRole)
