@@ -7,7 +7,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from core.runtime_manager import RuntimeManagerError
-from core.runtime_release import fetch_default_runtime_package, fetch_runtime_package
+from core.runtime_release import (
+    BUILTIN_RUNTIME_MANIFEST_PUBLIC_KEY,
+    fetch_default_runtime_package,
+    fetch_runtime_package,
+)
 
 
 class _Response:
@@ -73,8 +77,21 @@ def test_fetch_runtime_package_verifies_signed_release_manifest():
     assert package.worker_path == "worker/echovault-asr-worker.exe"
 
 
-def test_default_release_requires_embedded_or_configured_public_key(monkeypatch):
+def test_default_release_uses_bundled_public_key(monkeypatch):
     monkeypatch.delenv("ECHOVAULT_RUNTIME_MANIFEST_PUBLIC_KEY", raising=False)
+    captured = {}
 
-    with pytest.raises(RuntimeManagerError, match="公钥"):
+    def fake_fetch(runtime_id, public_key):
+        captured["runtime_id"] = runtime_id
+        captured["public_key"] = public_key
+        raise RuntimeManagerError("stop after public-key selection")
+
+    monkeypatch.setattr("core.runtime_release.fetch_runtime_package", fake_fetch)
+
+    with pytest.raises(RuntimeManagerError, match="stop"):
         fetch_default_runtime_package("cuda-cu132")
+
+    assert captured == {
+        "runtime_id": "cuda-cu132",
+        "public_key": BUILTIN_RUNTIME_MANIFEST_PUBLIC_KEY,
+    }

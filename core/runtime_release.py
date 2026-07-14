@@ -20,6 +20,10 @@ RUNTIME_RELEASE_BASE_URL = (
 RUNTIME_MANIFEST_URL = f"{RUNTIME_RELEASE_BASE_URL}/runtime-manifest.json"
 RUNTIME_SIGNATURE_URL = f"{RUNTIME_RELEASE_BASE_URL}/runtime-manifest.sig"
 PUBLIC_KEY_ENVIRONMENT_VARIABLE = "ECHOVAULT_RUNTIME_MANIFEST_PUBLIC_KEY"
+# This is the public half of the Ed25519 key stored in the release build system.
+# It is safe to ship with the application; only the private signing key can create
+# a manifest accepted by this client.
+BUILTIN_RUNTIME_MANIFEST_PUBLIC_KEY = "vrG3gELvIpO1I6NxZvV7683OZxYzlrrsihRzDykuRgM="
 
 
 def fetch_runtime_package(
@@ -42,11 +46,9 @@ def fetch_runtime_package(
 def fetch_default_runtime_package(runtime_id: str) -> RuntimePackage:
     """Fetch from the official release using the public key embedded by a release build."""
 
-    public_key = os.environ.get(PUBLIC_KEY_ENVIRONMENT_VARIABLE, "")
-    if not public_key:
-        raise RuntimeManagerError(
-            "当前版本尚未配置运行时 Release 公钥，无法安全下载 GPU 运行时。"
-        )
+    public_key = os.environ.get(
+        PUBLIC_KEY_ENVIRONMENT_VARIABLE, BUILTIN_RUNTIME_MANIFEST_PUBLIC_KEY
+    )
     return fetch_runtime_package(runtime_id, public_key)
 
 
