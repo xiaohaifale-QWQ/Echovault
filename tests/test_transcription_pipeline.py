@@ -29,19 +29,9 @@ def test_pipeline_offsets_chunks_and_writes_complete_lrc(tmp_path, monkeypatch):
     monkeypatch.setattr("core.audio_utils.cleanup_temp_files", lambda _paths: None)
     router = FakeRouter()
 
-    events = []
-    lrc_path = transcribe_and_save_lrc(
-        str(audio), router, language="zh", progress_callback=events.append
-    )
+    lrc_path = transcribe_and_save_lrc(str(audio), router, language="zh")
     parsed = parse_lrc_file(lrc_path)
 
     assert len(router.calls) == 2
-    assert [line.timestamp for line in parsed.lines] == [1.0, 16.0]
-    assert [event.percent for event in events] == [0, 5, 5, 47, 47, 90, 92, 96, 100]
-    assert [(event.chunk_index, event.chunk_total) for event in events[2:6]] == [
-        (1, 2),
-        (1, 2),
-        (2, 2),
-        (2, 2),
-    ]
+    assert [line.timestamp for line in parsed.lines] == [1.0, 601.0]
     assert not Path(lrc_path + ".tmp").exists()

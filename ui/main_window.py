@@ -16,7 +16,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QSplitter, QMenuBar, QMenu, QStatusBar,
     QMessageBox, QFileDialog, QLabel, QWidget, QVBoxLayout,
-    QTabWidget, QPushButton, QProgressBar,
+    QTabWidget, QPushButton, QProgressBar, QStackedWidget,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
@@ -29,6 +29,7 @@ from core.video_library import scan_videos
 from core.video_aggregation import write_video_transcript_timeline
 
 from ui.library_panel import LibraryPanel
+from ui.lyrics_preview_panel import LyricsPreviewPanel
 from ui.song_list_panel import SongListPanel
 from ui.detail_panel import DetailPanel
 from ui.settings_dialog import SettingsDialog
@@ -71,7 +72,11 @@ class MainWindow(QMainWindow):
         
         # 左侧：素材列表
         self.song_list_panel = SongListPanel()
-        splitter.addWidget(self.song_list_panel)
+        self.lyrics_preview_panel = LyricsPreviewPanel()
+        self.left_stack = QStackedWidget()
+        self.left_stack.addWidget(self.song_list_panel)
+        self.left_stack.addWidget(self.lyrics_preview_panel)
+        splitter.addWidget(self.left_stack)
         
         # 右侧：选项卡
         self.right_tabs = QTabWidget()
@@ -205,11 +210,14 @@ class MainWindow(QMainWindow):
         self.library_panel.folder_selected.connect(self._on_folder_selected)
         self.library_panel.mode_changed.connect(self._on_material_mode_changed)
         self.library_panel.directories_changed.connect(self._on_material_directories_changed)
-        self.library_panel.calibrate_requested.connect(self._on_video_calibrate)
+        self.library_panel.calibration_changed.connect(self._on_video_calibration_changed)
         self.library_panel.aggregate_requested.connect(self._on_video_aggregate)
+        self.library_panel.export_requested.connect(self._on_video_export)
+        self.right_tabs.currentChanged.connect(self._on_right_tab_changed)
         
         # 歌曲列表 → 详情面板
         self.song_list_panel.song_selected.connect(self.detail_panel.show_song)
+        self.song_list_panel.song_selected.connect(self.lyrics_preview_panel.show_song)
         
         # 详情面板 → 请求识别
         self.detail_panel.transcribe_clicked.connect(self._on_transcribe_single)
@@ -234,8 +242,10 @@ class MainWindow(QMainWindow):
         if self.library_panel.mode == "video":
             offset = self.config.video_time_offsets.get(str(Path(folder_path).resolve()), 0)
             materials = scan_videos(folder_path, offset_seconds=offset)
+            self.library_panel.set_video_materials(folder_path, materials, offset)
         else:
             materials = scan_audio(folder_path)
+            self.library_panel.clear_video_materials()
         self.song_list_panel.load_songs(materials, root_dir=folder_path)
         self._refresh_statusbar()
         
@@ -248,6 +258,11 @@ class MainWindow(QMainWindow):
         self.song_list_panel.set_material_mode(mode)
         self._refresh_statusbar()
 
+    def _on_right_tab_changed(self, index: int):
+        self.left_stack.setCurrentWidget(
+            self.lyrics_preview_panel if self.right_tabs.widget(index) is self.library_panel else self.song_list_panel
+        )
+
     def _on_material_directories_changed(self, mode: str, directories: list[str]):
         if mode == "video":
             self.config.video_dirs = directories
@@ -255,27 +270,17 @@ class MainWindow(QMainWindow):
             self.config.music_dirs = directories
         config_manager.save()
 
-    def _on_video_calibrate(self, folder_path: str):
-        from ui.video_calibration_dialog import VideoCalibrationDialog
-
-        existing_offset = self.config.video_time_offsets.get(str(Path(folder_path).resolve()), 0)
-        dialog = VideoCalibrationDialog(folder_path, existing_offset, self)
-        if not dialog.selected_video:
-            QMessageBox.information(self, "时间校准", "当前文件夹中没有可用于校准的视频文件。")
-            return
-        if not dialog.exec():
-            return
-        offset = dialog.offset_seconds
-        self.config.video_time_offsets[str(Path(folder_path).resolve())] = offset
+    def _on_video_calibration_changed(self, folder_path: str, source, target):
+        key = str(Path(folder_path).resolve())
+        if target is None:
+            self.config.video_time_offsets.pop(key, None)
+            offset = 0
+        else:
+            offset = int((target - source).total_seconds())
+            self.config.video_time_offsets[key] = offset
         config_manager.save()
-        timeline_path, row_count = write_video_transcript_timeline(folder_path, offset)
+        write_video_transcript_timeline(folder_path, offset)
         self._on_folder_selected(folder_path)
-        QMessageBox.information(
-            self,
-            "时间校准",
-            f"已保存偏移：{offset:+d} 秒。\n"
-            f"已生成 {row_count} 条文字与实际日期对应关系：\n{timeline_path}",
-        )
 
     def _on_video_aggregate(self, folder_path: str):
         reply = QMessageBox.question(
@@ -305,6 +310,15 @@ class MainWindow(QMainWindow):
             self,
             "视频汇总完成",
             f"已汇总 {result.video_count} 个视频。\n输出目录：{result.output_dir}",
+        )
+
+    def _on_video_export(self, folder_path: str):
+        offset = self.config.video_time_offsets.get(str(Path(folder_path).resolve()), 0)
+        output_path, row_count = write_video_transcript_timeline(folder_path, offset)
+        QMessageBox.information(
+            self,
+            "导出完成",
+            f"已导出 {row_count} 条文字时间记录。\n输出文件：{output_path}",
         )
     
     def _on_transcribe_single(self, file_path: str):
@@ -369,17 +383,20 @@ class MainWindow(QMainWindow):
         
         self.btn_stop_transcribe.setVisible(True)
         self.trans_progress.setVisible(True)
-        self.trans_progress.setRange(0, 100)
-        self.trans_progress.setFormat("本首进度 %p%")
+        self.trans_progress.setRange(0, 0)
+        self.trans_progress.setFormat("正在识别，请耐心等待")
         self.total_trans_progress.setVisible(len(files) > 1)
-        self.total_trans_progress.setRange(0, 100)
-        self.total_trans_progress.setFormat("总进度 %p%")
+        self.total_trans_progress.setRange(0, len(files))
+        self.total_trans_progress.setFormat("总进度 %v/%m")
         self.total_trans_progress.setValue(0)
-        self.trans_progress.setValue(0)
+        self._transcription_total = len(files)
+        self._batch_completed = 0
         self.status_label.setText(f"识别中... 0/{len(files)}")
         self.worker.start()
     
     def _on_transcribe_progress(self, current: int, total: int, filename: str):
+        if total > 1:
+            self.total_trans_progress.setValue(current - 1)
         self.status_label.setText(f"识别中... {current}/{total} - {filename}")
 
     def _on_song_progress(
@@ -392,19 +409,7 @@ class MainWindow(QMainWindow):
         chunk_index: int,
         chunk_total: int,
     ):
-        self.trans_progress.setValue(song_percent)
-        if chunk_total:
-            segment_label = (
-                f"第 {chunk_index}/{chunk_total} 段" if chunk_index else f"共 {chunk_total} 段"
-            )
-            self.trans_progress.setFormat(f"本首进度 %p% · {segment_label}")
-        else:
-            self.trans_progress.setFormat("本首进度 %p%")
-        if total > 1:
-            overall = int(((current - 1) + song_percent / 100) / total * 100)
-            self.total_trans_progress.setValue(overall)
-        chunk = f" · 第 {chunk_index}/{chunk_total} 段" if chunk_total else ""
-        self.status_label.setText(f"{message}{chunk}")
+        self.status_label.setText(message)
     
     def _on_stage_progress(self, msg: str):
         self.status_label.setText(msg)
@@ -416,6 +421,9 @@ class MainWindow(QMainWindow):
             self.status_label.setText("正在停止...")
     
     def _on_song_done(self, file_path: str, lrc_path: str, success: bool):
+        self._batch_completed += 1
+        if self._transcription_total > 1:
+            self.total_trans_progress.setValue(self._batch_completed)
         self.song_list_panel.update_song_status(file_path, success)
         # 识别成功后立即刷新右侧详情面板
         if success:
