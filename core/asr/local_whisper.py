@@ -48,7 +48,14 @@ class LocalWhisperProvider(ASRProvider):
     
     @property
     def display_name(self) -> str:
-        dev = "GPU" if self._device == "cuda" else "CPU"
+        if self._device == "cuda":
+            dev = "GPU"
+        elif self._device == "cpu":
+            dev = "CPU"
+        elif self._worker_command:
+            dev = "GPU 运行时"
+        else:
+            dev = "检测中"
         return f"本地 Whisper ({self._model_name}, {dev})"
     
     def _get_model(self):
@@ -82,7 +89,9 @@ class LocalWhisperProvider(ASRProvider):
         """检查 whisper 是否已安装"""
         if self._worker_command:
             try:
-                return bool(self._get_worker_client().request("doctor", timeout=10).get("torch_installed"))
+                report = self._get_worker_client().request("doctor", timeout=10)
+                self._device = str(report.get("device", "cpu"))
+                return bool(report.get("torch_installed"))
             except WorkerClientError:
                 return False
         try:
