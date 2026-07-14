@@ -40,10 +40,14 @@ def test_double_clicking_folder_opens_a_new_material_column(tmp_path):
     child.mkdir(parents=True)
     (child / "audio.mp3").write_bytes(b"")
     panel = LibraryPanel()
+    panel.resize(600, 600)
     panel.set_directories([str(root)], [])
+    panel.show()
+    _app().processEvents()
 
     assert len(panel.folder_browser._columns) == 2
     assert panel.folder_browser._columns[1][1].count() == 1
+    assert panel.folder_browser._columns[0][1].parentWidget().height() > 0
 
     root_list = panel.folder_browser._columns[0][1]
     panel.folder_browser._open_item(root_list.item(0))

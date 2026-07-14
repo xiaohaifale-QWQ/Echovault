@@ -35,7 +35,9 @@ class FolderColumnsBrowser(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         self._scroll = QScrollArea()
-        self._scroll.setWidgetResizable(False)
+        # Let the content take the viewport height. Its minimum width still keeps
+        # every column readable and causes a horizontal bar when needed.
+        self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.Shape.StyledPanel)
         self._content = QWidget()
         self._content_layout = QHBoxLayout(self._content)
@@ -107,7 +109,7 @@ class FolderColumnsBrowser(QWidget):
         layout.addWidget(listing)
         self._content_layout.insertWidget(self._content_layout.count() - 1, column)
         self._columns.append((None if roots else title, listing))
-        self._content.setFixedWidth(max(238, len(self._columns) * 239))
+        self._content.setMinimumWidth(max(238, len(self._columns) * 239))
 
     def _select_item(self, item: QListWidgetItem) -> None:
         path = str(item.data(Qt.ItemDataRole.UserRole) or "")
@@ -130,7 +132,7 @@ class FolderColumnsBrowser(QWidget):
             old_column = old_listing.parentWidget()
             self._content_layout.removeWidget(old_column)
             old_column.deleteLater()
-        self._content.setFixedWidth(max(238, len(self._columns) * 239))
+        self._content.setMinimumWidth(max(238, len(self._columns) * 239))
         self._current_folder = path
         self.folder_selected.emit(path)
         self._add_column(os.path.basename(path) or path, self._entries_for(path))
