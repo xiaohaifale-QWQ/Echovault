@@ -73,8 +73,9 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(QSize(1100, 680))
         self.resize(QSize(1280, 780))
         
-        # 两栏布局
+        # 中间/右侧内容区。启用 AI 后，外层会在其左侧固定一栏聊天面板。
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.content_splitter = splitter
         
         # 左侧：素材列表
         self.song_list_panel = SongListPanel()
@@ -102,15 +103,19 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 2)
         splitter.setSizes([700, 400])
         
+        self._ai_panel_width = 340
+        self._ai_mode_enabled = False
         self.ai_chat_panel = AIChatPanel(self.config)
+        self.ai_chat_panel.setFixedWidth(self._ai_panel_width)
         self.ai_chat_panel.setVisible(False)
-        outer_splitter = QSplitter(Qt.Orientation.Horizontal)
-        outer_splitter.addWidget(self.ai_chat_panel)
-        outer_splitter.addWidget(splitter)
-        outer_splitter.setStretchFactor(0, 1)
-        outer_splitter.setStretchFactor(1, 4)
-        outer_splitter.setSizes([0, 1280])
-        self.setCentralWidget(outer_splitter)
+        self.outer_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.outer_splitter.addWidget(self.ai_chat_panel)
+        self.outer_splitter.addWidget(splitter)
+        self.outer_splitter.setCollapsible(0, False)
+        self.outer_splitter.setStretchFactor(0, 0)
+        self.outer_splitter.setStretchFactor(1, 1)
+        self.outer_splitter.setSizes([0, 1280])
+        self.setCentralWidget(self.outer_splitter)
     
     def _setup_menubar(self):
         """菜单栏"""
@@ -242,6 +247,7 @@ class MainWindow(QMainWindow):
         # 歌曲列表 → 详情面板
         self.song_list_panel.song_selected.connect(self.detail_panel.show_song)
         self.song_list_panel.song_selected.connect(self.lyrics_preview_panel.show_song)
+        self.lyrics_preview_panel.lyrics_saved.connect(self._on_preview_lyrics_saved)
         
         # 详情面板 → 请求识别
         self.detail_panel.transcribe_clicked.connect(self._on_transcribe_single)
@@ -327,6 +333,15 @@ class MainWindow(QMainWindow):
             }
         )
         self.left_stack.setCurrentWidget(self.lyrics_preview_panel)
+
+    def _on_preview_lyrics_saved(self, lrc_path: str):
+        """Refresh completion state after an inline material-library lyric edit."""
+        for song in self.song_list_panel.get_all_songs():
+            if Path(song["path"]).with_suffix(".lrc") == Path(lrc_path):
+                self.song_list_panel.update_song_status(song["path"], True)
+                break
+        self.status_label.setText("歌词已保存")
+        self._refresh_statusbar()
 
     def _on_right_tab_changed(self, index: int):
         self.left_stack.setCurrentWidget(
@@ -594,15 +609,16 @@ class MainWindow(QMainWindow):
 
     def _show_ai_mode_menu(self):
         menu = QMenu(self)
-        enabled = self.ai_chat_panel.isVisible()
-        toggle = menu.addAction("关闭" if enabled else "启动")
+        toggle = menu.addAction("关闭" if self._ai_mode_enabled else "启动")
         toggle.triggered.connect(self._toggle_ai_mode)
         rect = self.menuBar().actionGeometry(self.ai_mode_action)
         menu.exec(self.menuBar().mapToGlobal(rect.bottomLeft()))
 
     def _toggle_ai_mode(self):
-        if self.ai_chat_panel.isVisible():
+        if self._ai_mode_enabled:
             self.ai_chat_panel.setVisible(False)
+            self.outer_splitter.setSizes([0, max(1, self.width())])
+            self._ai_mode_enabled = False
             return
         if not self.config.ai_model_api_key:
             QMessageBox.information(
@@ -612,6 +628,10 @@ class MainWindow(QMainWindow):
             )
             return
         self.ai_chat_panel.setVisible(True)
+        self.outer_splitter.setSizes(
+            [self._ai_panel_width, max(1, self.width() - self._ai_panel_width)]
+        )
+        self._ai_mode_enabled = True
     
     def _do_restart(self):
         """重新启动应用"""
