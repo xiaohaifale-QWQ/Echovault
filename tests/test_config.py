@@ -13,6 +13,8 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     manager.config.ai_model_api_key = "ai-secret"
     manager.config.music_dirs = ["D:/Music"]
     manager.config.video_dirs = ["D:/Video"]
+    manager.config.music_select_all = True
+    manager.config.video_select_all = True
     manager.config.video_time_offsets = {"D:/Video": 120}
 
     manager.save()
@@ -23,6 +25,8 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     assert loaded.ai_model_api_key == "ai-secret"
     assert loaded.music_dirs == ["D:/Music"]
     assert loaded.video_dirs == ["D:/Video"]
+    assert loaded.music_select_all is True
+    assert loaded.video_select_all is True
     assert loaded.video_time_offsets == {"D:/Video": 120}
 
     raw = json.loads(path.read_text(encoding="utf-8"))

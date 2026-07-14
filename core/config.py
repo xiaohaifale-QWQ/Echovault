@@ -3,12 +3,11 @@
 管理 API Key、模型选择、路径等全局配置。
 """
 
-import os
 import json
-from pathlib import Path
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
-
 
 CONFIG_SCHEMA_VERSION = 2
 SUPPORTED_PROVIDERS = {"groq", "local"}
@@ -40,16 +39,18 @@ class AppConfig:
     """应用全局配置"""
     music_dirs: list[str] = field(default_factory=list)
     video_dirs: list[str] = field(default_factory=list)
+    music_select_all: bool = False
+    video_select_all: bool = False
     video_time_offsets: dict[str, int] = field(default_factory=dict)
     output_lrc_dir: Optional[str] = None   # None=与音频同目录
     asr: ASRConfig = field(default_factory=ASRConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
-    
+
     # API Keys（建议通过环境变量设置，这里提供默认值）
     groq_api_key: str = ""
     xunfei_api_key: str = ""
     ai_model_api_key: str = ""
-    
+
     def __post_init__(self):
         # 从环境变量读取 API Key
         if not self.groq_api_key:
@@ -62,14 +63,14 @@ class AppConfig:
 
 class ConfigManager:
     """配置管理器：加载/保存 JSON 配置文件"""
-    
+
     DEFAULT_CONFIG_PATH = Path.home() / ".music-lyrics-sync" / "config.json"
-    
+
     def __init__(self, config_path: Optional[Path] = None):
         self.config_path = config_path or self.DEFAULT_CONFIG_PATH
         self.config = AppConfig()
         self._loaded = False
-    
+
     def load(self) -> AppConfig:
         """加载配置，如果文件不存在则使用默认值"""
         if self.config_path.exists():
@@ -81,7 +82,7 @@ class ConfigManager:
                 pass  # 配置损坏，使用默认值
         self._loaded = True
         return self.config
-    
+
     def save(self):
         """保存配置到文件"""
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -96,13 +97,15 @@ class ConfigManager:
         finally:
             if temp_path.exists():
                 temp_path.unlink()
-    
+
     def _serialize(self) -> dict:
         c = self.config
         return {
             "schema_version": CONFIG_SCHEMA_VERSION,
             "music_dirs": c.music_dirs,
             "video_dirs": c.video_dirs,
+            "music_select_all": c.music_select_all,
+            "video_select_all": c.video_select_all,
             "video_time_offsets": c.video_time_offsets,
             "output_lrc_dir": c.output_lrc_dir,
             "groq_api_key": c.groq_api_key,
@@ -122,11 +125,13 @@ class ConfigManager:
                 "remote_dir": c.sync.remote_dir,
             },
         }
-    
+
     def _deserialize(self, data: dict):
         c = self.config
         c.music_dirs = data.get("music_dirs", [])
         c.video_dirs = [value for value in data.get("video_dirs", []) if isinstance(value, str)]
+        c.music_select_all = bool(data.get("music_select_all", False))
+        c.video_select_all = bool(data.get("video_select_all", False))
         offsets = data.get("video_time_offsets", {})
         c.video_time_offsets = {
             key: value

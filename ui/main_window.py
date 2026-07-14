@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
         
         self.config = config_manager.load()
         self.router = get_router(self.config)
+        self._selected_material_folder = ""
         
         self._setup_ui()
         self._setup_menubar()
@@ -55,6 +56,9 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         
         self.library_panel.set_directories(self.config.music_dirs, self.config.video_dirs)
+        self.library_panel.set_select_all_modes(
+            self.config.music_select_all, self.config.video_select_all
+        )
         if self.config.music_dirs:
             self._on_folder_selected(self.config.music_dirs[0])
 
@@ -220,6 +224,7 @@ class MainWindow(QMainWindow):
         self.library_panel.folder_selected.connect(self._on_folder_selected)
         self.library_panel.material_selected.connect(self._on_material_selected)
         self.library_panel.mode_changed.connect(self._on_material_mode_changed)
+        self.library_panel.select_all_changed.connect(self._on_material_select_all_changed)
         self.library_panel.directories_changed.connect(self._on_material_directories_changed)
         self.library_panel.calibration_changed.connect(self._on_video_calibration_changed)
         self.library_panel.aggregate_requested.connect(self._on_video_aggregate)
@@ -249,15 +254,33 @@ class MainWindow(QMainWindow):
     
     def _on_folder_selected(self, folder_path: str):
         """文件夹被选中 → 扫描当前模式的素材"""
+        self._selected_material_folder = folder_path
         self.status_label.setText(f"扫描中: {folder_path}...")
+        directories = (
+            self.config.video_dirs if self.library_panel.mode == "video" else self.config.music_dirs
+        )
+        scan_directories = directories if self.library_panel.select_all else [folder_path]
         if self.library_panel.mode == "video":
             offset = self.config.video_time_offsets.get(str(Path(folder_path).resolve()), 0)
-            materials = scan_videos(folder_path, offset_seconds=offset)
-            self.library_panel.set_video_materials(folder_path, materials, offset)
+            materials = []
+            selected_materials = []
+            for directory in scan_directories:
+                directory_offset = self.config.video_time_offsets.get(
+                    str(Path(directory).resolve()), 0
+                )
+                scanned = scan_videos(directory, offset_seconds=directory_offset)
+                materials.extend(scanned)
+                if directory == folder_path:
+                    selected_materials = scanned
+            self.library_panel.set_video_materials(folder_path, selected_materials, offset)
         else:
-            materials = scan_audio(folder_path)
+            materials = []
+            for directory in scan_directories:
+                materials.extend(scan_audio(directory))
             self.library_panel.clear_video_materials()
-        self.song_list_panel.load_songs(materials, root_dir=folder_path)
+        self.song_list_panel.load_songs(
+            materials, root_dir="" if self.library_panel.select_all else folder_path
+        )
         self._refresh_statusbar()
         
         if self.library_panel.mode == "music":
@@ -268,6 +291,20 @@ class MainWindow(QMainWindow):
     def _on_material_mode_changed(self, mode: str):
         self.song_list_panel.set_material_mode(mode)
         self._refresh_statusbar()
+
+    def _on_material_select_all_changed(self, mode: str, selected: bool):
+        if mode == "video":
+            self.config.video_select_all = selected
+            directories = self.config.video_dirs
+        else:
+            self.config.music_select_all = selected
+            directories = self.config.music_dirs
+        config_manager.save()
+        folder = self._selected_material_folder
+        if folder not in directories:
+            folder = directories[0] if directories else ""
+        if folder:
+            self._on_folder_selected(folder)
 
     def _on_material_selected(self, material_path: str):
         """Show the selected audio or video material's same-name LRC on the left."""

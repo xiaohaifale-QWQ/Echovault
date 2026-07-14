@@ -19,6 +19,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDateTimeEdit,
     QFileDialog,
@@ -163,6 +164,7 @@ class LibraryPanel(QWidget):
     folder_selected = pyqtSignal(str)
     material_selected = pyqtSignal(str)
     mode_changed = pyqtSignal(str)
+    select_all_changed = pyqtSignal(str, bool)
     directories_changed = pyqtSignal(str, object)
     calibration_changed = pyqtSignal(str, object, object)
     aggregate_requested = pyqtSignal(str)
@@ -172,6 +174,7 @@ class LibraryPanel(QWidget):
         super().__init__(parent)
         self._mode = "music"
         self._directories = {"music": [], "video": []}
+        self._select_all = {"music": False, "video": False}
         self._calibration_folder = ""
         self._videos = []
         self._current_offset = 0
@@ -181,6 +184,16 @@ class LibraryPanel(QWidget):
     @property
     def mode(self) -> str:
         return self._mode
+
+    @property
+    def select_all(self) -> bool:
+        return self._select_all[self._mode]
+
+    def set_select_all_modes(self, music_selected: bool, video_selected: bool):
+        self._select_all = {"music": bool(music_selected), "video": bool(video_selected)}
+        self.select_all_check.blockSignals(True)
+        self.select_all_check.setChecked(self._select_all[self._mode])
+        self.select_all_check.blockSignals(False)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -208,9 +221,15 @@ class LibraryPanel(QWidget):
         controls = QWidget()
         controls_layout = QVBoxLayout(controls)
         controls_layout.setContentsMargins(4, 4, 4, 4)
+        mode_row = QHBoxLayout()
         self.mode_switch = MaterialModeSwitch()
         self.mode_switch.toggled.connect(self._switch_mode)
-        controls_layout.addWidget(self.mode_switch)
+        mode_row.addWidget(self.mode_switch, 1)
+        self.select_all_check = QCheckBox("全选")
+        self.select_all_check.setToolTip("勾选后，详情页显示当前模式下所有素材文件夹的内容")
+        self.select_all_check.toggled.connect(self._on_select_all_toggled)
+        mode_row.addWidget(self.select_all_check)
+        controls_layout.addLayout(mode_row)
 
         self.video_controls = QWidget()
         video_layout = QVBoxLayout(self.video_controls)
@@ -306,10 +325,17 @@ class LibraryPanel(QWidget):
         if self._mode == mode:
             return
         self._mode = mode
+        self.select_all_check.blockSignals(True)
+        self.select_all_check.setChecked(self._select_all[mode])
+        self.select_all_check.blockSignals(False)
         self._refresh_folders()
         self.mode_changed.emit(mode)
         if self._directories[mode]:
             self.folder_selected.emit(self._directories[mode][0])
+
+    def _on_select_all_toggled(self, checked: bool):
+        self._select_all[self._mode] = checked
+        self.select_all_changed.emit(self._mode, checked)
 
     def _refresh_folders(self):
         is_video = self._mode == "video"

@@ -79,3 +79,20 @@ def test_hour_offset_fills_right_time_and_tracks_left_time(tmp_path):
     panel.calibration_left.setDateTime(QDateTime(datetime(2026, 7, 14, 11, 0, 0)))
     panel._on_left_time_changed()
     assert panel.calibration_right.dateTime().toPyDateTime() == datetime(2026, 7, 14, 13, 30, 0)
+
+
+def test_select_all_is_tracked_per_material_mode():
+    _app()
+    panel = LibraryPanel()
+    changes = []
+    panel.select_all_changed.connect(lambda mode, selected: changes.append((mode, selected)))
+
+    panel.select_all_check.setChecked(True)
+    assert panel.select_all is True
+    panel._switch_mode(True)
+    assert panel.select_all is False
+    panel.select_all_check.setChecked(True)
+    panel._switch_mode(False)
+
+    assert panel.select_all is True
+    assert changes == [("music", True), ("video", True)]
