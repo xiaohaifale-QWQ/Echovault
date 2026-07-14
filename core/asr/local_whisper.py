@@ -90,7 +90,9 @@ class LocalWhisperProvider(ASRProvider):
         if self._worker_command:
             try:
                 report = self._get_worker_client().request("doctor", timeout=10)
-                self._device = str(report.get("device", "cpu"))
+                device = report.get("device")
+                if isinstance(device, str) and device in {"cpu", "cuda"}:
+                    self._device = device
                 return bool(report.get("torch_installed"))
             except WorkerClientError:
                 return False
