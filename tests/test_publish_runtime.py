@@ -21,7 +21,7 @@ def test_publish_runtime_splits_archive_and_signs_manifest(tmp_path):
                 "worker_path": "worker/echovault-asr-worker.exe",
             }
         ),
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
     private_key = Ed25519PrivateKey.generate()
     private_key_path = tmp_path / "release-key.pem"

@@ -20,7 +20,7 @@ def main() -> int:
     arguments = _arguments()
     archive = arguments.archive.resolve()
     output = arguments.output.resolve()
-    metadata = json.loads(arguments.metadata.read_text(encoding="utf-8"))
+    metadata = json.loads(arguments.metadata.read_text(encoding="utf-8-sig"))
     _validate_metadata(metadata)
     if not archive.is_file():
         raise SystemExit(f"Runtime archive not found: {archive}")
