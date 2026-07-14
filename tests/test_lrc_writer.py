@@ -33,3 +33,34 @@ def test_traditional_chinese_locale_is_converted_to_simplified():
     lrc = segments_to_lrc(result, post_process=False)
 
     assert lrc.lines[0].text == "云端资料与离线模型"
+
+
+def test_leading_composer_hallucination_is_removed():
+    result = TranscriptionResult(
+        segments=[
+            Segment(0.0, 1.0, "作曲"),
+            Segment(1.0, 2.0, "李宗盛"),
+            Segment(2.0, 5.0, "真正的歌词从这里开始"),
+        ],
+        language="zh",
+        duration=5.0,
+    )
+
+    lrc = segments_to_lrc(result, post_process=False)
+
+    assert [line.text for line in lrc.lines] == ["真正的歌词从这里开始"]
+
+
+def test_complete_leading_credit_does_not_remove_first_lyric():
+    result = TranscriptionResult(
+        segments=[
+            Segment(0.0, 1.0, "作曲：李宗盛"),
+            Segment(1.0, 4.0, "这是应当保留的第一行歌词"),
+        ],
+        language="zh",
+        duration=4.0,
+    )
+
+    lrc = segments_to_lrc(result, post_process=False)
+
+    assert [line.text for line in lrc.lines] == ["这是应当保留的第一行歌词"]

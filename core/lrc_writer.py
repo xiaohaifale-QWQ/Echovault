@@ -44,6 +44,17 @@ _CHINESE_LANGUAGE_NAMES = {
     "普通話",
 }
 
+# Whisper 在纯前奏或静音段偶尔会把训练语料中的制作署名误识别为歌词，
+# 常见形式为“作曲”后紧跟一个人名。只处理识别结果最开头的连续署名，
+# 避免误删歌曲正文中正常出现的词语。
+_LEADING_CREDIT_LABELS = frozenset(
+    {"作词", "作曲", "编曲", "填词", "词曲", "演唱", "歌手", "制作人", "制作"}
+)
+_LEADING_CREDIT_LABEL_RE = re.compile(
+    r"^(?:作词|作曲|编曲|填词|词曲|演唱|歌手|制作人|制作)(?:\s*[:：]?\s*.+)?$"
+)
+_LEADING_CREDIT_VALUE_RE = re.compile(r"^[\w\u4e00-\u9fff·・'’\- ]{1,40}$")
+
 
 def _is_chinese_language(language: Optional[str]) -> bool:
     if not language:
@@ -151,6 +162,31 @@ def _correct_common_errors(text: str, language: Optional[str]) -> str:
     return text
 
 
+def _remove_leading_credits(segments: List[Segment]) -> List[Segment]:
+    """移除 ASR 在开头幻听出的制作署名，不触碰后续歌词。"""
+    index = 0
+    expects_credit_value = False
+
+    while index < len(segments):
+        text = segments[index].text.strip()
+        if _LEADING_CREDIT_LABEL_RE.fullmatch(text):
+            # 只有“作曲”这种孤立标签才会吃掉紧随的姓名；“作曲：某人”
+            # 已经是完整署名，下一句必须作为正常歌词保留。
+            expects_credit_value = text.rstrip(" ：:") in _LEADING_CREDIT_LABELS
+            index += 1
+            continue
+
+        # 独立的“作曲”之后，Whisper 常将署名拆成下一条时间轴；只在
+        # 已移除开头标签且该条看起来像简短姓名时一并删除。
+        if expects_credit_value and _LEADING_CREDIT_VALUE_RE.fullmatch(text):
+            index += 1
+            expects_credit_value = False
+            continue
+        break
+
+    return segments[index:]
+
+
 def segments_to_lrc(
     result: TranscriptionResult,
     title: Optional[str] = None,
@@ -181,6 +217,8 @@ def segments_to_lrc(
     # structural post-processing.
     for segment in segments:
         segment.text = _correct_common_errors(segment.text, normalization_language)
+
+    segments = _remove_leading_credits(segments)
 
     if post_process and segments:
         # 1. 删除重复句
