@@ -161,6 +161,7 @@ class TimeOffsetDash(QLabel):
 
 class LibraryPanel(QWidget):
     folder_selected = pyqtSignal(str)
+    material_selected = pyqtSignal(str)
     mode_changed = pyqtSignal(str)
     directories_changed = pyqtSignal(str, object)
     calibration_changed = pyqtSignal(str, object, object)
@@ -200,6 +201,7 @@ class LibraryPanel(QWidget):
         folder_layout.addLayout(header)
         self.folder_browser = FolderColumnsBrowser()
         self.folder_browser.folder_selected.connect(self.folder_selected)
+        self.folder_browser.material_selected.connect(self.material_selected)
         folder_layout.addWidget(self.folder_browser)
         splitter.addWidget(folder_section)
 

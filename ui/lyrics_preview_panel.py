@@ -35,7 +35,7 @@ class LyricsPreviewPanel(QWidget):
         self.song_label.setText(Path(song.get("name", "")).stem)
         lrc_path = song.get("lrc_path")
         if not song.get("has_lrc") or not lrc_path:
-            self.text.setPlainText("该素材尚未完成识别。")
+            self.text.setPlainText("暂未识别")
             return
         try:
             lrc = parse_lrc_file(lrc_path)

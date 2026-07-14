@@ -26,6 +26,7 @@ class FolderColumnsBrowser(QWidget):
     """
 
     folder_selected = pyqtSignal(str)
+    material_selected = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -116,6 +117,8 @@ class FolderColumnsBrowser(QWidget):
         if os.path.isdir(path):
             self._current_folder = path
             self.folder_selected.emit(path)
+        elif os.path.isfile(path):
+            self.material_selected.emit(path)
 
     def _open_item(self, item: QListWidgetItem) -> None:
         path = str(item.data(Qt.ItemDataRole.UserRole) or "")

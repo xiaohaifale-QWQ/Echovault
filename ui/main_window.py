@@ -218,6 +218,7 @@ class MainWindow(QMainWindow):
         """连接信号"""
         # 文件夹树 → 歌曲列表
         self.library_panel.folder_selected.connect(self._on_folder_selected)
+        self.library_panel.material_selected.connect(self._on_material_selected)
         self.library_panel.mode_changed.connect(self._on_material_mode_changed)
         self.library_panel.directories_changed.connect(self._on_material_directories_changed)
         self.library_panel.calibration_changed.connect(self._on_video_calibration_changed)
@@ -267,6 +268,20 @@ class MainWindow(QMainWindow):
     def _on_material_mode_changed(self, mode: str):
         self.song_list_panel.set_material_mode(mode)
         self._refresh_statusbar()
+
+    def _on_material_selected(self, material_path: str):
+        """Show the selected audio or video material's same-name LRC on the left."""
+        path = Path(material_path)
+        lrc_path = path.with_suffix(".lrc")
+        self.lyrics_preview_panel.show_song(
+            {
+                "name": path.name,
+                "path": str(path),
+                "lrc_path": str(lrc_path),
+                "has_lrc": lrc_path.is_file(),
+            }
+        )
+        self.left_stack.setCurrentWidget(self.lyrics_preview_panel)
 
     def _on_right_tab_changed(self, index: int):
         self.left_stack.setCurrentWidget(

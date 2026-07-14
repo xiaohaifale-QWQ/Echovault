@@ -57,6 +57,11 @@ def test_double_clicking_folder_opens_a_new_material_column(tmp_path):
     assert len(panel.folder_browser._columns) == 3
     assert panel.folder_browser.current_folder == str(child)
 
+    selected = []
+    panel.material_selected.connect(selected.append)
+    panel.folder_browser._select_item(panel.folder_browser._columns[2][1].item(0))
+    assert selected == [str(child / "audio.mp3")]
+
 
 def test_hour_offset_fills_right_time_and_tracks_left_time(tmp_path):
     _app()
