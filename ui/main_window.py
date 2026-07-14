@@ -163,11 +163,22 @@ class MainWindow(QMainWindow):
         
         # 设置菜单
         settings_menu = menubar.addMenu("设置(&S)")
-        
-        settings_action = QAction("偏好设置(&P)...", self)
-        settings_action.setShortcut("Ctrl+,")
-        settings_action.triggered.connect(self._on_settings)
-        settings_menu.addAction(settings_action)
+
+        recognition_settings_action = QAction("语音识别", self)
+        recognition_settings_action.setShortcut("Ctrl+,")
+        recognition_settings_action.triggered.connect(
+            lambda: self._on_settings("recognition")
+        )
+        settings_menu.addAction(recognition_settings_action)
+        lyrics_settings_action = QAction("歌词输出", self)
+        lyrics_settings_action.triggered.connect(lambda: self._on_settings("lyrics"))
+        settings_menu.addAction(lyrics_settings_action)
+        shortcut_settings_action = QAction("快捷键", self)
+        shortcut_settings_action.triggered.connect(lambda: self._on_settings("shortcuts"))
+        settings_menu.addAction(shortcut_settings_action)
+        cache_settings_action = QAction("缓存", self)
+        cache_settings_action.triggered.connect(lambda: self._on_settings("cache"))
+        settings_menu.addAction(cache_settings_action)
 
         key_action = QAction("密钥管理(&K)...", self)
         key_action.triggered.connect(self._on_key_manager)
@@ -604,9 +615,9 @@ class MainWindow(QMainWindow):
         self.song_list_panel.update_song_status(file_path, has_lrc)
         self._refresh_statusbar()
     
-    def _on_settings(self):
-        """打开设置对话框"""
-        dialog = SettingsDialog(self.config, self)
+    def _on_settings(self, section: str = "recognition"):
+        """从顶栏设置菜单打开指定分类的设置对话框。"""
+        dialog = SettingsDialog(self.config, self, section=section)
         result = dialog.exec()
         if result == 42:
             # GPU 安装完成，重启应用
