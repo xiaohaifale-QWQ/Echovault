@@ -90,6 +90,7 @@ Groq 连接失败时会区分 Key 无效、调用额度不足和 `api.groq.com:4
 顶栏点击“密钥管理”：
 
 - **Groq API Key**：用于 Groq 在线转写。
+- **Groq 代理地址（可选）**：直连无法访问 Groq 时，可填写正在运行的本地 HTTP 代理，例如 `http://127.0.0.1:7890`。
 - **讯飞 API Key**：可在本机保存，预留给后续引擎接入。
 - **DeepSeek API Key**：用于内置 AI 助手。默认接口为 `https://api.deepseek.com`，默认模型为 `deepseek-chat`，也可在密钥管理中改为其他 OpenAI 兼容接口。
 

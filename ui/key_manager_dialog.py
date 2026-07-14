@@ -37,9 +37,12 @@ class KeyManagerDialog(QDialog):
 
         form = QFormLayout()
         self.groq_input = self._key_input(config.groq_api_key)
+        self.groq_proxy_input = QLineEdit(config.groq_proxy_url)
+        self.groq_proxy_input.setPlaceholderText("可选，例如 http://127.0.0.1:7890")
         self.xunfei_input = self._key_input(config.xunfei_api_key)
         self.ai_input = self._key_input(config.ai_model_api_key)
         form.addRow("Groq API Key:", self.groq_input)
+        form.addRow("Groq 代理地址（可选）:", self.groq_proxy_input)
         form.addRow("讯飞 API Key:", self.xunfei_input)
         form.addRow("DeepSeek API Key:", self.ai_input)
         self.ai_base_url = QLineEdit(config.ai_base_url)
@@ -69,6 +72,7 @@ class KeyManagerDialog(QDialog):
 
     def _save(self) -> None:
         self.config.groq_api_key = self.groq_input.text().strip()
+        self.config.groq_proxy_url = self.groq_proxy_input.text().strip()
         self.config.xunfei_api_key = self.xunfei_input.text().strip()
         self.config.ai_model_api_key = self.ai_input.text().strip()
         self.config.ai_base_url = self.ai_base_url.text().strip().rstrip("/") or "https://api.deepseek.com"

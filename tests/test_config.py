@@ -9,6 +9,7 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     path = tmp_path / "config.json"
     manager = ConfigManager(path)
     manager.config.groq_api_key = "groq-secret"
+    manager.config.groq_proxy_url = "http://127.0.0.1:7890"
     manager.config.xunfei_api_key = "xunfei-secret"
     manager.config.ai_model_api_key = "ai-secret"
     manager.config.ai_base_url = "https://example.invalid"
@@ -23,6 +24,7 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     loaded = ConfigManager(path).load()
 
     assert loaded.groq_api_key == "groq-secret"
+    assert loaded.groq_proxy_url == "http://127.0.0.1:7890"
     assert loaded.xunfei_api_key == "xunfei-secret"
     assert loaded.ai_model_api_key == "ai-secret"
     assert loaded.ai_base_url == "https://example.invalid"

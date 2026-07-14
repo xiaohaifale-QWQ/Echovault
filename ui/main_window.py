@@ -544,7 +544,12 @@ class MainWindow(QMainWindow):
             if provider_name == "local":
                 hint = "请确认已在设置中下载模型，且 ffmpeg 已安装。"
             elif provider_name == "groq":
-                hint = "请检查网络连接和 Groq API Key 配置。"
+                if "无法连接 Groq 服务" in err_detail:
+                    hint = "当前为网络连接问题；请检查代理、DNS 或防火墙。"
+                elif "API Key" in err_detail or "鉴权" in err_detail:
+                    hint = "请检查 Groq API Key 配置。"
+                else:
+                    hint = "请检查网络连接和 Groq API Key 配置。"
             else:
                 hint = "请检查相关配置。"
             

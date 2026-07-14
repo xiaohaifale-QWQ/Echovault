@@ -51,3 +51,9 @@ def test_groq_provider_explains_connection_timeout(tmp_path):
 
     with pytest.raises(RuntimeError, match="api\\.groq\\.com:443"):
         provider.transcribe(str(audio))
+
+
+def test_groq_provider_accepts_optional_proxy_setting():
+    provider = GroqWhisperProvider(api_key="test", proxy_url="http://127.0.0.1:7890")
+
+    assert provider._proxy_url == "http://127.0.0.1:7890"

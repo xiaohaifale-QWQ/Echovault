@@ -26,8 +26,9 @@ def _field(value, name: str, default=None):
 class GroqWhisperProvider(ASRProvider):
     """Groq Cloud Whisper API 实现"""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, proxy_url: Optional[str] = None):
         self._api_key = api_key or os.environ.get("GROQ_API_KEY", "")
+        self._proxy_url = (proxy_url or "").strip()
         self._client = None  # 懒加载
 
     @property
@@ -53,7 +54,14 @@ class GroqWhisperProvider(ASRProvider):
                     "或在设置面板中配置。\n"
                     "免费获取: https://console.groq.com/keys"
                 )
-            self._client = Groq(api_key=self._api_key)
+            options = {"api_key": self._api_key}
+            if self._proxy_url:
+                try:
+                    import httpx
+                except ImportError as exc:
+                    raise RuntimeError("Groq 代理需要 httpx 依赖。") from exc
+                options["http_client"] = httpx.Client(proxy=self._proxy_url, timeout=60)
+            self._client = Groq(**options)
         return self._client
 
     def is_available(self) -> bool:

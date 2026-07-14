@@ -48,6 +48,7 @@ class AppConfig:
 
     # API Keys（建议通过环境变量设置，这里提供默认值）
     groq_api_key: str = ""
+    groq_proxy_url: str = ""
     xunfei_api_key: str = ""
     ai_model_api_key: str = ""
     ai_base_url: str = "https://api.deepseek.com"
@@ -111,6 +112,7 @@ class ConfigManager:
             "video_time_offsets": c.video_time_offsets,
             "output_lrc_dir": c.output_lrc_dir,
             "groq_api_key": c.groq_api_key,
+            "groq_proxy_url": c.groq_proxy_url,
             "xunfei_api_key": c.xunfei_api_key,
             "ai_model_api_key": c.ai_model_api_key,
             "ai_base_url": c.ai_base_url,
@@ -144,6 +146,7 @@ class ConfigManager:
         } if isinstance(offsets, dict) else {}
         c.output_lrc_dir = data.get("output_lrc_dir")
         c.groq_api_key = os.environ.get("GROQ_API_KEY") or data.get("groq_api_key", "")
+        c.groq_proxy_url = data.get("groq_proxy_url", "")
         c.xunfei_api_key = os.environ.get("XUNFEI_API_KEY") or data.get("xunfei_api_key", "")
         c.ai_model_api_key = os.environ.get("ECHOVAULT_AI_API_KEY") or data.get(
             "ai_model_api_key", ""
@@ -194,6 +197,8 @@ def update_config_value(config: AppConfig, key: str, value: str) -> None:
         config.video_dirs = [value]
     elif key == "groq_api_key":
         config.groq_api_key = value
+    elif key == "groq_proxy_url":
+        config.groq_proxy_url = value
     elif key == "xunfei_api_key":
         config.xunfei_api_key = value
     elif key == "ai_model_api_key":

@@ -52,7 +52,8 @@ class ASRRouter:
         # 注册内置 Provider
         if GroqWhisperProvider is not None:
             self.register(GroqWhisperProvider(
-                api_key=config.groq_api_key if config else None
+                api_key=config.groq_api_key if config else None,
+                proxy_url=config.groq_proxy_url if config else None,
             ))
         else:
             logger.warning("Groq SDK 未安装，跳过 Groq Provider。安装: pip install groq")
