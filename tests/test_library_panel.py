@@ -126,3 +126,19 @@ def test_removing_added_root_keeps_source_files_and_refreshes_roots(tmp_path):
     assert source.is_file()
     assert changes == [("music", [])]
     assert selected[-1] == ""
+
+
+def test_few_material_columns_expand_to_fill_the_available_width(tmp_path):
+    _app()
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "song.mp3").write_bytes(b"")
+    panel = LibraryPanel()
+    panel.resize(900, 600)
+    panel.set_directories([str(root)], [])
+    panel.show()
+    _app().processEvents()
+
+    columns = [listing.parentWidget() for _, listing in panel.folder_browser._columns]
+    assert len(columns) == 2
+    assert all(column.width() > 238 for column in columns)

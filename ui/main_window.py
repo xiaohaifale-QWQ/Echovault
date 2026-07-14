@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QPushButton, QProgressBar, QStackedWidget,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut
 
 from core.config import config_manager, AppConfig
 from core.asr.router import ASRRouter, get_router
@@ -34,7 +34,8 @@ from ui.song_list_panel import SongListPanel
 from ui.detail_panel import DetailPanel
 from ui.settings_dialog import SettingsDialog
 from ui.key_manager_dialog import KeyManagerDialog
-from ui.ai_chat_panel import AIChatPanel
+from ui.ai_chat_panel import AIChatPanel, CLICommandWorker
+from core.ai_control import validate_cli_command
 from ui.sync_panel import SyncPanel
 
 
@@ -55,6 +56,9 @@ class MainWindow(QMainWindow):
         self._setup_menubar()
         self._setup_statusbar()
         self._connect_signals()
+        self._voice_shortcut = QShortcut(self)
+        self._voice_shortcut.activated.connect(self._toggle_voice_input_shortcut)
+        self._configure_voice_input_shortcut()
         
         self.library_panel.set_directories(self.config.music_dirs, self.config.video_dirs)
         self.library_panel.set_select_all_modes(
@@ -228,6 +232,8 @@ class MainWindow(QMainWindow):
         provider = self.router.get(self.config.asr.provider)
         if provider and provider.is_available():
             self.provider_label.setText(f"引擎: {provider.display_name}")
+        elif self.config.asr.provider == "xunfei":
+            self.provider_label.setText("引擎: 讯飞（待接入）")
         else:
             self.provider_label.setText("引擎: 不可用 (请检查设置)")
     
@@ -248,6 +254,7 @@ class MainWindow(QMainWindow):
         self.song_list_panel.song_selected.connect(self.detail_panel.show_song)
         self.song_list_panel.song_selected.connect(self.lyrics_preview_panel.show_song)
         self.lyrics_preview_panel.lyrics_saved.connect(self._on_preview_lyrics_saved)
+        self.ai_chat_panel.command_requested.connect(self._on_ai_command_requested)
         
         # 详情面板 → 请求识别
         self.detail_panel.transcribe_clicked.connect(self._on_transcribe_single)
@@ -457,6 +464,8 @@ class MainWindow(QMainWindow):
         if not provider or not provider.is_available():
             if provider_name == "groq":
                 msg = "Groq 云端引擎不可用。\n\n请确认已设置 Groq API Key。\n免费获取: https://console.groq.com/keys"
+            elif provider_name == "xunfei":
+                msg = "讯飞云端引擎尚未接入。\n\n已可保存和选择讯飞 Key；实际识别仍需补充讯飞 AppID/API Secret 接入。"
             elif provider_name == "local":
                 msg = "本地 Whisper 引擎不可用。\n\n"
                 try: import whisper
@@ -607,13 +616,54 @@ class MainWindow(QMainWindow):
         elif result:
             # 设置已保存，重建 router
             self.router = get_router(self.config)
+            self._configure_voice_input_shortcut()
             self._refresh_statusbar()
 
     def _on_key_manager(self):
         """Open the local credential manager and rebuild the ASR router if saved."""
         dialog = KeyManagerDialog(self.config, self)
+        dialog.asr_provider_saved.connect(self._on_asr_provider_saved)
         if dialog.exec():
             self.router = get_router(self.config)
+            self._refresh_statusbar()
+
+    def _on_asr_provider_saved(self, provider: str):
+        self.config.asr.provider = provider
+
+    def _on_ai_command_requested(self, raw_command: str):
+        try:
+            command = validate_cli_command(raw_command)
+        except ValueError as exc:
+            self.ai_chat_panel.append_command_result(f"已拒绝命令：{exc}")
+            return
+        if command.needs_confirmation:
+            reply = QMessageBox.question(
+                self,
+                "确认 AI 操作",
+                f"AI 请求执行：\n{raw_command}\n\n该操作会修改软件配置、文件或缓存，是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                self.ai_chat_panel.append_command_result("已取消需要确认的 AI 操作。")
+                return
+        self.ai_chat_panel.append_command_result(f"正在执行：{raw_command}")
+        self._ai_command_worker = CLICommandWorker(command, self)
+        self._ai_command_worker.completed.connect(
+            lambda output: self._on_ai_command_finished(raw_command, True, output)
+        )
+        self._ai_command_worker.failed.connect(
+            lambda error: self._on_ai_command_finished(raw_command, False, error)
+        )
+        self._ai_command_worker.start()
+
+    def _on_ai_command_finished(self, raw_command: str, success: bool, output: str):
+        self.ai_chat_panel.append_command_result(
+            f"{'完成' if success else '失败'}：{raw_command}\n{output}"
+        )
+        if success:
+            self.config = config_manager.load()
+            self.router = get_router(self.config)
+            self._configure_voice_input_shortcut()
             self._refresh_statusbar()
 
     def _show_ai_mode_menu(self):
@@ -641,6 +691,15 @@ class MainWindow(QMainWindow):
             [self._ai_panel_width, max(1, self.width() - self._ai_panel_width)]
         )
         self._ai_mode_enabled = True
+
+    def _configure_voice_input_shortcut(self):
+        self._voice_shortcut.setKey(QKeySequence(self.config.voice_input_shortcut))
+
+    def _toggle_voice_input_shortcut(self):
+        if not self._ai_mode_enabled:
+            self.status_label.setText("请先启动 AI 模式，再使用语音输入快捷键。")
+            return
+        self.ai_chat_panel.toggle_voice_input()
     
     def _do_restart(self):
         """重新启动应用"""

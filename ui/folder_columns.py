@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -46,7 +47,6 @@ class FolderColumnsBrowser(QWidget):
         self._content_layout = QHBoxLayout(self._content)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(1)
-        self._content_layout.addStretch()
         self._scroll.setWidget(self._content)
         outer.addWidget(self._scroll)
 
@@ -68,10 +68,14 @@ class FolderColumnsBrowser(QWidget):
 
     def _clear_columns(self) -> None:
         self._columns.clear()
-        while self._content_layout.count() > 1:
+        while self._content_layout.count():
             item = self._content_layout.takeAt(0)
             if item and item.widget():
                 item.widget().deleteLater()
+        self._update_content_minimum_width()
+
+    def _update_content_minimum_width(self) -> None:
+        self._content.setMinimumWidth(max(238, len(self._columns) * 238))
 
     def _entries_for(self, folder: str) -> list[str]:
         try:
@@ -86,7 +90,11 @@ class FolderColumnsBrowser(QWidget):
     def _add_column(self, title: str, paths: list[str], *, roots: bool = False) -> None:
         column = QFrame()
         column.setObjectName("materialFolderColumn")
-        column.setFixedWidth(238)
+        column.setMinimumWidth(238)
+        column.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         column.setStyleSheet(
             "QFrame#materialFolderColumn{background:#FFFFFF;border:1px solid #D9DEE5;}"
             "QListWidget{border:0;background:#FFFFFF;}"
@@ -114,9 +122,9 @@ class FolderColumnsBrowser(QWidget):
             lambda position, target=listing: self._show_context_menu(target, position)
         )
         layout.addWidget(listing)
-        self._content_layout.insertWidget(self._content_layout.count() - 1, column)
+        self._content_layout.addWidget(column, 1)
         self._columns.append((None if roots else title, listing))
-        self._content.setMinimumWidth(max(238, len(self._columns) * 239))
+        self._update_content_minimum_width()
 
     def _select_item(self, item: QListWidgetItem) -> None:
         path = str(item.data(Qt.ItemDataRole.UserRole) or "")
@@ -141,7 +149,7 @@ class FolderColumnsBrowser(QWidget):
             old_column = old_listing.parentWidget()
             self._content_layout.removeWidget(old_column)
             old_column.deleteLater()
-        self._content.setMinimumWidth(max(238, len(self._columns) * 239))
+        self._update_content_minimum_width()
         self._current_folder = path
         self.folder_selected.emit(path)
         self._add_column(os.path.basename(path) or path, self._entries_for(path))

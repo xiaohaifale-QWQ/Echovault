@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 CONFIG_SCHEMA_VERSION = 2
-SUPPORTED_PROVIDERS = {"groq", "local"}
+SUPPORTED_PROVIDERS = {"groq", "local", "xunfei"}
 SUPPORTED_LOCAL_MODELS = {"tiny", "base", "small", "medium", "large"}
 SUPPORTED_LANGUAGES = {"zh", "en", "ja", "ko"}
 
@@ -53,6 +53,7 @@ class AppConfig:
     ai_model_api_key: str = ""
     ai_base_url: str = "https://api.deepseek.com"
     ai_model_name: str = "deepseek-chat"
+    voice_input_shortcut: str = "Ctrl+Shift+Space"
 
     def __post_init__(self):
         # 从环境变量读取 API Key
@@ -117,6 +118,7 @@ class ConfigManager:
             "ai_model_api_key": c.ai_model_api_key,
             "ai_base_url": c.ai_base_url,
             "ai_model_name": c.ai_model_name,
+            "voice_input_shortcut": c.voice_input_shortcut,
             "asr": {
                 "provider": c.asr.provider,
                 "local_model": c.asr.local_model,
@@ -153,6 +155,8 @@ class ConfigManager:
         )
         c.ai_base_url = data.get("ai_base_url", "https://api.deepseek.com")
         c.ai_model_name = data.get("ai_model_name", "deepseek-chat")
+        shortcut = data.get("voice_input_shortcut", "Ctrl+Shift+Space")
+        c.voice_input_shortcut = shortcut if isinstance(shortcut, str) else "Ctrl+Shift+Space"
         asr_data = data.get("asr", {})
         c.asr.provider = asr_data.get("provider", "groq")
         c.asr.local_model = asr_data.get("local_model", "base")
@@ -207,6 +211,8 @@ def update_config_value(config: AppConfig, key: str, value: str) -> None:
         config.ai_base_url = value.rstrip("/")
     elif key == "ai_model_name":
         config.ai_model_name = value
+    elif key == "voice_input_shortcut":
+        config.voice_input_shortcut = value
     else:
         raise ValueError(f"未知配置项: {key}")
 

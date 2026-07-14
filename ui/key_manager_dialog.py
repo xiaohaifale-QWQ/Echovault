@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -20,9 +21,13 @@ from core.config import AppConfig, config_manager
 class KeyManagerDialog(QDialog):
     """Edit locally stored provider credentials without placing them in preferences."""
 
+    asr_provider_saved = pyqtSignal(str)
+
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent)
         self.config = config
+        self._initial_groq_key = config.groq_api_key
+        self._initial_xunfei_key = config.xunfei_api_key
         self.setWindowTitle("密钥管理")
         self.setMinimumWidth(520)
 
@@ -60,7 +65,7 @@ class KeyManagerDialog(QDialog):
         form.addRow("AI 模型名称:", self.ai_model_name)
         layout.addLayout(form)
 
-        future = QLabel("AI 模式尚未启用；此处只预先保存密钥，不会发起任何 AI 请求。")
+        future = QLabel("AI Key 仅在用户主动发送 AI 对话时使用；不会上传本地素材文件。")
         future.setStyleSheet("font-size:11px;color:#7A838D")
         future.setWordWrap(True)
         layout.addWidget(future)
@@ -102,8 +107,17 @@ class KeyManagerDialog(QDialog):
                 os.environ[name] = value
             else:
                 os.environ.pop(name, None)
-        config_manager.config = self.config
         try:
+            if self.config.groq_api_key and self.config.groq_api_key != self._initial_groq_key:
+                self.config.asr.provider = "groq"
+                self.asr_provider_saved.emit("groq")
+            elif (
+                self.config.xunfei_api_key
+                and self.config.xunfei_api_key != self._initial_xunfei_key
+            ):
+                self.config.asr.provider = "xunfei"
+                self.asr_provider_saved.emit("xunfei")
+            config_manager.config = self.config
             config_manager.save()
         except OSError as exc:
             QMessageBox.critical(self, "密钥管理", f"无法保存本机配置：{exc}")

@@ -8,7 +8,6 @@ from pathlib import Path
 
 from core.audio_utils import find_ffmpeg
 
-
 BASE_PACKAGES = {
     "PyQt6": "PyQt6",
     "pydub": "pydub",
@@ -54,6 +53,13 @@ def build_environment_report(config, cache_root: str | Path | None = None) -> di
         provider_ready = (
             provider_details["whisper_installed"] and provider_details["model_installed"]
         )
+    elif provider == "xunfei":
+        provider_details = {
+            "name": "xunfei",
+            "api_key_configured": bool(config.xunfei_api_key),
+            "implementation_ready": False,
+        }
+        provider_ready = False
     else:
         provider_details = {"name": provider, "supported": False}
         provider_ready = False

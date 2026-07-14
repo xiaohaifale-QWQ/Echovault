@@ -24,6 +24,7 @@ if not ffprobe_path or not Path(ffprobe_path).is_file():
 hidden_imports = [
     "groq",
     "opencc",
+    "PyQt6.QtMultimedia",
     "torch",
     "zeroconf",
 ] + collect_submodules("groq") + collect_submodules("whisper") + collect_submodules("tiktoken_ext")

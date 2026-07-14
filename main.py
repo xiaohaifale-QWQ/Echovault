@@ -44,6 +44,7 @@ from core.audio_utils import is_supported, SUPPORTED_FORMATS
 from core.lrc_writer import transcribe_and_save_lrc
 from core.lrc_parser import parse_lrc_file
 from core.environment import build_environment_report
+from core.voice_cache import clear_voice_cache, voice_cache_dir
 from services.library_service import InstrumentalStore, scan_audio
 
 logging.basicConfig(
@@ -300,7 +301,11 @@ def cmd_config(args):
                 "xunfei_configured": bool(c.xunfei_api_key),
                 "deepseek_configured": bool(c.ai_model_api_key),
             },
-            "ai": {"base_url": c.ai_base_url, "model": c.ai_model_name},
+            "ai": {
+                "base_url": c.ai_base_url,
+                "model": c.ai_model_name,
+                "voice_input_shortcut": c.voice_input_shortcut,
+            },
             "asr": {
                 "provider": c.asr.provider, "local_model": c.asr.local_model,
                 "language": c.asr.language, "use_vocal_separation": c.asr.use_vocal_separation,
@@ -364,6 +369,13 @@ def cmd_ai(args):
         logger.error(str(exc))
         raise SystemExit(1) from exc
     _out({"answer": answer} if args.json_output else answer, args)
+
+
+def cmd_cache(args):
+    if args.cache_action == "path":
+        print(voice_cache_dir())
+    elif args.cache_action == "clear":
+        print(f"已清理 {clear_voice_cache()} 个语音缓存文件。")
 
 
 def cmd_video(args):
@@ -718,6 +730,12 @@ def main():
     sp = sub.add_parser("ai", help="Built-in DeepSeek assistant")
     s2 = sp.add_subparsers(dest="ai_action", required=True)
     x = s2.add_parser("chat", help="Ask the assistant with the built-in manual"); x.add_argument("question"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_ai)
+
+    # cache
+    sp = sub.add_parser("cache", help="Voice-input cache management")
+    s2 = sp.add_subparsers(dest="cache_action", required=True)
+    x = s2.add_parser("path", help="Show the voice-input cache folder"); x.set_defaults(func=cmd_cache)
+    x = s2.add_parser("clear", help="Delete cached voice recordings"); x.set_defaults(func=cmd_cache)
 
     # model
     sp = sub.add_parser("model", help="Model management")

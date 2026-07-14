@@ -3,15 +3,17 @@ import os, subprocess, sys
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QCheckBox, QPushButton,
-    QGroupBox, QLabel, QDialogButtonBox, QFileDialog, QProgressBar, QMessageBox,
+    QGroupBox, QLabel, QDialogButtonBox, QFileDialog, QKeySequenceEdit, QProgressBar, QMessageBox,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QThread
+from PyQt6.QtCore import Qt, QUrl, pyqtSignal, QThread
+from PyQt6.QtGui import QDesktopServices, QKeySequence
 from core.config import AppConfig, config_manager
 from core.model_download import DownloadCancelled, ModelDownloadError, download_model
 from core.runtime_detection import detect_hardware, select_runtime
 from core.runtime_manager import RuntimeInstallCancelled, RuntimeManagerError
 from core.runtime_setup import RuntimeSetupResult, RuntimeSetupService
 from core.process_utils import hidden_window_kwargs
+from core.voice_cache import clear_voice_cache, voice_cache_dir
 
 class _GPUDetectWorker(QThread):
     """后台扫描显卡"""
@@ -221,10 +223,19 @@ class SettingsDialog(QDialog):
 
         ag = QGroupBox("语音识别 (ASR)"); af = QFormLayout(ag)
         self.provider_combo = QComboBox()
-        self.provider_combo.addItem("云端", "groq")
+        self.provider_combo.addItem("云端", "cloud")
         self.provider_combo.addItem("本地", "local")
         self.provider_combo.currentIndexChanged.connect(self._on_prov)
         af.addRow("识别引擎:", self.provider_combo)
+
+        self.cloud_provider_label = QLabel("云端服务:")
+        self.cloud_provider_combo = QComboBox()
+        self.cloud_provider_combo.addItem("Groq", "groq")
+        self.cloud_provider_combo.addItem("讯飞", "xunfei")
+        self.cloud_provider_combo.currentIndexChanged.connect(
+            lambda _index: self._on_prov(self.provider_combo.currentIndex())
+        )
+        af.addRow(self.cloud_provider_label, self.cloud_provider_combo)
 
         self.api_input = QLineEdit(); self.api_input.setPlaceholderText("输入 API Key...")
         self.api_input.setEchoMode(QLineEdit.EchoMode.Password); af.addRow("Groq Key:", self.api_input)
@@ -236,6 +247,15 @@ class SettingsDialog(QDialog):
         key_notice = QLabel("Key 将以明文保存在当前用户的本机配置中")
         key_notice.setStyleSheet("font-size:10px;color:#888")
         af.addRow("", key_notice)
+
+        self.xunfei_key_label = QLabel("讯飞 Key:")
+        self.xunfei_key_status = QLabel("已在密钥管理中配置 ✓")
+        self.xunfei_key_status.setStyleSheet("color:#248A4A;font-weight:600")
+        af.addRow(self.xunfei_key_label, self.xunfei_key_status)
+        self.xunfei_notice = QLabel("讯飞识别尚待接入；当前可保存并切换服务配置。")
+        self.xunfei_notice.setStyleSheet("font-size:10px;color:#888")
+        self.xunfei_notice.setWordWrap(True)
+        af.addRow("", self.xunfei_notice)
 
         # 保留字段以兼容已有配置，讯飞 Provider 实现前不在界面中展示。
         self.xunfei_input = QLineEdit()
@@ -321,12 +341,45 @@ class SettingsDialog(QDialog):
         bb = QPushButton("浏览"); bb.clicked.connect(lambda: self._browse(self.lrc_input)); dr.addWidget(bb)
         lf.addRow("LRC 目录:", dr); l.addWidget(lg)
 
+        shortcut_group = QGroupBox("快捷键")
+        shortcut_form = QFormLayout(shortcut_group)
+        self.voice_shortcut_edit = QKeySequenceEdit()
+        self.voice_shortcut_edit.setToolTip("在 AI 模式中开始或停止语音输入")
+        shortcut_form.addRow("语音输入:", self.voice_shortcut_edit)
+        shortcut_hint = QLabel("默认 Ctrl+Shift+Space；AI 模式未启动时快捷键不会录音。")
+        shortcut_hint.setWordWrap(True)
+        shortcut_hint.setStyleSheet("font-size:11px;color:#666")
+        shortcut_form.addRow("", shortcut_hint)
+        l.addWidget(shortcut_group)
+
+        cache_group = QGroupBox("缓存")
+        cache_form = QFormLayout(cache_group)
+        self.voice_cache_path = QLabel(str(voice_cache_dir()))
+        self.voice_cache_path.setWordWrap(True)
+        self.voice_cache_path.setStyleSheet("font-size:11px;color:#666")
+        cache_form.addRow("语音录音缓存:", self.voice_cache_path)
+        cache_actions = QHBoxLayout()
+        open_cache_button = QPushButton("打开缓存文件夹")
+        open_cache_button.clicked.connect(self._open_voice_cache)
+        cache_actions.addWidget(open_cache_button)
+        clear_cache_button = QPushButton("清理缓存")
+        clear_cache_button.clicked.connect(self._clear_voice_cache)
+        cache_actions.addWidget(clear_cache_button)
+        cache_actions.addStretch()
+        cache_form.addRow("", cache_actions)
+        self.cache_status = QLabel("")
+        self.cache_status.setStyleSheet("font-size:11px;color:#666")
+        cache_form.addRow("", self.cache_status)
+        l.addWidget(cache_group)
+
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btns.accepted.connect(self._save); btns.rejected.connect(self.reject); l.addWidget(btns)
 
     def _load_config(self):
         c = self.config
-        i = 0 if c.asr.provider == "groq" else 1; self.provider_combo.setCurrentIndex(i)
+        i = 1 if c.asr.provider == "local" else 0; self.provider_combo.setCurrentIndex(i)
+        cloud_index = self.cloud_provider_combo.findData(c.asr.provider)
+        self.cloud_provider_combo.setCurrentIndex(cloud_index if cloud_index >= 0 else 0)
         self.api_input.clear()
         self.xunfei_input.setText(c.xunfei_api_key)
         li = [j for j in range(self.lang_combo.count()) if self.lang_combo.itemData(j) == c.asr.language]
@@ -336,14 +389,21 @@ class SettingsDialog(QDialog):
         self.vocal_check.setChecked(c.asr.use_vocal_separation)
         self.gpu_check.setChecked(c.asr.use_gpu)
         if c.output_lrc_dir: self.lrc_input.setText(c.output_lrc_dir)
+        self.voice_shortcut_edit.setKeySequence(QKeySequence(c.voice_input_shortcut))
         # 自动扫描显卡
         self._on_scan_gpu()
-        self._refresh_groq_key_state()
+        self._refresh_cloud_provider_state()
 
     def _on_prov(self, idx):
         is_local = self.provider_combo.itemData(idx) == "local"
-        self.api_input.setVisible(not is_local and not bool(self.config.groq_api_key))
-        self.groq_key_status.setVisible(not is_local and bool(self.config.groq_api_key))
+        is_groq = self.cloud_provider_combo.currentData() == "groq"
+        self.cloud_provider_label.setVisible(not is_local)
+        self.cloud_provider_combo.setVisible(not is_local)
+        self.api_input.setVisible(not is_local and is_groq and not bool(self.config.groq_api_key))
+        self.groq_key_status.setVisible(not is_local and is_groq and bool(self.config.groq_api_key))
+        self.xunfei_key_label.setVisible(not is_local and not is_groq)
+        self.xunfei_key_status.setVisible(not is_local and not is_groq)
+        self.xunfei_notice.setVisible(not is_local and not is_groq)
         self.model_combo.setVisible(is_local)
         self.btn_dl.setVisible(is_local)
         self.btn_cancel_dl.setVisible(False)
@@ -351,9 +411,13 @@ class SettingsDialog(QDialog):
         self.dl_label.setVisible(False)
         self.gpu_group.setVisible(is_local)
 
-    def _refresh_groq_key_state(self):
-        configured = bool(self.config.groq_api_key)
-        self.provider_combo.setItemText(0, "云端（Groq ✓）" if configured else "云端（Groq）")
+    def _refresh_cloud_provider_state(self):
+        self.cloud_provider_combo.setItemText(
+            0, "Groq ✓" if self.config.groq_api_key else "Groq"
+        )
+        self.cloud_provider_combo.setItemText(
+            1, "讯飞 ✓" if self.config.xunfei_api_key else "讯飞"
+        )
         self._on_prov(self.provider_combo.currentIndex())
 
     def _on_download(self):
@@ -530,9 +594,32 @@ class SettingsDialog(QDialog):
         d = QFileDialog.getExistingDirectory(self, "选择文件夹")
         if d: edit.setText(d)
 
+    def _open_voice_cache(self):
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(voice_cache_dir())))
+
+    def _clear_voice_cache(self):
+        reply = QMessageBox.question(
+            self,
+            "清理语音缓存",
+            "将删除本机语音输入录音缓存，不会删除模型、素材或歌词。是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            removed = clear_voice_cache()
+        except OSError as exc:
+            QMessageBox.warning(self, "清理缓存", f"无法清理缓存：{exc}")
+            return
+        self.cache_status.setText(f"已清理 {removed} 个语音缓存文件。")
+
     def _save(self):
         c = self.config
-        c.asr.provider = self.provider_combo.currentData()
+        c.asr.provider = (
+            "local"
+            if self.provider_combo.currentData() == "local"
+            else self.cloud_provider_combo.currentData()
+        )
         c.asr.language = self.lang_combo.currentData()
         c.asr.local_model = self.model_combo.currentData()
         c.asr.use_vocal_separation = self.vocal_check.isChecked()
@@ -544,5 +631,7 @@ class SettingsDialog(QDialog):
         xunfei_key = self.xunfei_input.text().strip(); c.xunfei_api_key = xunfei_key
         if xunfei_key: os.environ["XUNFEI_API_KEY"] = xunfei_key
         d = self.lrc_input.text().strip(); c.output_lrc_dir = d if d else None
+        shortcut = self.voice_shortcut_edit.keySequence().toString().strip()
+        c.voice_input_shortcut = shortcut or "Ctrl+Shift+Space"
         config_manager.config = c; config_manager.save()
         self.accept()
