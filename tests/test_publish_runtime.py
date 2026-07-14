@@ -51,7 +51,7 @@ def test_publish_runtime_splits_archive_and_signs_manifest(tmp_path):
             "--installed-size",
             "100",
             "--release-base-url",
-            "https://github.com/xiaohaifale-QWQ/echovault-models/releases/download/runtime-v1.0",
+            "https://github.com/xiaohaifale-QWQ/echovault-models/releases/download/v1.0",
             "--part-size-mib",
             "1",
         ],

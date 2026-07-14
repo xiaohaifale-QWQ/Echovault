@@ -13,7 +13,7 @@ from .runtime_manager import (
     verify_manifest_signature,
 )
 
-RUNTIME_RELEASE_TAG = "runtime-v1.0"
+RUNTIME_RELEASE_TAG = "v1.0"
 RUNTIME_RELEASE_BASE_URL = (
     f"https://github.com/xiaohaifale-QWQ/echovault-models/releases/download/{RUNTIME_RELEASE_TAG}"
 )
