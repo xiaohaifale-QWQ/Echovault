@@ -79,7 +79,9 @@ def aggregate_videos_by_time(folder: str | Path, offset_seconds: int = 0) -> Vid
     return VideoAggregateResult(output_dir, video_path, manifest_path, len(videos), True)
 
 
-def write_video_transcript_timeline(folder: str | Path, offset_seconds: int = 0) -> tuple[Path, int]:
+def write_video_transcript_timeline(
+    folder: str | Path, offset_seconds: int = 0
+) -> tuple[Path, int]:
     """Map each recognised video-LRC line to a calibrated real-world timestamp."""
     root = Path(folder).expanduser().resolve()
     output_path = root / "视频文字时间轴.csv"
