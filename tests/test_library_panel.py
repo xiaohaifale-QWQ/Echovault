@@ -52,3 +52,21 @@ def test_double_clicking_folder_opens_a_new_material_column(tmp_path):
 
     assert len(panel.folder_browser._columns) == 3
     assert panel.folder_browser.current_folder == str(child)
+
+
+def test_hour_offset_fills_right_time_and_tracks_left_time(tmp_path):
+    _app()
+    panel = LibraryPanel()
+    recorded = datetime(2026, 7, 14, 10, 0, 0)
+    panel.set_video_materials(
+        str(tmp_path),
+        [{"name": "camera.mp4", "path": str(tmp_path / "camera.mp4"), "captured_at": recorded}],
+        0,
+    )
+
+    panel._set_target_from_offset(2.5)
+    assert panel.calibration_right.dateTime().toPyDateTime() == datetime(2026, 7, 14, 12, 30, 0)
+
+    panel.calibration_left.setDateTime(QDateTime(datetime(2026, 7, 14, 11, 0, 0)))
+    panel._on_left_time_changed()
+    assert panel.calibration_right.dateTime().toPyDateTime() == datetime(2026, 7, 14, 13, 30, 0)

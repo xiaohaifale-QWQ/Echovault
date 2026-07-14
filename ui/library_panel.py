@@ -13,6 +13,7 @@ from PyQt6.QtCore import (
     QSize,
     Qt,
     QTime,
+    QTimer,
     pyqtProperty,
     pyqtSignal,
 )
@@ -24,7 +25,9 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QMenu,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -125,6 +128,37 @@ class MaterialModeSwitch(QWidget):
         painter.drawRect(int(knob_x), track.y() + 3, knob_width, track.height() - 6)
 
 
+class TimeOffsetDash(QLabel):
+    """A dash that differentiates a normal click from a double-click."""
+
+    clicked = pyqtSignal()
+    double_clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__("—", parent)
+        self._click_timer = QTimer(self)
+        self._click_timer.setSingleShot(True)
+        self._click_timer.setInterval(220)
+        self._click_timer.timeout.connect(self.clicked)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._click_timer.start()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._click_timer.stop()
+            self.double_clicked.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
 class LibraryPanel(QWidget):
     folder_selected = pyqtSignal(str)
     mode_changed = pyqtSignal(str)
@@ -140,6 +174,7 @@ class LibraryPanel(QWidget):
         self._calibration_folder = ""
         self._videos = []
         self._current_offset = 0
+        self._offset_hours: float | None = None
         self._setup_ui()
 
     @property
@@ -193,19 +228,29 @@ class LibraryPanel(QWidget):
         time_row = QHBoxLayout()
         self.calibration_left = QDateTimeEdit()
         self.calibration_left.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
-        self.calibration_left.setCalendarPopup(True)
-        self.calibration_left.editingFinished.connect(self._emit_calibration)
+        self.calibration_left.setCalendarPopup(False)
+        self.calibration_left.setReadOnly(False)
+        self.calibration_left.editingFinished.connect(self._on_left_time_changed)
         time_row.addWidget(self.calibration_left)
         dash = QLabel("—")
         dash.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dash.setStyleSheet("font-size:18px;color:#667")
         time_row.addWidget(dash)
+        dash.setVisible(False)
+        time_row.removeWidget(dash)
+        self.offset_dash = TimeOffsetDash()
+        self.offset_dash.setToolTip("单击选择常用偏移；双击输入向后推的小时数")
+        self.offset_dash.setStyleSheet("font-size:18px;color:#667;padding:0 5px")
+        self.offset_dash.clicked.connect(self._choose_hour_offset)
+        self.offset_dash.double_clicked.connect(self._input_hour_offset)
+        time_row.addWidget(self.offset_dash)
         self.calibration_right = QDateTimeEdit()
         self.calibration_right.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
-        self.calibration_right.setCalendarPopup(True)
+        self.calibration_right.setCalendarPopup(False)
+        self.calibration_right.setReadOnly(False)
         self.calibration_right.setMinimumDateTime(QDateTime(QDate(2000, 1, 1), QTime(0, 0, 0)))
         self.calibration_right.setSpecialValueText("不校准")
-        self.calibration_right.editingFinished.connect(self._emit_calibration)
+        self.calibration_right.editingFinished.connect(self._on_right_time_changed)
         time_row.addWidget(self.calibration_right)
         calibration_layout.addRow(time_row)
         video_layout.addWidget(calibration_box)
@@ -295,10 +340,62 @@ class LibraryPanel(QWidget):
         if self._current_offset:
             adjusted = recorded + timedelta(seconds=self._current_offset)
             self.calibration_right.setDateTime(QDateTime(adjusted))
+            self._offset_hours = self._current_offset / 3600
         else:
             self.calibration_right.setDateTime(minimum)
+            self._offset_hours = None
         self.calibration_left.blockSignals(False)
         self.calibration_right.blockSignals(False)
+
+    def _on_left_time_changed(self):
+        if self._offset_hours is not None:
+            self._set_target_from_offset(self._offset_hours, emit=False)
+        self._emit_calibration()
+
+    def _on_right_time_changed(self):
+        target = self.calibration_right.dateTime()
+        if target == self.calibration_right.minimumDateTime():
+            self._offset_hours = None
+        else:
+            self._offset_hours = self.calibration_left.dateTime().secsTo(target) / 3600
+        self._emit_calibration()
+
+    def _choose_hour_offset(self):
+        menu = QMenu(self)
+        for hours in (1, 2, 6, 12, 24):
+            action = menu.addAction(f"向后推 {hours} 小时")
+            action.triggered.connect(
+                lambda _checked=False, selected_hours=hours: self._set_target_from_offset(
+                    selected_hours
+                )
+            )
+        menu.addSeparator()
+        custom_action = menu.addAction("自定义小时数…")
+        custom_action.triggered.connect(self._input_hour_offset)
+        menu.exec(self.offset_dash.mapToGlobal(self.offset_dash.rect().bottomLeft()))
+
+    def _input_hour_offset(self):
+        value, accepted = QInputDialog.getDouble(
+            self,
+            "时间偏差校准",
+            "向后推多少小时？负数表示向前推：",
+            self._offset_hours or 0.0,
+            -24 * 365,
+            24 * 365,
+            2,
+        )
+        if accepted:
+            self._set_target_from_offset(value)
+
+    def _set_target_from_offset(self, hours: float, *, emit: bool = True):
+        self._offset_hours = hours
+        source = self.calibration_left.dateTime()
+        target = source.addSecs(round(hours * 3600))
+        self.calibration_right.blockSignals(True)
+        self.calibration_right.setDateTime(target)
+        self.calibration_right.blockSignals(False)
+        if emit:
+            self._emit_calibration()
 
     def _emit_calibration(self):
         if not self._calibration_folder or self.reference_combo.currentIndex() < 0:
