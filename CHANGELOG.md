@@ -7,6 +7,7 @@
 - Versioned UTF-8 JSON Lines protocol and a standalone ASR Worker diagnostic process.
 - Main-process Worker client with request timeouts, structured remote errors, progress events,
   and safe child-process shutdown.
+- Cross-vendor Windows display-adapter detection and CUDA/WinML/CPU runtime recommendation.
 
 ## 0.3.0-dev — 2026-07-13
 

@@ -387,21 +387,22 @@ def cmd_model(args):
 
 def cmd_gpu(args):
     if args.gpu_action == "scan":
-        gpu_name = None
-        try:
-            import subprocess as sp
-            r = sp.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                       capture_output=True, text=True, timeout=10)
-            if r.returncode == 0 and r.stdout.strip():
-                gpu_name = r.stdout.strip().split("\n")[0].strip()
-        except Exception:
-            pass
+        from core.runtime_detection import detect_hardware, select_runtime
+
+        report = detect_hardware()
+        selection = select_runtime(report)
         cuda_ok = False
         try:
             import torch; cuda_ok = torch.cuda.is_available()
         except ImportError:
             pass
-        result = {"gpu_detected": bool(gpu_name), "gpu_name": gpu_name, "cuda_installed": cuda_ok}
+        result = {
+            "gpu_detected": bool(report.adapters),
+            "gpu_name": selection.adapter.name if selection.adapter else None,
+            "cuda_installed": cuda_ok,
+            "hardware": report.as_dict(),
+            "recommended_runtime": selection.as_dict(),
+        }
         _out(result, args)
 
     elif args.gpu_action == "status":
