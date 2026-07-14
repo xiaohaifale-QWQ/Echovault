@@ -10,6 +10,7 @@
 - Cross-vendor Windows display-adapter detection and CUDA/WinML/CPU runtime recommendation.
 - Signed-manifest runtime manager with resumable downloads, SHA-256 verification, safe ZIP
   extraction, atomic activation, and project-scoped cleanup.
+- External CPU/CUDA Worker Whisper transcription with actual-device reporting and CUDA OOM errors.
 
 ## 0.3.0-dev — 2026-07-13
 

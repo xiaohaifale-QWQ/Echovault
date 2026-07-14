@@ -11,9 +11,11 @@
 
 import os
 import logging
+from collections.abc import Callable, Sequence
 from typing import Optional
 
 from .base import ASRProvider, Segment, TranscriptionResult
+from .worker_client import WorkerClient, WorkerClientError
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +26,21 @@ class LocalWhisperProvider(ASRProvider):
     # 内置模型大小
     AVAILABLE_MODELS = ["tiny", "base", "small", "medium", "large"]
     
-    def __init__(self, model_name: str = "base", use_gpu: bool = False):
+    def __init__(
+        self,
+        model_name: str = "base",
+        use_gpu: bool = False,
+        *,
+        worker_command: Sequence[str] | None = None,
+        worker_client_factory: Callable[[Sequence[str]], WorkerClient] = WorkerClient,
+    ):
         self._model_name = model_name
         self._model = None
         self._device = None
         self._use_gpu = use_gpu
+        self._worker_command = list(worker_command) if worker_command else None
+        self._worker_client_factory = worker_client_factory
+        self._worker_client: WorkerClient | None = None
     
     @property
     def name(self) -> str:
@@ -58,9 +70,21 @@ class LocalWhisperProvider(ASRProvider):
             logger.info("Model loaded")
         
         return self._model
+
+    def _get_worker_client(self) -> WorkerClient:
+        if not self._worker_command:
+            raise RuntimeError("未配置外置 ASR Worker")
+        if self._worker_client is None:
+            self._worker_client = self._worker_client_factory(self._worker_command)
+        return self._worker_client
     
     def is_available(self) -> bool:
         """检查 whisper 是否已安装"""
+        if self._worker_command:
+            try:
+                return bool(self._get_worker_client().request("doctor", timeout=10).get("torch_installed"))
+            except WorkerClientError:
+                return False
         try:
             import whisper
             return True
@@ -69,6 +93,33 @@ class LocalWhisperProvider(ASRProvider):
     
     def transcribe(self, audio_path: str, language: Optional[str] = None) -> TranscriptionResult:
         """本地转录音频"""
+        if self._worker_command:
+            try:
+                payload = self._get_worker_client().request(
+                    "transcribe",
+                    audio=audio_path,
+                    model=self._model_name,
+                    language=language,
+                    cache_dir=os.path.join(os.path.expanduser("~"), ".cache", "whisper"),
+                    timeout=60 * 60,
+                )
+            except WorkerClientError as exc:
+                raise RuntimeError(f"外置本地识别运行时不可用: {exc}") from exc
+            self._device = str(payload.get("device", "cpu"))
+            return TranscriptionResult(
+                segments=[
+                    Segment(
+                        start_time=float(item.get("start", 0.0)),
+                        end_time=float(item.get("end", 0.0)),
+                        text=str(item.get("text", "")),
+                        confidence=float(item.get("confidence", 0.0)),
+                    )
+                    for item in payload.get("segments", [])
+                    if isinstance(item, dict)
+                ],
+                language=str(payload.get("language", "unknown")),
+                duration=float(payload.get("duration", 0.0)),
+            )
         model = self._get_model()
         
         # 转换语言代码 (Whisper 使用完整语言名)

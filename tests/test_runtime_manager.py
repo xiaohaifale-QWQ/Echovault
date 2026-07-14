@@ -16,6 +16,7 @@ from core.runtime_manager import (
     RuntimePackage,
     RuntimePart,
     active_runtime,
+    active_worker_command,
     decode_signature,
     install_runtime,
     runtime_package_from_manifest,
@@ -42,7 +43,10 @@ def _sha(data: bytes) -> str:
 def _runtime_archive(runtime_id: str = "cuda-cu132") -> bytes:
     content = io.BytesIO()
     with zipfile.ZipFile(content, "w") as archive:
-        archive.writestr("runtime.json", json.dumps({"runtime_id": runtime_id}))
+        archive.writestr(
+            "runtime.json",
+            json.dumps({"runtime_id": runtime_id, "worker_path": "bin/echovault-asr-worker.exe"}),
+        )
         archive.writestr("bin/echovault-asr-worker.exe", b"worker")
     return content.getvalue()
 
@@ -137,6 +141,9 @@ def test_install_runtime_assembles_validates_activates_and_cleans_parts(tmp_path
     assert result.activated is True
     assert (result.path / "bin" / "echovault-asr-worker.exe").read_bytes() == b"worker"
     assert active_runtime(tmp_path) == "cuda-cu132"
+    assert active_worker_command(tmp_path) == [
+        str(result.path / "bin" / "echovault-asr-worker.exe")
+    ]
     assert len(requested) == 2
     assert not (tmp_path / "downloads" / "cuda-cu132.zip").exists()
     assert not (tmp_path / "downloads" / "cuda-cu132").exists()

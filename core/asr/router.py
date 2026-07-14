@@ -60,7 +60,19 @@ class ASRRouter:
         if LocalWhisperProvider is not None:
             model = config.asr.local_model if config else "base"
             use_gpu = config.asr.use_gpu if config else False
-            self.register(LocalWhisperProvider(model_name=model, use_gpu=use_gpu))
+            try:
+                from core.runtime_manager import active_worker_command
+
+                worker_command = active_worker_command()
+            except Exception:
+                worker_command = None
+            self.register(
+                LocalWhisperProvider(
+                    model_name=model,
+                    use_gpu=use_gpu,
+                    worker_command=worker_command,
+                )
+            )
         else:
             logger.warning("openai-whisper 未安装，跳过本地 Provider。安装: pip install openai-whisper")
     

@@ -60,3 +60,34 @@ def test_cuda_model_uses_fp16_when_available(monkeypatch):
 
     assert captured["device"] == "cuda"
     assert fake_model.options["fp16"] is True
+
+
+def test_external_worker_result_is_converted_to_transcription_result():
+    class FakeWorker:
+        def __init__(self, _command):
+            self.requests = []
+
+        def request(self, action, **payload):
+            self.requests.append((action, payload))
+            if action == "doctor":
+                return {"torch_installed": True}
+            return {
+                "device": "cuda",
+                "language": "zh",
+                "duration": 2.5,
+                "segments": [
+                    {"start": 0, "end": 2.5, "text": "外置 Worker", "confidence": -0.1}
+                ],
+            }
+
+    provider = LocalWhisperProvider(
+        model_name="medium",
+        worker_command=["worker.exe"],
+        worker_client_factory=FakeWorker,
+    )
+
+    result = provider.transcribe("audio.wav", language="zh")
+
+    assert provider.is_available() is True
+    assert provider.display_name == "本地 Whisper (medium, GPU)"
+    assert result.segments[0].text == "外置 Worker"

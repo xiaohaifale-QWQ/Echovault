@@ -271,6 +271,29 @@ def active_runtime(runtime_root: str | os.PathLike[str] | None = None) -> str | 
     return value if isinstance(value, str) else None
 
 
+def active_worker_command(runtime_root: str | os.PathLike[str] | None = None) -> list[str] | None:
+    """Return the active external worker command only when its metadata is valid."""
+
+    root = Path(runtime_root) if runtime_root is not None else default_runtime_root()
+    runtime_id = active_runtime(root)
+    if not runtime_id:
+        return None
+    paths = _runtime_paths(root, runtime_id)
+    metadata = _read_json(paths["runtime_dir"] / "runtime.json")
+    worker_path = metadata.get("worker_path")
+    if not isinstance(worker_path, str):
+        return None
+    relative = PurePosixPath(worker_path)
+    if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+        return None
+    executable = paths["runtime_dir"].joinpath(*relative.parts)
+    try:
+        _assert_project_path(root, executable)
+    except RuntimeManagerError:
+        return None
+    return [str(executable)] if executable.is_file() else None
+
+
 def _download_part(
     part: RuntimePart,
     destination: Path,
@@ -401,6 +424,8 @@ def _validate_staging(staging_dir: Path, package: RuntimePackage) -> None:
     runtime_json = _read_json(staging_dir / "runtime.json")
     if runtime_json.get("runtime_id") != package.runtime_id:
         raise RuntimeManagerError("运行时目录缺少匹配的 runtime.json")
+    if runtime_json.get("worker_path") != package.worker_path:
+        raise RuntimeManagerError("运行时目录缺少匹配的 Worker 路径")
     worker_path = staging_dir.joinpath(*PurePosixPath(package.worker_path).parts)
     if not worker_path.is_file():
         raise RuntimeManagerError("运行时目录缺少 ASR Worker")
