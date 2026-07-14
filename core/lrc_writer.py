@@ -273,19 +273,20 @@ def transcribe_and_save_lrc(
         language: 语言代码
         output_dir: LRC 输出目录
         overwrite: 是否覆盖已有文件
-        progress_callback: 进度回调 callable(stage: str)
+        progress_callback: 进度回调 callable(RecognitionProgress)
 
     Returns:
         str: 保存的 LRC 文件路径
     """
     from .audio_utils import cleanup_temp_files, split_audio
+    from .recognition_progress import RecognitionProgress
 
     song_name = os.path.basename(audio_path)
 
     # 1. 转换并切分音频。10 分钟 16kHz 单声道 WAV 约 19 MB，
     # 可控制云端接口文件大小，也能降低本地识别的峰值内存。
     if progress_callback:
-        progress_callback(f"🎵 转换音频... {song_name}")
+        progress_callback(RecognitionProgress(0, "prepare", f"正在转换音频… {song_name}"))
     wav_paths = split_audio(audio_path, max_duration=600.0)
 
     try:
@@ -295,8 +296,15 @@ def transcribe_and_save_lrc(
         total_duration = 0.0
         for index, wav_path in enumerate(wav_paths):
             if progress_callback:
-                part = f" ({index + 1}/{len(wav_paths)})" if len(wav_paths) > 1 else ""
-                progress_callback(f"🎤 语音识别中{part}... {song_name}")
+                progress_callback(
+                    RecognitionProgress(
+                        15 + int(75 * index / len(wav_paths)),
+                        "transcribe",
+                        f"正在识别第 {index + 1}/{len(wav_paths)} 段… {song_name}",
+                        index + 1,
+                        len(wav_paths),
+                    )
+                )
             chunk_result = router.transcribe(wav_path, language=language)
             offset = index * 600.0
             for segment in chunk_result.segments:
@@ -311,6 +319,16 @@ def transcribe_and_save_lrc(
             if detected_language == "unknown":
                 detected_language = chunk_result.language
             total_duration = max(total_duration, offset + chunk_result.duration)
+            if progress_callback:
+                progress_callback(
+                    RecognitionProgress(
+                        15 + int(75 * (index + 1) / len(wav_paths)),
+                        "transcribe",
+                        f"已完成第 {index + 1}/{len(wav_paths)} 段… {song_name}",
+                        index + 1,
+                        len(wav_paths),
+                    )
+                )
 
         result = TranscriptionResult(
             segments=combined_segments,
@@ -323,7 +341,7 @@ def transcribe_and_save_lrc(
 
         # 3. 转换为 LRC + 后处理
         if progress_callback:
-            progress_callback(f"✍️ 后处理中... {song_name}")
+            progress_callback(RecognitionProgress(92, "postprocess", f"正在整理歌词… {song_name}"))
         lrc = segments_to_lrc(
             result,
             title=title,
@@ -332,7 +350,11 @@ def transcribe_and_save_lrc(
         )
 
         # 4. 保存
+        if progress_callback:
+            progress_callback(RecognitionProgress(96, "save", f"正在写入 LRC… {song_name}"))
         lrc_path = save_lrc(lrc, audio_path, output_dir=output_dir, overwrite=overwrite)
+        if progress_callback:
+            progress_callback(RecognitionProgress(100, "done", f"识别完成… {song_name}"))
 
         return lrc_path
 
