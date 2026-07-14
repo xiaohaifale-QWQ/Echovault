@@ -8,6 +8,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from core.config import AppConfig, config_manager
 from core.model_download import DownloadCancelled, ModelDownloadError, download_model
+from core.runtime_detection import detect_hardware, select_runtime
+from core.runtime_manager import RuntimeInstallCancelled, RuntimeManagerError
+from core.runtime_setup import RuntimeSetupResult, RuntimeSetupService
 
 class _GPUDetectWorker(QThread):
     """后台扫描显卡"""
@@ -128,6 +131,48 @@ class _GPUInstallWorker(QThread):
             self.finished.emit(False, str(e))
 
 
+class _RuntimeDetectWorker(QThread):
+    """Detect all supported GPU vendors without importing the bundled Torch."""
+
+    result_ready = pyqtSignal(object)
+
+    def run(self):
+        try:
+            report = detect_hardware()
+            self.result_ready.emit((report, select_runtime(report), None))
+        except Exception as exc:
+            self.result_ready.emit((None, None, str(exc)))
+
+
+class _RuntimeSetupWorker(QThread):
+    """Install and validate the selected external runtime without blocking the UI."""
+
+    progress = pyqtSignal(int, str)
+    finished = pyqtSignal(bool, object)
+
+    def __init__(self):
+        super().__init__()
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+        self.requestInterruption()
+
+    def run(self):
+        try:
+            result = RuntimeSetupService().configure(
+                progress=lambda percent, message: self.progress.emit(percent, message),
+                cancelled=lambda: self._cancelled or self.isInterruptionRequested(),
+            )
+            self.finished.emit(True, result)
+        except RuntimeInstallCancelled:
+            self.finished.emit(False, "运行时配置已取消")
+        except RuntimeManagerError as exc:
+            self.finished.emit(False, str(exc))
+        except Exception as exc:
+            self.finished.emit(False, f"运行时配置失败：{exc}")
+
+
 class _DownloadWorker(QThread):
     progress = pyqtSignal(int, str)
     finished = pyqtSignal(bool, str)
@@ -229,20 +274,20 @@ class SettingsDialog(QDialog):
         l.addWidget(ag)
 
         # ── GPU 加速 ──
-        self.gpu_group = QGroupBox("GPU 加速 (仅本地)"); gf = QFormLayout(self.gpu_group)
+        self.gpu_group = QGroupBox("本地识别运行时"); gf = QFormLayout(self.gpu_group)
         self.gpu_group.setVisible(False)
         
         gpu_scan_row = QHBoxLayout()
-        self.btn_scan_gpu = QPushButton("扫描显卡"); self.btn_scan_gpu.setMaximumWidth(80)
+        self.btn_scan_gpu = QPushButton("重新检测"); self.btn_scan_gpu.setMaximumWidth(80)
         self.btn_scan_gpu.clicked.connect(self._on_scan_gpu)
         gpu_scan_row.addWidget(self.btn_scan_gpu)
-        self.gpu_info_label = QLabel("点击扫描检测显卡"); self.gpu_info_label.setStyleSheet("font-size:11px;color:#666")
+        self.gpu_info_label = QLabel("检测当前电脑的推荐运行时"); self.gpu_info_label.setStyleSheet("font-size:11px;color:#666")
         gpu_scan_row.addWidget(self.gpu_info_label)
         gpu_scan_row.addStretch()
         gf.addRow("", gpu_scan_row)
         
         gpu_install_row = QHBoxLayout()
-        self.btn_install_gpu = QPushButton("安装 GPU 加速 (PyTorch CUDA ~2.5GB)")
+        self.btn_install_gpu = QPushButton("自动配置本地识别")
         self.btn_install_gpu.clicked.connect(self._on_install_gpu)
         self.btn_install_gpu.setEnabled(False)
         gpu_install_row.addWidget(self.btn_install_gpu)
@@ -259,7 +304,8 @@ class SettingsDialog(QDialog):
         self.gpu_progress_label.setVisible(False)
         gf.addRow("", self.gpu_progress_label)
         
-        self.gpu_check = QCheckBox("启用 GPU 加速")
+        self.gpu_check = QCheckBox("当前 GPU 运行时已启用")
+        self.gpu_check.setEnabled(False)
         gf.addRow("", self.gpu_check)
         l.addWidget(self.gpu_group)
 
@@ -391,6 +437,81 @@ class SettingsDialog(QDialog):
         else:
             self.btn_install_gpu.setEnabled(True)
             QMessageBox.critical(self, "安装失败", msg)
+
+    # The following handlers supersede the legacy bundled-Python pip installer above.
+    # A packaged app now installs only signed external runtime bundles.
+    def _on_scan_gpu(self):
+        self.btn_scan_gpu.setEnabled(False)
+        self.gpu_info_label.setText("正在检测硬件与驱动...")
+        self._gpu_detector = _RuntimeDetectWorker()
+        self._gpu_detector.result_ready.connect(self._on_gpu_detected)
+        self._gpu_detector.start()
+
+    def _on_gpu_detected(self, result):
+        self.btn_scan_gpu.setEnabled(True)
+        _report, selection, error = result
+        if error:
+            self.gpu_info_label.setText(f"检测失败：{error}")
+            self.btn_install_gpu.setEnabled(False)
+            return
+        self._runtime_selection = selection
+        if selection.variant.backend == "cpu":
+            self.gpu_info_label.setText("未检测到可用 GPU，将配置 CPU 本地识别")
+            self.btn_install_gpu.setText("配置 CPU 本地识别")
+        else:
+            adapter_name = selection.adapter.name if selection.adapter else "兼容 GPU"
+            label = {
+                "cuda": "CUDA GPU 推理",
+                "winml": "Windows GPU 推理",
+            }.get(selection.variant.backend, selection.variant.backend)
+            self.gpu_info_label.setText(f"{adapter_name} · 推荐 {label}")
+            self.btn_install_gpu.setText(f"自动配置 {label}")
+        self.btn_install_gpu.setEnabled(True)
+
+    def _on_install_gpu(self):
+        self.btn_install_gpu.setVisible(False)
+        self.btn_cancel_gpu.setVisible(True)
+        self.gpu_progress.setVisible(True); self.gpu_progress.setValue(0)
+        self.gpu_progress_label.setVisible(True); self.gpu_progress_label.setText("")
+        self._gpu_installer = _RuntimeSetupWorker()
+        self._gpu_installer.progress.connect(self._on_gpu_dl_progress)
+        self._gpu_installer.finished.connect(self._on_gpu_installed)
+        self._gpu_installer.start()
+
+    def _on_cancel_gpu(self):
+        if hasattr(self, "_gpu_installer") and self._gpu_installer.isRunning():
+            self._gpu_installer.cancel()
+            self.gpu_progress_label.setText("正在取消...")
+            self.btn_cancel_gpu.setEnabled(False)
+
+    def _on_gpu_installed(self, ok: bool, payload):
+        self.btn_install_gpu.setVisible(True)
+        self.btn_cancel_gpu.setVisible(False)
+        self.btn_cancel_gpu.setEnabled(True)
+        self.gpu_progress.setVisible(False)
+        self.gpu_progress_label.setVisible(False)
+        if not ok and "取消" in str(payload):
+            self.btn_install_gpu.setEnabled(True)
+            return
+        if not ok:
+            self.btn_install_gpu.setEnabled(True)
+            QMessageBox.critical(self, "配置失败", str(payload))
+            return
+
+        result: RuntimeSetupResult = payload
+        self.gpu_check.setChecked(result.uses_gpu)
+        self.config.asr.use_gpu = result.uses_gpu
+        config_manager.config = self.config
+        config_manager.save()
+        if result.install_result is None:
+            QMessageBox.information(self, "配置完成", "已选择 CPU 本地识别。")
+            return
+        QMessageBox.information(
+            self,
+            "配置完成",
+            "推理运行时已通过自检。点击确定后将重启应用以启用它。",
+        )
+        self.done(42)
 
     def _browse(self, edit):
         d = QFileDialog.getExistingDirectory(self, "选择文件夹")
