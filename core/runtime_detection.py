@@ -10,6 +10,8 @@ import sys
 from dataclasses import asdict, dataclass
 from typing import Callable, Iterable, Sequence
 
+from core.process_utils import hidden_window_kwargs
+
 NVIDIA_SMI_COMMAND = (
     "nvidia-smi",
     "--query-gpu=name,memory.total,driver_version,compute_cap",
@@ -209,7 +211,14 @@ def _run(runner: CommandRunner, command: Sequence[str]) -> CommandOutput:
 
 
 def _run_command(command: Sequence[str]) -> CommandOutput:
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+        **hidden_window_kwargs(),
+    )
     return CommandOutput(completed.returncode, completed.stdout, completed.stderr)
 
 

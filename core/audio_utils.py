@@ -7,6 +7,7 @@
 - 支持的音频格式检测
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -15,7 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from pydub import AudioSegment
+from .process_utils import hidden_window_kwargs
 
 # 支持的音频格式
 SUPPORTED_FORMATS = {".mp3", ".flac", ".wav", ".aac", ".m4a", ".ogg", ".opus", ".wma", ".ape", ".wv"}
@@ -40,6 +41,26 @@ def find_ffmpeg() -> Optional[str]:
     return shutil.which("ffmpeg")
 
 
+def find_ffprobe() -> Optional[str]:
+    """Find the bundled ffprobe executable or a system installation."""
+    candidates = []
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        candidates.append(Path(bundle_root) / "ffprobe.exe")
+        candidates.append(Path(bundle_root) / "ffprobe")
+
+    executable_dir = Path(sys.executable).resolve().parent
+    candidates.append(executable_dir / "ffprobe.exe")
+    ffmpeg_path = find_ffmpeg()
+    if ffmpeg_path:
+        candidates.append(Path(ffmpeg_path).resolve().with_name("ffprobe.exe"))
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return shutil.which("ffprobe")
+
+
 def is_supported(file_path: str) -> bool:
     """检查文件是否为支持的音频格式"""
     ext = Path(file_path).suffix.lower()
@@ -53,16 +74,39 @@ def get_audio_info(file_path: str) -> dict:
     Returns:
         dict: {"duration": float, "sample_rate": int, "channels": int, "format": str}
     """
-    ffmpeg_path = find_ffmpeg()
-    if not ffmpeg_path:
-        raise RuntimeError("未找到 ffmpeg。请先安装 ffmpeg 并确保 ffmpeg 命令已加入 PATH。")
-    AudioSegment.converter = ffmpeg_path
-    audio = AudioSegment.from_file(file_path)
+    ffprobe_path = find_ffprobe()
+    if not ffprobe_path:
+        raise RuntimeError("未找到 ffprobe。请重新安装 Echovault 或安装 ffmpeg。")
+    try:
+        completed = subprocess.run(
+            [
+                ffprobe_path,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration:stream=sample_rate,channels",
+                "-of",
+                "json",
+                file_path,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            **hidden_window_kwargs(),
+        )
+        info = json.loads(completed.stdout)
+        stream = next(
+            (item for item in info.get("streams", []) if item.get("sample_rate")),
+            {},
+        )
+        duration = float(info.get("format", {}).get("duration", 0.0))
+    except (subprocess.SubprocessError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"无法读取音频信息: {file_path}") from exc
     return {
-        "duration": len(audio) / 1000.0,          # 毫秒 → 秒
-        "sample_rate": audio.frame_rate,
-        "channels": audio.channels,
-        "sample_width": audio.sample_width,
+        "duration": duration,
+        "sample_rate": int(stream.get("sample_rate", 0)),
+        "channels": int(stream.get("channels", 0)),
+        "sample_width": 0,
         "format": Path(file_path).suffix.lower().lstrip("."),
     }
 
@@ -113,7 +157,13 @@ def convert_to_whisper_format(
         args.append(output_path)
     
     try:
-        subprocess.run(args, check=True, capture_output=True, text=True)
+        subprocess.run(
+            args,
+            check=True,
+            capture_output=True,
+            text=True,
+            **hidden_window_kwargs(),
+        )
     except FileNotFoundError as e:
         if created_temp and os.path.exists(output_path):
             os.remove(output_path)

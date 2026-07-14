@@ -14,6 +14,12 @@ if not ffmpeg_path or not Path(ffmpeg_path).is_file():
         "ECHOVAULT_FFMPEG must point to an existing ffmpeg executable. "
         "Use build.ps1 to configure it automatically."
     )
+ffprobe_path = os.environ.get("ECHOVAULT_FFPROBE", "")
+if not ffprobe_path or not Path(ffprobe_path).is_file():
+    raise SystemExit(
+        "ECHOVAULT_FFPROBE must point to an existing ffprobe executable. "
+        "Use build.ps1 to configure it automatically."
+    )
 
 hidden_imports = [
     "groq",
@@ -23,7 +29,7 @@ hidden_imports = [
 ] + collect_submodules("whisper") + collect_submodules("tiktoken_ext")
 
 datas = collect_data_files("certifi") + collect_data_files("whisper")
-binaries = [(ffmpeg_path, ".")]
+binaries = [(ffmpeg_path, "."), (ffprobe_path, ".")]
 
 a = Analysis(
     [str(project_root / "main.py")],

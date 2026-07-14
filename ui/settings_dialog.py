@@ -11,6 +11,7 @@ from core.model_download import DownloadCancelled, ModelDownloadError, download_
 from core.runtime_detection import detect_hardware, select_runtime
 from core.runtime_manager import RuntimeInstallCancelled, RuntimeManagerError
 from core.runtime_setup import RuntimeSetupResult, RuntimeSetupService
+from core.process_utils import hidden_window_kwargs
 
 class _GPUDetectWorker(QThread):
     """后台扫描显卡"""
@@ -21,7 +22,8 @@ class _GPUDetectWorker(QThread):
             # 先试 nvidia-smi
             import subprocess as sp
             r = sp.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                       capture_output=True, text=True, timeout=10)
+                       capture_output=True, text=True, timeout=10,
+                       **hidden_window_kwargs())
             if r.returncode == 0 and r.stdout.strip():
                 name = r.stdout.strip().split("\n")[0].strip()
                 self.result_ready.emit(f"✅ {name}")
@@ -70,6 +72,7 @@ class _GPUInstallWorker(QThread):
                  "--index-url", "https://download.pytorch.org/whl/cu121"],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1, universal_newlines=True,
+                **hidden_window_kwargs(),
             )
             
             pkg_name = ""

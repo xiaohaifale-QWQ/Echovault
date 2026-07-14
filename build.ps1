@@ -23,8 +23,13 @@ $FfmpegCommand = Get-Command ffmpeg -ErrorAction SilentlyContinue
 if (-not $FfmpegCommand) {
     throw "ffmpeg was not found. Install it and add it to PATH before building."
 }
+$FfprobeCommand = Get-Command ffprobe -ErrorAction SilentlyContinue
+if (-not $FfprobeCommand) {
+    throw "ffprobe was not found. Install ffmpeg (including ffprobe) and add it to PATH before building."
+}
 
 $env:ECHOVAULT_FFMPEG = $FfmpegCommand.Source
+$env:ECHOVAULT_FFPROBE = $FfprobeCommand.Source
 & $Python -m PyInstaller --clean --noconfirm Echovault.spec
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed with exit code $LASTEXITCODE"
