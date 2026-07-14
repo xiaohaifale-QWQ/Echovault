@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from core.audio_utils import cleanup_temp_files, convert_to_whisper_format, get_audio_info, split_audio
+from core.audio_utils import (
+    cleanup_temp_files,
+    convert_to_whisper_format,
+    get_audio_info,
+    split_audio,
+)
 
 
 def test_missing_ffmpeg_has_actionable_error_and_cleans_temp(tmp_path, monkeypatch):
