@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QCheckBox, QPushButton,
     QGroupBox, QLabel, QDialogButtonBox, QFileDialog, QKeySequenceEdit, QProgressBar, QMessageBox,
+    QWidget, QGridLayout, QStackedWidget,
 )
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal, QThread
 from PyQt6.QtGui import QDesktopServices, QKeySequence
@@ -218,8 +219,20 @@ class SettingsDialog(QDialog):
         self._setup_ui(); self._load_config()
 
     def _setup_ui(self):
-        self.setWindowTitle("偏好设置"); self.setMinimumWidth(500)
+        self.setWindowTitle("偏好设置"); self.setMinimumWidth(560)
         l = QVBoxLayout(self)
+
+        # 首页仅保留四个设置入口，避免识别、输出、快捷键和缓存挤在同一张长表单中。
+        self.settings_stack = QStackedWidget()
+        self.settings_home = self._create_settings_home()
+        self.settings_stack.addWidget(self.settings_home)
+        recognition_page, recognition_layout = self._create_settings_section("语音识别")
+        lyrics_page, lyrics_layout = self._create_settings_section("歌词输出")
+        shortcut_page, shortcut_layout = self._create_settings_section("快捷键")
+        cache_page, cache_layout = self._create_settings_section("缓存")
+        for page in (recognition_page, lyrics_page, shortcut_page, cache_page):
+            self.settings_stack.addWidget(page)
+        l.addWidget(self.settings_stack)
 
         ag = QGroupBox("语音识别 (ASR)"); af = QFormLayout(ag)
         self.provider_combo = QComboBox()
@@ -297,7 +310,7 @@ class SettingsDialog(QDialog):
 
         self.vocal_check = QCheckBox("启用 Demucs 人声分离 (每首多花 1-3 分钟，提升准确率)")
         af.addRow("", self.vocal_check)
-        l.addWidget(ag)
+        recognition_layout.addWidget(ag)
 
         # ── GPU 加速 ──
         self.gpu_group = QGroupBox("本地识别运行时"); gf = QFormLayout(self.gpu_group)
@@ -333,13 +346,15 @@ class SettingsDialog(QDialog):
         self.gpu_check = QCheckBox("当前 GPU 运行时已启用")
         self.gpu_check.setEnabled(False)
         gf.addRow("", self.gpu_check)
-        l.addWidget(self.gpu_group)
+        recognition_layout.addWidget(self.gpu_group)
+        recognition_layout.addStretch()
 
         lg = QGroupBox("歌词输出"); lf = QFormLayout(lg)
         dr = QHBoxLayout(); self.lrc_input = QLineEdit()
         self.lrc_input.setPlaceholderText("留空 = 与音频文件同目录"); dr.addWidget(self.lrc_input)
         bb = QPushButton("浏览"); bb.clicked.connect(lambda: self._browse(self.lrc_input)); dr.addWidget(bb)
-        lf.addRow("LRC 目录:", dr); l.addWidget(lg)
+        lf.addRow("LRC 目录:", dr); lyrics_layout.addWidget(lg)
+        lyrics_layout.addStretch()
 
         shortcut_group = QGroupBox("快捷键")
         shortcut_form = QFormLayout(shortcut_group)
@@ -350,7 +365,8 @@ class SettingsDialog(QDialog):
         shortcut_hint.setWordWrap(True)
         shortcut_hint.setStyleSheet("font-size:11px;color:#666")
         shortcut_form.addRow("", shortcut_hint)
-        l.addWidget(shortcut_group)
+        shortcut_layout.addWidget(shortcut_group)
+        shortcut_layout.addStretch()
 
         cache_group = QGroupBox("缓存")
         cache_form = QFormLayout(cache_group)
@@ -370,10 +386,72 @@ class SettingsDialog(QDialog):
         self.cache_status = QLabel("")
         self.cache_status.setStyleSheet("font-size:11px;color:#666")
         cache_form.addRow("", self.cache_status)
-        l.addWidget(cache_group)
+        cache_layout.addWidget(cache_group)
+        cache_layout.addStretch()
 
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btns.accepted.connect(self._save); btns.rejected.connect(self.reject); l.addWidget(btns)
+
+    def _create_settings_home(self) -> QWidget:
+        """创建偏好设置的四卡片目录页。"""
+        page = QWidget()
+        page.setObjectName("settingsHome")
+        page.setStyleSheet("#settingsHome { background: #f4f6f8; }")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 18, 18, 18)
+        title = QLabel("偏好设置")
+        title.setStyleSheet("font-size:20px;font-weight:700;color:#202124;")
+        layout.addWidget(title)
+        hint = QLabel("选择要调整的项目")
+        hint.setStyleSheet("color:#6b7280;padding-bottom:6px;")
+        layout.addWidget(hint)
+
+        grid = QGridLayout()
+        grid.setSpacing(12)
+        cards = (
+            ("语音识别", "云端、本地模型与 GPU 运行时", 1),
+            ("歌词输出", "LRC 保存目录", 2),
+            ("快捷键", "语音输入的触发按键", 3),
+            ("缓存", "录音缓存的打开与清理", 4),
+        )
+        for index, (title_text, detail, target_page) in enumerate(cards):
+            card = QPushButton(f"{title_text}\n{detail}")
+            card.setMinimumHeight(92)
+            card.setCursor(Qt.CursorShape.PointingHandCursor)
+            card.setStyleSheet(
+                "QPushButton { background:#ffffff; color:#202124; border:1px solid #dfe3e8;"
+                "border-radius:10px; text-align:left; padding:15px; font-size:14px; font-weight:600; }"
+                "QPushButton:hover { border-color:#4c8bf5; background:#f8fbff; }"
+                "QPushButton:pressed { background:#edf4ff; }"
+            )
+            card.clicked.connect(lambda _checked=False, page_index=target_page: self._open_settings_section(page_index))
+            grid.addWidget(card, index // 2, index % 2)
+        layout.addLayout(grid)
+        layout.addStretch()
+        return page
+
+    def _create_settings_section(self, title_text: str) -> tuple[QWidget, QVBoxLayout]:
+        """创建一个设置分类页，并提供回到四卡片目录的入口。"""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        nav = QHBoxLayout()
+        back_button = QPushButton("‹ 返回设置分类")
+        back_button.setFlat(True)
+        back_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_button.clicked.connect(self._show_settings_home)
+        nav.addWidget(back_button)
+        nav.addStretch()
+        layout.addLayout(nav)
+        heading = QLabel(title_text)
+        heading.setStyleSheet("font-size:18px;font-weight:700;color:#202124;padding:0 0 8px 2px;")
+        layout.addWidget(heading)
+        return page, layout
+
+    def _open_settings_section(self, page_index: int):
+        self.settings_stack.setCurrentIndex(page_index)
+
+    def _show_settings_home(self):
+        self.settings_stack.setCurrentIndex(0)
 
     def _load_config(self):
         c = self.config
