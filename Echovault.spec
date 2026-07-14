@@ -26,7 +26,7 @@ hidden_imports = [
     "opencc",
     "torch",
     "zeroconf",
-] + collect_submodules("whisper") + collect_submodules("tiktoken_ext")
+] + collect_submodules("groq") + collect_submodules("whisper") + collect_submodules("tiktoken_ext")
 
 datas = collect_data_files("certifi") + collect_data_files("whisper")
 binaries = [(ffmpeg_path, "."), (ffprobe_path, ".")]

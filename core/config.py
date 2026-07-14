@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
-CONFIG_SCHEMA_VERSION = 1
+CONFIG_SCHEMA_VERSION = 2
 SUPPORTED_PROVIDERS = {"groq", "local"}
 SUPPORTED_LOCAL_MODELS = {"tiny", "base", "small", "medium", "large"}
 SUPPORTED_LANGUAGES = {"zh", "en", "ja", "ko"}
@@ -48,6 +48,7 @@ class AppConfig:
     # API Keys（建议通过环境变量设置，这里提供默认值）
     groq_api_key: str = ""
     xunfei_api_key: str = ""
+    ai_model_api_key: str = ""
     
     def __post_init__(self):
         # 从环境变量读取 API Key
@@ -55,6 +56,8 @@ class AppConfig:
             self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
         if not self.xunfei_api_key:
             self.xunfei_api_key = os.environ.get("XUNFEI_API_KEY", "")
+        if not self.ai_model_api_key:
+            self.ai_model_api_key = os.environ.get("ECHOVAULT_AI_API_KEY", "")
 
 
 class ConfigManager:
@@ -104,6 +107,7 @@ class ConfigManager:
             "output_lrc_dir": c.output_lrc_dir,
             "groq_api_key": c.groq_api_key,
             "xunfei_api_key": c.xunfei_api_key,
+            "ai_model_api_key": c.ai_model_api_key,
             "asr": {
                 "provider": c.asr.provider,
                 "local_model": c.asr.local_model,
@@ -132,6 +136,9 @@ class ConfigManager:
         c.output_lrc_dir = data.get("output_lrc_dir")
         c.groq_api_key = os.environ.get("GROQ_API_KEY") or data.get("groq_api_key", "")
         c.xunfei_api_key = os.environ.get("XUNFEI_API_KEY") or data.get("xunfei_api_key", "")
+        c.ai_model_api_key = os.environ.get("ECHOVAULT_AI_API_KEY") or data.get(
+            "ai_model_api_key", ""
+        )
         asr_data = data.get("asr", {})
         c.asr.provider = asr_data.get("provider", "groq")
         c.asr.local_model = asr_data.get("local_model", "base")
@@ -178,6 +185,8 @@ def update_config_value(config: AppConfig, key: str, value: str) -> None:
         config.groq_api_key = value
     elif key == "xunfei_api_key":
         config.xunfei_api_key = value
+    elif key == "ai_model_api_key":
+        config.ai_model_api_key = value
     else:
         raise ValueError(f"未知配置项: {key}")
 

@@ -228,6 +228,9 @@ class SettingsDialog(QDialog):
 
         self.api_input = QLineEdit(); self.api_input.setPlaceholderText("输入 API Key...")
         self.api_input.setEchoMode(QLineEdit.EchoMode.Password); af.addRow("Groq Key:", self.api_input)
+        self.groq_key_status = QLabel("已在密钥管理中配置 ✓")
+        self.groq_key_status.setStyleSheet("color:#248A4A;font-weight:600")
+        af.addRow("Groq Key:", self.groq_key_status)
         kh = QLabel('<a href="https://console.groq.com/keys" style="color:#1976D2">免费获取 Groq Key</a>')
         kh.setOpenExternalLinks(True); kh.setStyleSheet("font-size:11px"); af.addRow("", kh)
         key_notice = QLabel("Key 将以明文保存在当前用户的本机配置中")
@@ -324,7 +327,7 @@ class SettingsDialog(QDialog):
     def _load_config(self):
         c = self.config
         i = 0 if c.asr.provider == "groq" else 1; self.provider_combo.setCurrentIndex(i)
-        self.api_input.setText(c.groq_api_key)
+        self.api_input.clear()
         self.xunfei_input.setText(c.xunfei_api_key)
         li = [j for j in range(self.lang_combo.count()) if self.lang_combo.itemData(j) == c.asr.language]
         self.lang_combo.setCurrentIndex(li[0] if li else 0)
@@ -335,16 +338,23 @@ class SettingsDialog(QDialog):
         if c.output_lrc_dir: self.lrc_input.setText(c.output_lrc_dir)
         # 自动扫描显卡
         self._on_scan_gpu()
+        self._refresh_groq_key_state()
 
     def _on_prov(self, idx):
         is_local = self.provider_combo.itemData(idx) == "local"
-        self.api_input.setVisible(not is_local)
+        self.api_input.setVisible(not is_local and not bool(self.config.groq_api_key))
+        self.groq_key_status.setVisible(not is_local and bool(self.config.groq_api_key))
         self.model_combo.setVisible(is_local)
         self.btn_dl.setVisible(is_local)
         self.btn_cancel_dl.setVisible(False)
         self.dl_bar.setVisible(False)
         self.dl_label.setVisible(False)
         self.gpu_group.setVisible(is_local)
+
+    def _refresh_groq_key_state(self):
+        configured = bool(self.config.groq_api_key)
+        self.provider_combo.setItemText(0, "云端（Groq ✓）" if configured else "云端（Groq）")
+        self._on_prov(self.provider_combo.currentIndex())
 
     def _on_download(self):
         model = self.model_combo.currentData()
@@ -527,7 +537,9 @@ class SettingsDialog(QDialog):
         c.asr.local_model = self.model_combo.currentData()
         c.asr.use_vocal_separation = self.vocal_check.isChecked()
         c.asr.use_gpu = self.gpu_check.isChecked()
-        key = self.api_input.text().strip(); c.groq_api_key = key
+        key = self.api_input.text().strip()
+        if key:
+            c.groq_api_key = key
         if key: os.environ["GROQ_API_KEY"] = key
         xunfei_key = self.xunfei_input.text().strip(); c.xunfei_api_key = xunfei_key
         if xunfei_key: os.environ["XUNFEI_API_KEY"] = xunfei_key

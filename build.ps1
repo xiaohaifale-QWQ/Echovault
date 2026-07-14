@@ -14,6 +14,15 @@ if ($InstallDependencies) {
     }
 }
 
+$GroqAvailable = & $Python -c "import groq; print('yes')" 2>$null
+if ($LASTEXITCODE -ne 0 -or $GroqAvailable -ne "yes") {
+    Write-Host "Installing the Groq cloud-recognition dependency..."
+    & $Python -m pip install -r requirements-cloud.txt
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to install the Groq dependency required by online recognition."
+    }
+}
+
 $PyInstallerAvailable = & $Python -c "import PyInstaller; print('yes')" 2>$null
 if ($LASTEXITCODE -ne 0 -or $PyInstallerAvailable -ne "yes") {
     throw "PyInstaller is not installed. Run: python -m pip install -r requirements-dev.txt"

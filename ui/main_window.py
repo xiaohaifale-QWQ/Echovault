@@ -33,6 +33,7 @@ from ui.lyrics_preview_panel import LyricsPreviewPanel
 from ui.song_list_panel import SongListPanel
 from ui.detail_panel import DetailPanel
 from ui.settings_dialog import SettingsDialog
+from ui.key_manager_dialog import KeyManagerDialog
 from ui.sync_panel import SyncPanel
 
 
@@ -145,6 +146,15 @@ class MainWindow(QMainWindow):
         settings_action.setShortcut("Ctrl+,")
         settings_action.triggered.connect(self._on_settings)
         settings_menu.addAction(settings_action)
+
+        key_action = QAction("密钥管理(&K)...", self)
+        key_action.triggered.connect(self._on_key_manager)
+        menubar.addAction(key_action)
+
+        ai_mode_action = QAction("AI 模式", self)
+        ai_mode_action.setEnabled(False)
+        ai_mode_action.setToolTip("AI 功能即将推出")
+        menubar.addAction(ai_mode_action)
         
         # 帮助菜单
         help_menu = menubar.addMenu("帮助(&H)")
@@ -507,6 +517,13 @@ class MainWindow(QMainWindow):
             self._do_restart()
         elif result:
             # 设置已保存，重建 router
+            self.router = get_router(self.config)
+            self._refresh_statusbar()
+
+    def _on_key_manager(self):
+        """Open the local credential manager and rebuild the ASR router if saved."""
+        dialog = KeyManagerDialog(self.config, self)
+        if dialog.exec():
             self.router = get_router(self.config)
             self._refresh_statusbar()
     

@@ -10,6 +10,7 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     manager = ConfigManager(path)
     manager.config.groq_api_key = "groq-secret"
     manager.config.xunfei_api_key = "xunfei-secret"
+    manager.config.ai_model_api_key = "ai-secret"
     manager.config.music_dirs = ["D:/Music"]
     manager.config.video_dirs = ["D:/Video"]
     manager.config.video_time_offsets = {"D:/Video": 120}
@@ -19,6 +20,7 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
 
     assert loaded.groq_api_key == "groq-secret"
     assert loaded.xunfei_api_key == "xunfei-secret"
+    assert loaded.ai_model_api_key == "ai-secret"
     assert loaded.music_dirs == ["D:/Music"]
     assert loaded.video_dirs == ["D:/Video"]
     assert loaded.video_time_offsets == {"D:/Video": 120}
@@ -49,10 +51,12 @@ def test_update_config_value_validates_provider_and_booleans():
     update_config_value(config, "asr.provider", "local")
     update_config_value(config, "asr.use_gpu", "yes")
     update_config_value(config, "asr.language", "auto")
+    update_config_value(config, "ai_model_api_key", "local-only-secret")
 
     assert config.asr.provider == "local"
     assert config.asr.use_gpu is True
     assert config.asr.language is None
+    assert config.ai_model_api_key == "local-only-secret"
 
     with pytest.raises(ValueError, match="Provider"):
         update_config_value(config, "asr.provider", "xunfei")
