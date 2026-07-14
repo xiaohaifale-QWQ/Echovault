@@ -11,12 +11,13 @@
 """
 
 import os
+from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QMainWindow, QSplitter, QMenuBar, QMenu, QStatusBar,
     QMessageBox, QFileDialog, QLabel, QWidget, QVBoxLayout,
-    QTabWidget, QPushButton, QProgressBar,
+    QTabWidget, QPushButton, QProgressBar, QInputDialog,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
@@ -25,6 +26,7 @@ from core.config import config_manager, AppConfig
 from core.asr.router import ASRRouter, get_router
 from core.environment import build_environment_report
 from services.library_service import scan_audio
+from core.video_library import calibration_offset_seconds, scan_videos, video_timestamp
 
 from ui.library_panel import LibraryPanel
 from ui.song_list_panel import SongListPanel
@@ -50,9 +52,9 @@ class MainWindow(QMainWindow):
         self._setup_statusbar()
         self._connect_signals()
         
-        # 恢复上次的音乐目录
+        self.library_panel.set_directories(self.config.music_dirs, self.config.video_dirs)
         if self.config.music_dirs:
-            self.library_panel.set_root(self.config.music_dirs[0])
+            self._on_folder_selected(self.config.music_dirs[0])
 
         report = build_environment_report(self.config)
         if not report["ffmpeg"]["available"]:
@@ -67,7 +69,7 @@ class MainWindow(QMainWindow):
         # 两栏布局
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # 左侧：歌曲列表
+        # 左侧：素材列表
         self.song_list_panel = SongListPanel()
         splitter.addWidget(self.song_list_panel)
         
@@ -78,7 +80,7 @@ class MainWindow(QMainWindow):
         self.right_tabs.addTab(self.detail_panel, "详情")
         
         self.library_panel = LibraryPanel()
-        self.right_tabs.addTab(self.library_panel, "音乐库")
+        self.right_tabs.addTab(self.library_panel, "素材库")
         
         self.sync_panel = SyncPanel()
         self.right_tabs.addTab(self.sync_panel, "同步")
@@ -98,7 +100,7 @@ class MainWindow(QMainWindow):
         # 文件菜单
         file_menu = menubar.addMenu("文件(&F)")
         
-        open_dir_action = QAction("打开音乐文件夹(&O)...", self)
+        open_dir_action = QAction("添加素材文件夹(&O)...", self)
         open_dir_action.setShortcut("Ctrl+O")
         open_dir_action.triggered.connect(self._on_open_folder)
         file_menu.addAction(open_dir_action)
@@ -113,12 +115,12 @@ class MainWindow(QMainWindow):
         # 识别菜单
         trans_menu = menubar.addMenu("识别(&T)")
         
-        trans_all_action = QAction("识别全部未标注歌曲(&A)", self)
+        trans_all_action = QAction("识别全部未完成音频(&A)", self)
         trans_all_action.setShortcut("Ctrl+Shift+A")
         trans_all_action.triggered.connect(self._on_transcribe_all)
         trans_menu.addAction(trans_all_action)
         
-        trans_selected_action = QAction("识别选中歌曲(&S)", self)
+        trans_selected_action = QAction("识别选中音频(&S)", self)
         trans_selected_action.setShortcut("Ctrl+T")
         trans_selected_action.triggered.connect(self._on_transcribe_selected)
         trans_menu.addAction(trans_selected_action)
@@ -186,8 +188,10 @@ class MainWindow(QMainWindow):
         songs = self.song_list_panel.get_all_songs()
         has_lrc = sum(1 for s in songs if s.get("has_lrc"))
         total = len(songs)
-        
-        self.count_label.setText(f"共 {total} 首 | 有歌词 {has_lrc} 首")
+        if self.library_panel.mode == "video":
+            self.count_label.setText(f"共 {total} 个视频素材")
+        else:
+            self.count_label.setText(f"共 {total} 个音频素材 | 已完成 {has_lrc} 个")
         
         provider = self.router.get(self.config.asr.provider)
         if provider and provider.is_available():
@@ -199,6 +203,10 @@ class MainWindow(QMainWindow):
         """连接信号"""
         # 文件夹树 → 歌曲列表
         self.library_panel.folder_selected.connect(self._on_folder_selected)
+        self.library_panel.mode_changed.connect(self._on_material_mode_changed)
+        self.library_panel.directories_changed.connect(self._on_material_directories_changed)
+        self.library_panel.calibrate_requested.connect(self._on_video_calibrate)
+        self.library_panel.aggregate_requested.connect(self._on_video_aggregate)
         
         # 歌曲列表 → 详情面板
         self.song_list_panel.song_selected.connect(self.detail_panel.show_song)
@@ -217,29 +225,92 @@ class MainWindow(QMainWindow):
     # ─── 事件处理 ─────────────────────────────
 
     def _on_open_folder(self):
-        """选择音乐文件夹"""
-        dir_path = QFileDialog.getExistingDirectory(
-            self, "选择音乐文件夹",
-            self.config.music_dirs[0] if self.config.music_dirs else str(Path.home() / "Music"),
-        )
-        if dir_path:
-            self.library_panel.set_root(dir_path)
-            self.config.music_dirs = [dir_path]
-            config_manager.save()
+        """向当前素材模式添加文件夹"""
+        self.library_panel.open_directory_picker()
     
     def _on_folder_selected(self, folder_path: str):
-        """文件夹被选中 → 扫描歌曲加载到列表"""
+        """文件夹被选中 → 扫描当前模式的素材"""
         self.status_label.setText(f"扫描中: {folder_path}...")
-        
-        songs = scan_audio(folder_path)
-        
-        self.song_list_panel.load_songs(songs, root_dir=folder_path)
+        if self.library_panel.mode == "video":
+            offset = self.config.video_time_offsets.get(str(Path(folder_path).resolve()), 0)
+            materials = scan_videos(folder_path, offset_seconds=offset)
+        else:
+            materials = scan_audio(folder_path)
+        self.song_list_panel.load_songs(materials, root_dir=folder_path)
         self._refresh_statusbar()
         
-        # 同步面板也设置本机路径
-        self.sync_panel.set_dir_a(folder_path)
+        if self.library_panel.mode == "music":
+            self.sync_panel.set_dir_a(folder_path)
         
         self.status_label.setText("就绪")
+
+    def _on_material_mode_changed(self, mode: str):
+        self.song_list_panel.set_material_mode(mode)
+        self._refresh_statusbar()
+
+    def _on_material_directories_changed(self, mode: str, directories: list[str]):
+        if mode == "video":
+            self.config.video_dirs = directories
+        else:
+            self.config.music_dirs = directories
+        config_manager.save()
+
+    def _on_video_calibrate(self, folder_path: str):
+        selected = self.song_list_panel.get_selected_songs()
+        video = selected[0] if selected and selected[0].get("material_type") == "video" else None
+        if not video:
+            QMessageBox.information(self, "时间校准", "请先在素材列表中选中一个作为参考的视频文件。")
+            return
+        recorded_start, _source = video_timestamp(video["path"])
+        default_value = recorded_start.strftime("%Y-%m-%d %H:%M:%S")
+        value, accepted = QInputDialog.getText(
+            self,
+            "时间校准",
+            "请输入该参考视频的真实起始日期时间（YYYY-MM-DD HH:MM:SS）：",
+            text=default_value,
+        )
+        if not accepted:
+            return
+        try:
+            actual_start = datetime.strptime(value.strip(), "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            QMessageBox.warning(self, "时间校准", "日期格式应为 YYYY-MM-DD HH:MM:SS。")
+            return
+        offset = calibration_offset_seconds(recorded_start, actual_start)
+        self.config.video_time_offsets[str(Path(folder_path).resolve())] = offset
+        config_manager.save()
+        self._on_folder_selected(folder_path)
+        QMessageBox.information(self, "时间校准", f"已保存偏移：{offset:+d} 秒。")
+
+    def _on_video_aggregate(self, folder_path: str):
+        reply = QMessageBox.question(
+            self,
+            "按时间汇总视频",
+            "将按校准后的时间排序，并在当前文件夹创建新的“视频汇总_时间”子目录。\n"
+            "原始视频不会被修改，是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        from ui.video_aggregate_worker import VideoAggregateWorker
+
+        offset = self.config.video_time_offsets.get(str(Path(folder_path).resolve()), 0)
+        self.video_aggregate_worker = VideoAggregateWorker(folder_path, offset, self)
+        self.video_aggregate_worker.finished.connect(self._on_video_aggregate_finished)
+        self.status_label.setText("正在按时间汇总视频，请稍候...")
+        self.video_aggregate_worker.start()
+
+    def _on_video_aggregate_finished(self, success: bool, result: object):
+        if not success:
+            self.status_label.setText("视频汇总失败")
+            QMessageBox.warning(self, "视频汇总失败", str(result))
+            return
+        self.status_label.setText("视频汇总完成")
+        QMessageBox.information(
+            self,
+            "视频汇总完成",
+            f"已汇总 {result.video_count} 个视频。\n输出目录：{result.output_dir}",
+        )
     
     def _on_transcribe_single(self, file_path: str):
         """识别单首歌"""
@@ -258,15 +329,15 @@ class MainWindow(QMainWindow):
         self._run_transcription(files)
     
     def _on_transcribe_all(self):
-        """识别全部未标注歌曲"""
+        """识别全部未完成素材"""
         songs = self.song_list_panel.get_all_songs()
         files = [s["path"] for s in songs if not s.get("has_lrc") and not s.get("instrumental")]
         if not files:
-            QMessageBox.information(self, "提示", "所有歌曲都已有歌词！")
+            QMessageBox.information(self, "提示", "当前素材均已完成识别！")
             return
         
         reply = QMessageBox.question(
-            self, "确认", f"将为 {len(files)} 首歌曲识别歌词，是否继续？",
+            self, "确认", f"将为 {len(files)} 个素材识别音轨，是否继续？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -352,7 +423,7 @@ class MainWindow(QMainWindow):
                     self.detail_panel.show_song(s)
                     break
         # 自动检测纯音乐：歌词太短（<20字）可能是纯音乐
-        if success and lrc_path and os.path.exists(lrc_path):
+        if self.library_panel.mode == "music" and success and lrc_path and os.path.exists(lrc_path):
             try:
                 text = Path(lrc_path).read_text(encoding="utf-8")
                 # 提取所有歌词文本（去掉时间戳和元数据）

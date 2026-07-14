@@ -50,6 +50,23 @@ class DetailPanel(QWidget):
         self._current_song = song
         self.lbl_name.setText(Path(song.get("name","?")).stem)
         self.lbl_path.setText(song.get("path",""))
+        if song.get("material_type") == "video":
+            captured_at = song.get("captured_at")
+            timestamp = captured_at.strftime("%Y-%m-%d %H:%M:%S") if captured_at else "未知"
+            self.lbl_status.setText(f"拍摄时间：{timestamp}（{song.get('timestamp_source', '未知来源')}）")
+            self.lbl_status.setStyleSheet("color:#1976D2;font-size:12px")
+            self.btn_transcribe.setVisible(True)
+            self.btn_transcribe.setEnabled(True)
+            self.btn_transcribe.setText("重新识别视频音频" if song.get("has_lrc") else "识别视频音频")
+            self.btn_edit.setVisible(True)
+            self.btn_edit.setEnabled(song.get("has_lrc", False))
+            if song.get("has_lrc") and song.get("lrc_path"):
+                self._load(song["lrc_path"])
+            else:
+                self.lyrics_text.setPlainText("将从视频中提取音轨并识别为同名 LRC。")
+            return
+        self.btn_transcribe.setVisible(True)
+        self.btn_edit.setVisible(True)
         has = song.get("has_lrc",False)
         self.lbl_status.setText("已有歌词" if has else "暂无歌词")
         self.lbl_status.setStyleSheet(f"color:{'#4CAF50' if has else '#999'};font-size:12px")

@@ -20,7 +20,7 @@ class SongListPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._songs = []; self._instrumental = set(); self._auto_inst = set()
+        self._songs = []; self._instrumental = set(); self._auto_inst = set(); self._mode = "music"
         self._instrumental_store = None
         self._setup_ui()
         self.lyric_filter.setCurrentIndex(2)  # default "no lyrics"
@@ -30,12 +30,12 @@ class SongListPanel(QWidget):
     def _setup_ui(self):
         l = QVBoxLayout(self); l.setContentsMargins(4,4,4,4)
         h = QHBoxLayout()
-        t = QLabel("歌曲列表"); t.setStyleSheet("font-weight:bold;font-size:13px;padding:4px")
-        h.addWidget(t); h.addStretch()
+        self.title_label = QLabel("素材列表"); self.title_label.setStyleSheet("font-weight:bold;font-size:13px;padding:4px")
+        h.addWidget(self.title_label); h.addStretch()
         self.search_box = QLineEdit(); self.search_box.setPlaceholderText("搜索...")
         self.search_box.setClearButtonEnabled(True); self.search_box.setMaximumWidth(120)
         self.search_box.textChanged.connect(self._do_refresh); h.addWidget(self.search_box)
-        self.lyric_filter = QComboBox(); self.lyric_filter.addItems(["全部","有歌词","无歌词","纯音乐"])
+        self.lyric_filter = QComboBox(); self.lyric_filter.addItems(["全部","已完成","未完成","纯音乐"])
         self.lyric_filter.setMaximumWidth(70); self.lyric_filter.currentIndexChanged.connect(self._do_refresh)
         h.addWidget(self.lyric_filter)
         self.fmt_filter = QComboBox(); self.fmt_filter.addItem("全部格式")
@@ -47,7 +47,7 @@ class SongListPanel(QWidget):
         self.btn_batch.clicked.connect(self.batch_transcribe.emit); h.addWidget(self.btn_batch)
         l.addLayout(h)
         self.table = QTableWidget(); self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(["歌曲名称","格式","状态","大小","文件夹","路径"])
+        self.table.setHorizontalHeaderLabels(["音频名称","格式","完成","大小","文件夹","路径"])
         self.table.setColumnHidden(self.COL_PATH, True)
         hv = self.table.horizontalHeader()
         hv.setSectionResizeMode(self.COL_NAME, QHeaderView.ResizeMode.Stretch)
@@ -80,10 +80,32 @@ class SongListPanel(QWidget):
 
     def load_songs(self, songs, root_dir=""):
         self._songs = songs
-        if root_dir: self._load_instrumental(root_dir)
+        if self._mode == "music" and root_dir:
+            self._load_instrumental(root_dir)
+        elif self._mode == "video":
+            self._instrumental = set()
+            self._instrumental_store = None
         for s in self._songs:
-            s["instrumental"] = s["path"] in self._instrumental
+            if self._mode == "music":
+                s["instrumental"] = s["path"] in self._instrumental
         self._build_fmt_items(); self._do_refresh()
+
+    def set_material_mode(self, mode: str):
+        self._mode = mode
+        is_video = mode == "video"
+        self.title_label.setText("素材列表（视频）" if is_video else "素材列表（音乐）")
+        self.table.setHorizontalHeaderLabels(
+            ["视频名称", "格式", "完成", "大小", "文件夹", "路径"]
+            if is_video else ["音频名称", "格式", "完成", "大小", "文件夹", "路径"]
+        )
+        self.lyric_filter.blockSignals(True)
+        self.lyric_filter.clear()
+        self.lyric_filter.addItems(["全部", "已完成", "未完成"] if is_video else ["全部", "已完成", "未完成", "纯音乐"])
+        self.lyric_filter.setCurrentIndex(2)
+        self.lyric_filter.blockSignals(False)
+        self.lyric_filter.setVisible(True)
+        self.btn_batch.setVisible(True)
+        self._do_refresh()
 
     def _do_refresh(self, *a):
         self.table.setRowCount(0); f = self._songs
@@ -92,7 +114,7 @@ class SongListPanel(QWidget):
         lf = self.lyric_filter.currentIndex()
         if lf == 1: f = [s for s in f if s.get("has_lrc") and not s.get("instrumental")]
         elif lf == 2: f = [s for s in f if not s.get("has_lrc") and not s.get("instrumental")]
-        elif lf == 3: f = [s for s in f if s.get("instrumental")]
+        elif self._mode == "music" and lf == 3: f = [s for s in f if s.get("instrumental")]
         ff = self.fmt_filter.currentText()
         if ff and ff != "全部格式":
             f = [s for s in f if Path(s["name"]).suffix.upper().lstrip(".") == ff.upper()]
@@ -101,11 +123,17 @@ class SongListPanel(QWidget):
             n = QTableWidgetItem(Path(s["name"]).stem); n.setData(Qt.ItemDataRole.UserRole, s); self.table.setItem(i, 0, n)
             fmt = Path(s["name"]).suffix.lstrip(".").upper()
             fi = QTableWidgetItem(fmt); fi.setTextAlignment(Qt.AlignmentFlag.AlignCenter); self.table.setItem(i, 1, fi)
-            if s.get("instrumental_auto"): st = "纯?"; c = COLOR_INST
+            if self._mode == "video":
+                captured_at = s.get("captured_at")
+                st = "完成" if s.get("has_lrc") else "未完成"
+                c = COLOR_HAS_LRC if s.get("has_lrc") else QColor(158,158,158)
+            elif s.get("instrumental_auto"): st = "纯?"; c = COLOR_INST
             elif s.get("instrumental"): st = "纯"; c = COLOR_INST
-            elif s.get("has_lrc"): st = "OK"; c = COLOR_HAS_LRC
-            else: st = "--"; c = QColor(158,158,158)
+            elif s.get("has_lrc"): st = "完成"; c = COLOR_HAS_LRC
+            else: st = "未完成"; c = QColor(158,158,158)
             si = QTableWidgetItem(st); si.setTextAlignment(Qt.AlignmentFlag.AlignCenter); si.setForeground(QBrush(c))
+            if self._mode == "video" and captured_at:
+                si.setToolTip(f"拍摄时间：{captured_at:%Y-%m-%d %H:%M:%S}（{s.get('timestamp_source', '未知')}）")
             self.table.setItem(i, 2, si)
             zi = QTableWidgetItem(_fmt_size(s.get("size",0)))
             zi.setTextAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter); self.table.setItem(i, 3, zi)
@@ -118,6 +146,8 @@ class SongListPanel(QWidget):
         if sel: self.song_selected.emit(sel[0])
 
     def _on_context_menu(self, pos):
+        if self._mode == "video":
+            return
         items = self.table.selectedItems()
         if not items: return
         songs = self.get_selected_songs()
@@ -188,7 +218,7 @@ class SongListPanel(QWidget):
         try:
             os.rename(old_str, new_str)
             old_lrc = old_path.with_suffix(".lrc"); new_lrc = new_path.with_suffix(".lrc")
-            if old_lrc.exists(): os.rename(str(old_lrc), str(new_lrc))
+            if self._mode == "music" and old_lrc.exists(): os.rename(str(old_lrc), str(new_lrc))
         except Exception as e: QMessageBox.critical(self, "rename failed", str(e)); return
         self._update_renamed_song(old_str, new_str, new_name, new_lrc)
         self._build_fmt_items(); self._do_refresh()
@@ -204,7 +234,7 @@ class SongListPanel(QWidget):
                 continue
             s["path"] = new_path
             s["name"] = new_name
-            s["has_lrc"] = new_lrc.exists()
+            s["has_lrc"] = self._mode == "music" and new_lrc.exists()
             s["lrc_path"] = str(new_lrc) if s["has_lrc"] else None
             if old_path in self._instrumental:
                 self._instrumental.remove(old_path)

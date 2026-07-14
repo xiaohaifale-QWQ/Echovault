@@ -142,6 +142,7 @@ def convert_to_whisper_format(
     
     # 转码参数
     args.extend([
+        "-vn",                              # 视频素材只保留音轨
         "-ar", str(WHISPER_SAMPLE_RATE),  # 采样率 16kHz
         "-ac", str(WHISPER_CHANNELS),      # 单声道
         "-sample_fmt", "s16",              # 16-bit PCM

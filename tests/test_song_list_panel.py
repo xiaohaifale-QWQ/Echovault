@@ -14,6 +14,7 @@ def test_rename_updates_the_matching_song_not_the_first_record(tmp_path):
         {"path": str(old_path), "name": "old.mp3", "has_lrc": False},
     ]
     panel._instrumental = set()
+    panel._mode = "music"
     panel._save_instrumental = lambda: None
 
     panel._update_renamed_song(str(old_path), str(new_path), new_path.name, new_lrc)

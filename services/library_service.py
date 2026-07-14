@@ -110,6 +110,7 @@ def scan_audio(folder: str | Path) -> list[dict]:
             {
                 "path": str(resolved),
                 "name": resolved.name,
+                "material_type": "music",
                 "folder": (
                     str(resolved.parent.relative_to(root)) if resolved.parent != root else ""
                 ),

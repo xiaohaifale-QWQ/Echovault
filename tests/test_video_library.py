@@ -22,3 +22,10 @@ def test_scan_videos_sorts_by_adjusted_capture_time_and_skips_outputs(tmp_path, 
     assert [video["name"] for video in videos] == ["second.mov", "first.mp4"]
     assert videos[0]["captured_at"] == datetime(2026, 7, 14, 9, 1, 0)
     assert videos[0]["timestamp_source"] == "视频元数据"
+
+
+def test_calibration_offset_maps_recorded_time_to_actual_time():
+    assert video_library.calibration_offset_seconds(
+        datetime(2020, 1, 1, 8, 0, 0),
+        datetime(2026, 7, 14, 12, 0, 0),
+    ) == 206164800

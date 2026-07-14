@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
 
 from .audio_utils import find_ffprobe
 from .process_utils import hidden_window_kwargs
-
 
 VIDEO_FORMATS = {
     ".mp4",
@@ -88,6 +86,11 @@ def video_timestamp(path: str | Path, offset_seconds: int = 0) -> tuple[datetime
     return captured_at, source
 
 
+def calibration_offset_seconds(recorded_start: datetime, actual_start: datetime) -> int:
+    """Return the offset that maps a video's recorded start time to real time."""
+    return int((actual_start - recorded_start).total_seconds())
+
+
 def scan_videos(folder: str | Path, offset_seconds: int = 0) -> list[dict]:
     """Recursively scan video material, excluding previous aggregate outputs."""
     root = Path(folder).expanduser().resolve()
@@ -103,14 +106,18 @@ def scan_videos(folder: str | Path, offset_seconds: int = 0) -> list[dict]:
             continue
         captured_at, source = video_timestamp(path, offset_seconds)
         resolved = path.resolve()
+        lrc_path = resolved.with_suffix(".lrc")
         videos.append(
             {
                 "path": str(resolved),
                 "name": resolved.name,
+                "material_type": "video",
                 "folder": str(resolved.parent.relative_to(root)) if resolved.parent != root else "",
                 "size": resolved.stat().st_size,
                 "captured_at": captured_at,
                 "timestamp_source": source,
+                "has_lrc": lrc_path.exists(),
+                "lrc_path": str(lrc_path) if lrc_path.exists() else None,
             }
         )
     return sorted(videos, key=lambda video: (video["captured_at"], video["name"].casefold()))
