@@ -5,10 +5,11 @@ from __future__ import annotations
 import csv
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .audio_utils import find_ffmpeg
+from .lrc_parser import parse_lrc_file
 from .process_utils import hidden_window_kwargs
 from .video_library import AGGREGATE_DIRECTORY_PREFIX, scan_videos
 
@@ -76,6 +77,36 @@ def aggregate_videos_by_time(folder: str | Path, offset_seconds: int = 0) -> Vid
     if not _run_ffmpeg(reencode_command):
         raise RuntimeError("视频汇总失败：视频编码不兼容，重新编码也未成功")
     return VideoAggregateResult(output_dir, video_path, manifest_path, len(videos), True)
+
+
+def write_video_transcript_timeline(folder: str | Path, offset_seconds: int = 0) -> tuple[Path, int]:
+    """Map each recognised video-LRC line to a calibrated real-world timestamp."""
+    root = Path(folder).expanduser().resolve()
+    output_path = root / "视频文字时间轴.csv"
+    row_count = 0
+    with output_path.open("w", encoding="utf-8-sig", newline="") as output:
+        writer = csv.writer(output)
+        writer.writerow(["视频文件", "视频相对时间", "对应日期时间", "识别文字"])
+        for video in scan_videos(root, offset_seconds=offset_seconds):
+            lrc_path = video.get("lrc_path")
+            if not lrc_path:
+                continue
+            try:
+                lrc = parse_lrc_file(lrc_path)
+            except (OSError, UnicodeError):
+                continue
+            for line in sorted(lrc.lines, key=lambda item: item.timestamp):
+                absolute_time = video["captured_at"] + timedelta(seconds=line.timestamp)
+                writer.writerow(
+                    [
+                        video["path"],
+                        f"{line.timestamp:.2f}",
+                        absolute_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        line.text,
+                    ]
+                )
+                row_count += 1
+    return output_path, row_count
 
 
 def _run_ffmpeg(command: list[str]) -> bool:

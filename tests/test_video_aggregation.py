@@ -28,3 +28,26 @@ def test_aggregate_writes_manifest_and_uses_copy_before_reencoding(tmp_path, mon
     assert not result.reencoded
     assert result.manifest_path.exists()
     assert "-c" in commands[0] and "copy" in commands[0]
+
+
+def test_transcript_timeline_maps_lrc_seconds_to_video_datetime(tmp_path, monkeypatch):
+    video = tmp_path / "source.mp4"
+    lrc = tmp_path / "source.lrc"
+    video.write_bytes(b"video")
+    lrc.write_text("[00:02.00]第一句", encoding="utf-8")
+    monkeypatch.setattr(
+        video_aggregation,
+        "scan_videos",
+        lambda *_args, **_kwargs: [
+            {
+                "path": str(video),
+                "lrc_path": str(lrc),
+                "captured_at": datetime(2026, 7, 14, 10, 0, 0),
+            }
+        ],
+    )
+
+    output, row_count = video_aggregation.write_video_transcript_timeline(tmp_path)
+
+    assert row_count == 1
+    assert "2026-07-14 10:00:02" in output.read_text(encoding="utf-8-sig")

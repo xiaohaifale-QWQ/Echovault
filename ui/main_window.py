@@ -27,6 +27,7 @@ from core.asr.router import ASRRouter, get_router
 from core.environment import build_environment_report
 from services.library_service import scan_audio
 from core.video_library import calibration_offset_seconds, scan_videos, video_timestamp
+from core.video_aggregation import write_video_transcript_timeline
 
 from ui.library_panel import LibraryPanel
 from ui.song_list_panel import SongListPanel
@@ -279,8 +280,14 @@ class MainWindow(QMainWindow):
         offset = calibration_offset_seconds(recorded_start, actual_start)
         self.config.video_time_offsets[str(Path(folder_path).resolve())] = offset
         config_manager.save()
+        timeline_path, row_count = write_video_transcript_timeline(folder_path, offset)
         self._on_folder_selected(folder_path)
-        QMessageBox.information(self, "时间校准", f"已保存偏移：{offset:+d} 秒。")
+        QMessageBox.information(
+            self,
+            "时间校准",
+            f"已保存偏移：{offset:+d} 秒。\n"
+            f"已生成 {row_count} 条文字与实际日期对应关系：\n{timeline_path}",
+        )
 
     def _on_video_aggregate(self, folder_path: str):
         reply = QMessageBox.question(
