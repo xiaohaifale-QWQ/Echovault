@@ -26,6 +26,9 @@
 - A verified Demucs model catalog and real separation core that produces lossless vocal and
   accompaniment stems, reports processing stages, supports cancellation, and renders an
   independently volume-adjusted mix through the bundled ffmpeg.
+- A unified searchable model library for local Whisper recognition and Demucs separation,
+  including model purpose, speed, quality, size, installation state, verified downloads,
+  retry, cancellation, and direct access from Recognition settings.
 - A selectable-song Online Matching workspace with side-by-side editable local/online lyrics,
   four explicit keep/replace/cross-merge choices, and normalized timeline-to-text alignment.
 - A local-media player beneath the comparison view that seeks, pauses, and independently

@@ -32,6 +32,7 @@ from core.runtime_detection import detect_hardware, select_runtime
 from core.runtime_manager import RuntimeInstallCancelled, RuntimeManagerError
 from core.runtime_setup import RuntimeSetupResult, RuntimeSetupService
 from core.voice_cache import clear_voice_cache, voice_cache_dir
+from ui.model_library_dialog import ModelLibraryDialog
 
 
 class _CurrentPageStack(QStackedWidget):
@@ -358,6 +359,9 @@ class SettingsDialog(QDialog):
         dl_btn_row = QHBoxLayout()
         self.btn_dl = QPushButton("下载模型"); self.btn_dl.setVisible(False)
         self.btn_dl.clicked.connect(self._on_download); dl_btn_row.addWidget(self.btn_dl)
+        self.btn_model_library = QPushButton("模型库"); self.btn_model_library.setVisible(False)
+        self.btn_model_library.clicked.connect(self._open_model_library)
+        dl_btn_row.addWidget(self.btn_model_library)
         self.btn_cancel_dl = QPushButton("取消下载"); self.btn_cancel_dl.setVisible(False)
         self.btn_cancel_dl.setStyleSheet("color:#c0392b;")
         self.btn_cancel_dl.clicked.connect(self._on_cancel_download); dl_btn_row.addWidget(self.btn_cancel_dl)
@@ -631,6 +635,7 @@ class SettingsDialog(QDialog):
         self._set_asr_row_visible(self.xunfei_notice, is_xunfei)
         self._set_asr_row_visible(self.model_combo, is_local)
         self.btn_dl.setVisible(is_local)
+        self.btn_model_library.setVisible(is_local)
         self.btn_cancel_dl.setVisible(False)
         self.dl_bar.setVisible(False)
         self.dl_label.setVisible(False)
@@ -678,6 +683,10 @@ class SettingsDialog(QDialog):
         self.worker.progress.connect(self._on_dl_progress)
         self.worker.finished.connect(self._on_dl_done)
         self.worker.start()
+
+    def _open_model_library(self):
+        dialog = ModelLibraryDialog(self, initial_category="asr")
+        dialog.exec()
 
     def _on_dl_progress(self, pct, msg):
         self.dl_bar.setValue(pct)
