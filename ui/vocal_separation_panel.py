@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import shutil
 import struct
+import tempfile
 import wave
 from pathlib import Path
 
-from PyQt6.QtCore import QPointF, Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtCore import QPointF, Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
@@ -28,14 +30,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from core.config import config_manager
+from core.separation_process import run_separation_process
 from core.vocal_separation import (
-    SEPARATION_MODELS,
     SeparationCancelled,
     SeparationResult,
     mix_stems,
-    recommended_device,
-    separate_vocals,
+    reverse_audio,
     separation_available,
     separation_model_installed,
 )
@@ -64,7 +64,7 @@ class SeparationWorker(QThread):
 
     def run(self):
         try:
-            result = separate_vocals(
+            result = run_separation_process(
                 self.input_path,
                 self.output_dir,
                 model=self.model,
@@ -113,8 +113,32 @@ class MixExportWorker(QThread):
             self.completed.emit(False, str(exc))
 
 
+class ReversePreviewWorker(QThread):
+    completed = pyqtSignal(bool, object)
+
+    def __init__(self, paths: dict[str, Path], output_dir: str, parent=None):
+        super().__init__(parent)
+        self.paths = paths
+        self.output_dir = Path(output_dir)
+
+    def run(self):
+        try:
+            results = {}
+            for name, source in self.paths.items():
+                if self.isInterruptionRequested():
+                    raise SeparationCancelled("倒放准备已取消")
+                results[name] = reverse_audio(
+                    source, self.output_dir / f"{name}_reverse.wav"
+                )
+            self.completed.emit(True, results)
+        except Exception as exc:
+            self.completed.emit(False, str(exc))
+
+
 class WaveformView(QWidget):
     """Small dependency-free WAV overview with a shared playhead."""
+
+    seek_requested = pyqtSignal(float)
 
     def __init__(self, color: str, parent=None):
         super().__init__(parent)
@@ -122,6 +146,7 @@ class WaveformView(QWidget):
         self.samples: list[float] = []
         self.playhead = 0.0
         self.setMinimumHeight(76)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     @staticmethod
     def _decode_sample(data: bytes, width: int) -> int:
@@ -169,6 +194,25 @@ class WaveformView(QWidget):
         self.playhead = max(0.0, min(1.0, ratio))
         self.update()
 
+    def _request_seek(self, x: float):
+        ratio = max(0.0, min(1.0, x / max(self.width() - 1, 1)))
+        self.set_playhead(ratio)
+        self.seek_requested.emit(ratio)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._request_seek(event.position().x())
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self._request_seek(event.position().x())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -195,6 +239,8 @@ class VocalSeparationPanel(QWidget):
     """Separation settings above, synchronized stem mixer below."""
 
     model_library_requested = pyqtSignal()
+    position_changed_ms = pyqtSignal(int)
+    playback_started = pyqtSignal()
 
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
@@ -203,6 +249,10 @@ class VocalSeparationPanel(QWidget):
         self._selected_path = ""
         self._result: SeparationResult | None = None
         self._seeking = False
+        self._playback_speed = 1
+        self._reverse_mode = False
+        self._reverse_paths: dict[str, Path] = {}
+        self._reverse_temp_dir: str | None = None
         self._setup_players()
         self._setup_ui()
 
@@ -233,6 +283,17 @@ class VocalSeparationPanel(QWidget):
         splitter = QSplitter(Qt.Orientation.Vertical)
         root.addWidget(splitter)
 
+        top_widget = QWidget()
+        top_layout = QVBoxLayout(top_widget)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        selected_group = QGroupBox("已选中")
+        selected_layout = QHBoxLayout(selected_group)
+        self.selected_song_label = QLabel("尚未从左侧选择素材")
+        self.selected_song_label.setWordWrap(True)
+        self.selected_song_label.setStyleSheet("font-weight:600;color:#234")
+        selected_layout.addWidget(self.selected_song_label)
+        top_layout.addWidget(selected_group)
+
         settings_group = QGroupBox("处理设置")
         form = QFormLayout(settings_group)
         self.output_type_combo = QComboBox()
@@ -253,26 +314,12 @@ class VocalSeparationPanel(QWidget):
         output_row.addWidget(browse_button)
         form.addRow("输出目录:", output_row)
 
-        self.model_combo = QComboBox()
-        for spec in SEPARATION_MODELS.values():
-            self.model_combo.addItem(spec.name, spec.key)
-        self.model_combo.currentIndexChanged.connect(self._save_preferences)
-        form.addRow("分离模型:", self.model_combo)
-
         self.denoise_check = QCheckBox("降噪（模型尚未接入）")
         self.denoise_check.setEnabled(False)
         form.addRow("增强处理:", self.denoise_check)
         self.reverb_check = QCheckBox("混响移除（模型尚未接入）")
         self.reverb_check.setEnabled(False)
         form.addRow("", self.reverb_check)
-
-        self.device_combo = QComboBox()
-        self.device_combo.addItem("CPU（通用）", "cpu")
-        if recommended_device() == "cuda":
-            self.device_combo.insertItem(0, "NVIDIA CUDA（推荐）", "cuda")
-        self.device_combo.currentIndexChanged.connect(self._save_preferences)
-        form.addRow("硬件加速:", self.device_combo)
-        self.reload_settings()
 
         action_row = QHBoxLayout()
         self.start_button = QPushButton("▶ 开始处理")
@@ -292,18 +339,38 @@ class VocalSeparationPanel(QWidget):
         self.processing_status.setWordWrap(True)
         self.processing_status.setStyleSheet("color:#555")
         form.addRow("", self.processing_status)
-        splitter.addWidget(settings_group)
+        top_layout.addWidget(settings_group)
+        splitter.addWidget(top_widget)
 
         mixer_group = QGroupBox("音量调节台")
         mixer_layout = QVBoxLayout(mixer_group)
         self.current_file_label = QLabel("完成分离后可试听和调节两条音轨")
         self.current_file_label.setStyleSheet("color:#666")
         mixer_layout.addWidget(self.current_file_label)
+
+        transport_row = QHBoxLayout()
+        self.pause_button = QPushButton("暂停")
+        self.pause_button.setEnabled(False)
+        self.pause_button.clicked.connect(self.pause_playback)
+        transport_row.addWidget(self.pause_button)
+        self.speed_button = QPushButton("倍速 1x")
+        self.speed_button.setEnabled(False)
+        self.speed_button.clicked.connect(self._cycle_playback_speed)
+        transport_row.addWidget(self.speed_button)
+        self.reverse_button = QPushButton("倒放")
+        self.reverse_button.setEnabled(False)
+        self.reverse_button.clicked.connect(self._toggle_reverse_playback)
+        transport_row.addWidget(self.reverse_button)
+        transport_row.addStretch()
+        mixer_layout.addLayout(transport_row)
+
         mixer_layout.addWidget(QLabel("伴奏"))
         self.accompaniment_waveform = WaveformView("#2A9D9B")
+        self.accompaniment_waveform.seek_requested.connect(self._seek_to_ratio)
         mixer_layout.addWidget(self.accompaniment_waveform)
         mixer_layout.addWidget(QLabel("人声"))
         self.vocal_waveform = WaveformView("#D97845")
+        self.vocal_waveform.seek_requested.connect(self._seek_to_ratio)
         mixer_layout.addWidget(self.vocal_waveform)
 
         playback_row = QHBoxLayout()
@@ -375,29 +442,13 @@ class VocalSeparationPanel(QWidget):
             self._selected_song_changed()
 
     def reload_settings(self):
-        if not hasattr(self, "model_combo") or self.config is None:
-            return
-        model = getattr(self.config.asr, "vocal_separation_model", "htdemucs")
-        model_index = self.model_combo.findData(model)
-        self.model_combo.setCurrentIndex(max(0, model_index))
-        wants_gpu = bool(
-            getattr(self.config.asr, "vocal_separation_use_gpu", False)
-        )
-        device_index = self.device_combo.findData("cuda" if wants_gpu else "cpu")
-        self.device_combo.setCurrentIndex(max(0, device_index))
-
-    def _save_preferences(self, _index: int = -1):
-        if self.config is None:
-            return
-        self.config.asr.vocal_separation_model = self.model_combo.currentData()
-        self.config.asr.vocal_separation_use_gpu = (
-            self.device_combo.currentData() == "cuda"
-        )
-        config_manager.config = self.config
-        config_manager.save()
+        """Model and runtime choices are managed by the top-level Model Library."""
 
     def _selected_song_changed(self):
         file_path = self._selected_path
+        self.selected_song_label.setText(
+            Path(file_path).name if file_path else "尚未从左侧选择素材"
+        )
         if file_path and not self.output_input.text().strip():
             self.output_input.setText(str(Path(file_path).parent / "Separated"))
 
@@ -420,7 +471,11 @@ class VocalSeparationPanel(QWidget):
                 "当前安装缺少 Demucs 人声分离运行时，请重新安装本地功能依赖。",
             )
             return
-        model = self.model_combo.currentData()
+        model = (
+            getattr(self.config.asr, "vocal_separation_model", "htdemucs")
+            if self.config is not None
+            else "htdemucs"
+        )
         if not separation_model_installed(model):
             reply = QMessageBox.question(
                 self,
@@ -446,7 +501,12 @@ class VocalSeparationPanel(QWidget):
             input_path,
             output_dir,
             model,
-            self.device_combo.currentData(),
+            (
+                "cuda"
+                if self.config is not None
+                and getattr(self.config.asr, "vocal_separation_use_gpu", False)
+                else "cpu"
+            ),
             self.output_type_combo.currentData(),
             self,
         )
@@ -483,6 +543,9 @@ class VocalSeparationPanel(QWidget):
         self._load_preview(result)
 
     def _load_preview(self, result: SeparationResult):
+        self._cleanup_reverse_preview()
+        self._reverse_mode = False
+        self.reverse_button.setText("倒放")
         if result.accompaniment_path is not None:
             self.accompaniment_player.setSource(
                 QUrl.fromLocalFile(str(result.accompaniment_path))
@@ -511,6 +574,9 @@ class VocalSeparationPanel(QWidget):
         self.accompaniment_volume.setEnabled(has_accompaniment)
         self.vocal_volume.setEnabled(has_vocals)
         self.play_button.setEnabled(True)
+        self.pause_button.setEnabled(True)
+        self.speed_button.setEnabled(True)
+        self.reverse_button.setEnabled(True)
         self.seek_slider.setEnabled(True)
         self.save_mix_button.setEnabled(has_accompaniment and has_vocals)
         self.save_mix_button.setToolTip(
@@ -559,10 +625,124 @@ class VocalSeparationPanel(QWidget):
             self.processing_status.setText(
                 f"正在通过“{self.audio_device_combo.currentText()}”播放{track_count}条音轨。"
             )
+            self.playback_started.emit()
 
     def _stop_players(self):
         self.accompaniment_player.stop()
         self.vocal_player.stop()
+
+    def pause_playback(self):
+        self.accompaniment_player.pause()
+        self.vocal_player.pause()
+
+    def _master_player(self):
+        return (
+            self.accompaniment_player
+            if self._result and self._result.accompaniment_path is not None
+            else self.vocal_player
+        )
+
+    def _display_position(self, media_position: int | None = None) -> int:
+        master = self._master_player()
+        position = master.position() if media_position is None else media_position
+        duration = master.duration()
+        return max(0, duration - position) if self._reverse_mode else position
+
+    def _media_position(self, display_position: int) -> int:
+        duration = self._master_player().duration()
+        return (
+            max(0, duration - display_position)
+            if self._reverse_mode
+            else display_position
+        )
+
+    def _cycle_playback_speed(self):
+        self._playback_speed = (
+            self._playback_speed + 1 if self._playback_speed < 10 else 1
+        )
+        for player in (self.accompaniment_player, self.vocal_player):
+            player.setPlaybackRate(float(self._playback_speed))
+        self.speed_button.setText(f"倍速 {self._playback_speed}x")
+
+    def _toggle_reverse_playback(self):
+        if self._result is None:
+            return
+        if self._reverse_paths:
+            self._activate_reverse_mode(not self._reverse_mode)
+            return
+        sources = {
+            name: path
+            for name, path in {
+                "accompaniment": self._result.accompaniment_path,
+                "vocals": self._result.vocals_path,
+            }.items()
+            if path is not None
+        }
+        self._reverse_temp_dir = tempfile.mkdtemp(prefix="echovault_reverse_preview_")
+        self.reverse_button.setEnabled(False)
+        self.processing_status.setText("正在生成倒放试听音轨…")
+        self.reverse_worker = ReversePreviewWorker(
+            sources, self._reverse_temp_dir, self
+        )
+        self.reverse_worker.completed.connect(self._reverse_preview_ready)
+        self.reverse_worker.start()
+
+    def _reverse_preview_ready(self, success: bool, result: object):
+        self.reverse_button.setEnabled(True)
+        if not success:
+            self.processing_status.setText(str(result))
+            QMessageBox.warning(self, "倒放准备失败", str(result))
+            return
+        self._reverse_paths = result
+        self._activate_reverse_mode(True)
+
+    def _activate_reverse_mode(self, enabled: bool):
+        if self._result is None:
+            return
+        was_playing = any(
+            player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+            for player in (self.accompaniment_player, self.vocal_player)
+        )
+        display_position = self._display_position()
+        self.pause_playback()
+        self._reverse_mode = enabled
+        accompaniment = (
+            self._reverse_paths.get("accompaniment")
+            if enabled
+            else self._result.accompaniment_path
+        )
+        vocals = (
+            self._reverse_paths.get("vocals") if enabled else self._result.vocals_path
+        )
+        self.accompaniment_player.setSource(
+            QUrl.fromLocalFile(str(accompaniment)) if accompaniment else QUrl()
+        )
+        self.vocal_player.setSource(
+            QUrl.fromLocalFile(str(vocals)) if vocals else QUrl()
+        )
+        self.reverse_button.setText("恢复正放" if enabled else "倒放")
+        self.processing_status.setText("倒放模式" if enabled else "正放模式")
+
+        def restore_position():
+            media_position = self._media_position(display_position)
+            self.accompaniment_player.setPosition(media_position)
+            self.vocal_player.setPosition(media_position)
+            for player in (self.accompaniment_player, self.vocal_player):
+                player.setPlaybackRate(float(self._playback_speed))
+            if was_playing:
+                self._toggle_playback()
+
+        QTimer.singleShot(120, restore_position)
+
+    def _cleanup_reverse_preview(self):
+        self._reverse_paths = {}
+        if self._reverse_temp_dir:
+            shutil.rmtree(self._reverse_temp_dir, ignore_errors=True)
+            self._reverse_temp_dir = None
+
+    def closeEvent(self, event):
+        self._cleanup_reverse_preview()
+        super().closeEvent(event)
 
     def _apply_audio_device(self, _device=None):
         if not hasattr(self, "audio_device_combo"):
@@ -598,21 +778,19 @@ class VocalSeparationPanel(QWidget):
             and self._result.accompaniment_path is not None
         ):
             return
-        master = (
-            self.accompaniment_player
-            if self._result and self._result.accompaniment_path is not None
-            else self.vocal_player
-        )
+        master = self._master_player()
         duration = master.duration()
+        display_position = self._display_position(position)
         if duration > 0:
-            ratio = position / duration
+            ratio = display_position / duration
             if not self._seeking:
                 self.seek_slider.setValue(int(ratio * 1000))
             self.accompaniment_waveform.set_playhead(ratio)
             self.vocal_waveform.set_playhead(ratio)
         self.time_label.setText(
-            f"{self._format_time(position)} / {self._format_time(duration)}"
+            f"{self._format_time(display_position)} / {self._format_time(duration)}"
         )
+        self.position_changed_ms.emit(display_position)
         if (
             self._result is not None
             and self._result.vocals_path is not None
@@ -633,15 +811,30 @@ class VocalSeparationPanel(QWidget):
 
     def _seek_released(self):
         self._seeking = False
-        master = (
-            self.accompaniment_player
-            if self._result and self._result.accompaniment_path is not None
-            else self.vocal_player
-        )
+        master = self._master_player()
         duration = master.duration()
-        position = int(duration * self.seek_slider.value() / 1000)
-        self.accompaniment_player.setPosition(position)
-        self.vocal_player.setPosition(position)
+        display_position = int(duration * self.seek_slider.value() / 1000)
+        media_position = self._media_position(display_position)
+        self.accompaniment_player.setPosition(media_position)
+        self.vocal_player.setPosition(media_position)
+
+    def _seek_to_ratio(self, ratio: float):
+        if self._result is None:
+            return
+        duration = self._master_player().duration()
+        if duration <= 0:
+            return
+        display_position = int(duration * ratio)
+        media_position = self._media_position(display_position)
+        self.accompaniment_player.setPosition(media_position)
+        self.vocal_player.setPosition(media_position)
+        self.seek_slider.setValue(int(ratio * 1000))
+        self.accompaniment_waveform.set_playhead(ratio)
+        self.vocal_waveform.set_playhead(ratio)
+        self.time_label.setText(
+            f"{self._format_time(display_position)} / {self._format_time(duration)}"
+        )
+        self.position_changed_ms.emit(display_position)
 
     def _volume_changed(self, _value: int = -1):
         accompaniment = self.accompaniment_volume.value()

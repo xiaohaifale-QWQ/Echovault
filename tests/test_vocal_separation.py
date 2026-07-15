@@ -87,3 +87,22 @@ def test_mix_stems_builds_independent_volume_filter(monkeypatch, tmp_path):
     filter_value = calls[0][calls[0].index("-filter_complex") + 1]
     assert "volume=0.400" in filter_value
     assert "volume=0.700" in filter_value
+
+
+def test_reverse_audio_uses_ffmpeg_areverse(monkeypatch, tmp_path):
+    source = tmp_path / "source.wav"
+    source.write_bytes(b"wav")
+    calls = []
+    monkeypatch.setattr(vocal_separation, "find_ffmpeg", lambda: "ffmpeg")
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        Path(command[-1]).write_bytes(b"reversed")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(vocal_separation.subprocess, "run", fake_run)
+
+    output = vocal_separation.reverse_audio(source, tmp_path / "reverse.wav")
+
+    assert output.read_bytes() == b"reversed"
+    assert "areverse" in calls[0]

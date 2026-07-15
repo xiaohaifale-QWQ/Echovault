@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Demucs GPU selection now reuses the active external CUDA Worker's Torch in an isolated
+  process, so an installed RTX/CUDA runtime is no longer hidden by the desktop bundle's CPU
+  Torch. Progress identifies the actual GPU, and CPU/GPU processes remain isolated.
+- Starting playback in Online Matching now pauses Vocal Separation playback and vice versa.
 - Local lyric playback and the two-stem preview now expose the actual Windows output device,
   remember an explicit choice, avoid known virtual defaults when a physical speaker is available,
   rebind and unmute it immediately before playback, refresh after hot-plug, and report decoder
@@ -32,6 +36,11 @@
 
 ### Added
 
+- Vocal Separation now switches the main content into a three-column material/real-time-lyrics/
+  processing layout. The middle column reads the same local LRC shown on the left side of Online
+  Matching and follows the separation playhead.
+- The stem mixer adds a directly draggable waveform playhead, a dedicated Pause button, a 1x–10x
+  cycling speed button, and true reverse preview rendered locally through ffmpeg.
 - A top-level Model Library beside AI Mode and Help opens two white cards for text-recognition
   and audio-separation models. Each card includes its CPU/GPU-shared models and the matching
   GPU runtime status or configuration entry.
@@ -81,6 +90,8 @@
 
 ### Changed
 
+- The selected material is shown in its own top box. Default Demucs model and CPU/GPU selection
+  moved out of the processing form and into the Audio Separation card in Model Library.
 - The vocal mixer now aligns accompaniment and vocal volume rows and uses one larger adjusted-
   result button. The upper form uses the material selected on the left, removes redundant
   material/mode rows, and can output both stems, vocals only, or accompaniment only.

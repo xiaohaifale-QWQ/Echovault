@@ -111,6 +111,12 @@ class MainWindow(QMainWindow):
         self.left_stack.addWidget(self.online_comparison_panel)
         splitter.addWidget(self.left_stack)
 
+        self.vocal_lyrics_panel = LyricsPreviewPanel()
+        self.vocal_lyrics_panel.title_label.setText("实时歌词")
+        self.vocal_lyrics_panel.song_label.setText("左侧选择素材后显示本地识别歌词")
+        self.vocal_lyrics_panel.setVisible(False)
+        splitter.addWidget(self.vocal_lyrics_panel)
+
         # 右侧：选项卡
         self.right_tabs = QTabWidget()
 
@@ -140,7 +146,8 @@ class MainWindow(QMainWindow):
 
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
-        splitter.setSizes([720, 500])
+        splitter.setStretchFactor(2, 2)
+        splitter.setSizes([720, 0, 500])
 
         self._ai_panel_width = 340
         self._ai_mode_enabled = False
@@ -343,11 +350,25 @@ class MainWindow(QMainWindow):
         # 歌曲列表 → 详情面板
         self.song_list_panel.song_selected.connect(self.detail_panel.show_song)
         self.song_list_panel.song_selected.connect(self.lyrics_preview_panel.show_song)
+        self.song_list_panel.song_selected.connect(self.vocal_lyrics_panel.show_song)
         self.song_list_panel.song_selected.connect(self.online_lyrics_panel.show_song)
         self.song_list_panel.song_selected.connect(
             lambda song: self.vocal_separation_panel.select_song(song.get("path", ""))
         )
         self.lyrics_preview_panel.lyrics_saved.connect(self._on_preview_lyrics_saved)
+        self.vocal_lyrics_panel.lyrics_saved.connect(self._on_preview_lyrics_saved)
+        self.vocal_lyrics_panel.editing_started.connect(
+            self.vocal_separation_panel.pause_playback
+        )
+        self.vocal_separation_panel.position_changed_ms.connect(
+            lambda position: self.vocal_lyrics_panel.text.highlight_at(position / 1000)
+        )
+        self.online_comparison_panel.playback_started.connect(
+            self.vocal_separation_panel.pause_playback
+        )
+        self.vocal_separation_panel.playback_started.connect(
+            self.online_comparison_panel.pause_playback
+        )
         self.ai_chat_panel.command_requested.connect(self._on_ai_command_requested)
 
         # 详情面板 → 请求识别
@@ -460,6 +481,7 @@ class MainWindow(QMainWindow):
             "has_lrc": lrc_path.is_file(),
         }
         self.lyrics_preview_panel.show_song(song)
+        self.vocal_lyrics_panel.show_song(song)
         self.online_lyrics_panel.show_song(song)
         self.left_stack.setCurrentWidget(self.lyrics_preview_panel)
 
@@ -575,6 +597,7 @@ class MainWindow(QMainWindow):
         song.update({"has_lrc": True, "lrc_path": lrc_path})
         self.detail_panel.show_song(song)
         self.lyrics_preview_panel.show_song(song)
+        self.vocal_lyrics_panel.show_song(song)
         self.online_lyrics_panel._song = song
         self.online_lyrics_panel.reload_local_lyrics()
         self.online_lyrics_panel.status_label.setText("本地歌词已更新，音频文件未修改。")
@@ -596,9 +619,18 @@ class MainWindow(QMainWindow):
         elif current_panel is self.online_lyrics_panel:
             self._refresh_online_catalog()
             left_panel = self.online_comparison_panel
+        elif current_panel is self.vocal_separation_panel:
+            left_panel = self.song_list_panel
         else:
             left_panel = self.song_list_panel
         self.left_stack.setCurrentWidget(left_panel)
+        separation_mode = current_panel is self.vocal_separation_panel
+        self.vocal_lyrics_panel.setVisible(separation_mode)
+        self.left_stack.setMinimumWidth(280 if separation_mode else 0)
+        self.left_stack.setMaximumWidth(380 if separation_mode else 16777215)
+        self.content_splitter.setSizes(
+            [340, 420, 700] if separation_mode else [720, 0, 500]
+        )
 
     def _on_material_directories_changed(self, mode: str, directories: list[str]):
         if mode == "video":

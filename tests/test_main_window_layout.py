@@ -34,6 +34,12 @@ def test_main_window_has_six_right_tabs_and_no_scattered_batch_buttons(monkeypat
     window.right_tabs.setCurrentWidget(window.detail_panel)
     assert window.left_stack.currentWidget() is window.song_list_panel
 
+    window.right_tabs.setCurrentWidget(window.vocal_separation_panel)
+    assert window.left_stack.currentWidget() is window.song_list_panel
+    assert not window.vocal_lyrics_panel.isHidden()
+    assert window.vocal_lyrics_panel.title_label.text() == "实时歌词"
+    assert window.content_splitter.count() == 3
+
 
 def test_main_window_applies_cross_merge_with_backup(monkeypatch, tmp_path):
     ensure_app()

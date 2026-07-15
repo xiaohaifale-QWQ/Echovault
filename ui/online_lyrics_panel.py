@@ -138,6 +138,7 @@ class OnlineLyricsComparisonPane(QWidget):
     """Main-window left pane: local/online lyrics side by side, player below."""
 
     content_changed = pyqtSignal()
+    playback_started = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -294,6 +295,10 @@ class OnlineLyricsComparisonPane(QWidget):
                 f"正在通过“{self.audio_device_combo.currentText()}”播放本地素材。"
             )
             self.player.play()
+            self.playback_started.emit()
+
+    def pause_playback(self):
+        self.player.pause()
 
     def _on_playback_state_changed(self, state):
         self.play_button.setText(
