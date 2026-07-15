@@ -29,3 +29,20 @@ def test_calibration_offset_maps_recorded_time_to_actual_time():
         datetime(2020, 1, 1, 8, 0, 0),
         datetime(2026, 7, 14, 12, 0, 0),
     ) == 206164800
+
+
+def test_scan_video_catalog_is_lightweight_and_labels_video_source(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "Clip.mp4").write_bytes(b"video")
+    monkeypatch.setattr(
+        video_library,
+        "_probe_creation_time",
+        lambda _path: (_ for _ in ()).throw(AssertionError("must not probe")),
+    )
+
+    videos = video_library.scan_video_catalog(tmp_path)
+
+    assert len(videos) == 1
+    assert videos[0]["name"] == "Clip.mp4"
+    assert videos[0]["material_type"] == "video"

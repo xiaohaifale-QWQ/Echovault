@@ -10,17 +10,17 @@
 状态栏：歌曲统计 + 上次同步时间
 """
 
+import importlib.util
 import os
+import re
 from pathlib import Path
 
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut
+from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QFileDialog,
     QLabel,
     QMainWindow,
     QMenu,
-    QMenuBar,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -28,17 +28,15 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QStatusBar,
     QTabWidget,
-    QVBoxLayout,
-    QWidget,
 )
 
 from core.ai_control import validate_cli_command
-from core.asr.router import ASRRouter, get_router
-from core.config import AppConfig, config_manager
+from core.asr.router import get_router
+from core.config import config_manager
 from core.environment import build_environment_report
 from core.resource_monitor import format_resource_usage, sample_resource_usage
 from core.video_aggregation import write_video_transcript_timeline
-from core.video_library import scan_videos
+from core.video_library import scan_video_catalog, scan_videos
 from services.library_service import scan_audio
 from ui.ai_chat_panel import AIChatPanel, CLICommandWorker
 from ui.batch_operations_panel import BatchOnlineLyricsWorker, BatchOperationsPanel
@@ -59,17 +57,19 @@ from ui.sync_panel import SyncPanel
 
 class MainWindow(QMainWindow):
     """主窗口"""
-    
+
     # 信号：请求转录音频文件
     transcribe_requested = pyqtSignal(str)  # 文件路径
-    
+
     def __init__(self):
         super().__init__()
-        
+
         self.config = config_manager.load()
         self.router = get_router(self.config)
         self._selected_material_folder = ""
-        
+        self._online_catalog: list[dict] = []
+        self._online_catalog_dirty = True
+
         self._setup_ui()
         self._setup_menubar()
         self._setup_statusbar()
@@ -77,7 +77,7 @@ class MainWindow(QMainWindow):
         self._voice_shortcut = QShortcut(self)
         self._voice_shortcut.activated.connect(self._toggle_voice_input_shortcut)
         self._configure_voice_input_shortcut()
-        
+
         self.library_panel.set_directories(self.config.music_dirs, self.config.video_dirs)
         self.library_panel.set_select_all_modes(
             self.config.music_select_all, self.config.video_select_all
@@ -88,17 +88,17 @@ class MainWindow(QMainWindow):
         report = build_environment_report(self.config)
         if not report["ffmpeg"]["available"]:
             self.status_label.setText("未检测到 ffmpeg，歌词识别暂不可用")
-    
+
     def _setup_ui(self):
         """初始化 UI 布局"""
         self.setWindowTitle("琳琅乐府 — AI 歌词识别")
         self.setMinimumSize(QSize(1100, 680))
         self.resize(QSize(1280, 780))
-        
+
         # 中间/右侧内容区。启用 AI 后，外层会在其左侧固定一栏聊天面板。
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.content_splitter = splitter
-        
+
         # 左侧：素材列表
         self.song_list_panel = SongListPanel()
         self.lyrics_preview_panel = LyricsPreviewPanel()
@@ -108,13 +108,13 @@ class MainWindow(QMainWindow):
         self.left_stack.addWidget(self.lyrics_preview_panel)
         self.left_stack.addWidget(self.online_comparison_panel)
         splitter.addWidget(self.left_stack)
-        
+
         # 右侧：选项卡
         self.right_tabs = QTabWidget()
-        
+
         self.detail_panel = DetailPanel(self.config)
         self.right_tabs.addTab(self.detail_panel, "详情")
-        
+
         self.library_panel = LibraryPanel()
         self.right_tabs.addTab(self.library_panel, "素材库")
 
@@ -127,13 +127,13 @@ class MainWindow(QMainWindow):
 
         self.sync_panel = SyncPanel()
         self.right_tabs.addTab(self.sync_panel, "同步")
-        
+
         splitter.addWidget(self.right_tabs)
-        
+
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
         splitter.setSizes([720, 500])
-        
+
         self._ai_panel_width = 340
         self._ai_mode_enabled = False
         self.ai_chat_panel = AIChatPanel(self.config)
@@ -147,49 +147,49 @@ class MainWindow(QMainWindow):
         self.outer_splitter.setStretchFactor(1, 1)
         self.outer_splitter.setSizes([0, 1280])
         self.setCentralWidget(self.outer_splitter)
-    
+
     def _setup_menubar(self):
         """菜单栏"""
         menubar = self.menuBar()
-        
+
         # 文件菜单
         file_menu = menubar.addMenu("文件(&F)")
-        
+
         open_dir_action = QAction("添加素材文件夹(&O)...", self)
         open_dir_action.setShortcut("Ctrl+O")
         open_dir_action.triggered.connect(self._on_open_folder)
         file_menu.addAction(open_dir_action)
-        
+
         file_menu.addSeparator()
-        
+
         exit_action = QAction("退出(&X)", self)
         exit_action.setShortcut("Alt+F4")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-        
+
         # 识别菜单
         trans_menu = menubar.addMenu("识别(&T)")
-        
+
         trans_all_action = QAction("识别全部未完成音频(&A)", self)
         trans_all_action.setShortcut("Ctrl+Shift+A")
         trans_all_action.triggered.connect(self._on_transcribe_all)
         trans_menu.addAction(trans_all_action)
-        
+
         trans_selected_action = QAction("识别选中音频(&S)", self)
         trans_selected_action.setShortcut("Ctrl+T")
         trans_selected_action.triggered.connect(self._on_transcribe_selected)
         trans_menu.addAction(trans_selected_action)
-        
+
         # 同步菜单
         sync_menu = menubar.addMenu("同步(&Y)")
-        
+
         sync_goto_action = QAction("打开同步面板(&S)", self)
         sync_goto_action.setShortcut("Ctrl+D")
         sync_goto_action.triggered.connect(
             lambda: self.right_tabs.setCurrentWidget(self.sync_panel)
         )
         sync_menu.addAction(sync_goto_action)
-        
+
         # 设置菜单
         settings_menu = menubar.addMenu("设置(&S)")
 
@@ -219,7 +219,7 @@ class MainWindow(QMainWindow):
         self.ai_mode_action = QAction("AI 模式", self)
         self.ai_mode_action.triggered.connect(self._show_ai_mode_menu)
         menubar.addAction(self.ai_mode_action)
-        
+
         # 帮助菜单
         help_menu = menubar.addMenu("帮助(&H)")
 
@@ -231,15 +231,15 @@ class MainWindow(QMainWindow):
         about_action = QAction("关于(&A)", self)
         about_action.triggered.connect(self._on_about)
         help_menu.addAction(about_action)
-    
+
     def _setup_statusbar(self):
         """状态栏"""
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
-        
+
         self.status_label = QLabel("就绪")
         self.statusbar.addWidget(self.status_label)
-        
+
         self.trans_progress = QProgressBar()
         self.trans_progress.setMaximumWidth(200)
         self.trans_progress.setMaximumHeight(16)
@@ -251,17 +251,20 @@ class MainWindow(QMainWindow):
         self.total_trans_progress.setMaximumHeight(16)
         self.total_trans_progress.setVisible(False)
         self.statusbar.addWidget(self.total_trans_progress)
-        
+
         self.btn_stop_transcribe = QPushButton("停止")
         self.btn_stop_transcribe.setMaximumHeight(18)
-        self.btn_stop_transcribe.setStyleSheet("QPushButton{color:#c0392b;font-size:11px;padding:0 6px;margin-left:4px}QPushButton:hover{color:white;background:#c0392b}")
+        self.btn_stop_transcribe.setStyleSheet(
+            "QPushButton{color:#c0392b;font-size:11px;padding:0 6px;"
+            "margin-left:4px}QPushButton:hover{color:white;background:#c0392b}"
+        )
         self.btn_stop_transcribe.setVisible(False)
         self.btn_stop_transcribe.clicked.connect(self._on_stop_transcribe)
         self.statusbar.addWidget(self.btn_stop_transcribe)
-        
+
         self.count_label = QLabel("")
         self.statusbar.addPermanentWidget(self.count_label)
-        
+
         self.provider_label = QLabel("")
         self.statusbar.addPermanentWidget(self.provider_label)
 
@@ -272,9 +275,9 @@ class MainWindow(QMainWindow):
         self.resource_timer = QTimer(self)
         self.resource_timer.setInterval(1000)
         self.resource_timer.timeout.connect(self._refresh_resource_usage)
-        
+
         self._refresh_statusbar()
-    
+
     def _refresh_statusbar(self):
         """刷新状态栏信息"""
         songs = self.song_list_panel.get_all_songs()
@@ -284,7 +287,7 @@ class MainWindow(QMainWindow):
             self.count_label.setText(f"共 {total} 个视频素材")
         else:
             self.count_label.setText(f"共 {total} 个音频素材 | 已完成 {has_lrc} 个")
-        
+
         provider = self.router.get(self.config.asr.provider)
         if provider and provider.is_available():
             self.provider_label.setText(f"引擎: {provider.display_name}")
@@ -293,10 +296,23 @@ class MainWindow(QMainWindow):
         else:
             self.provider_label.setText("引擎: 不可用 (请检查设置)")
         if hasattr(self, "online_lyrics_panel"):
-            self.online_lyrics_panel.set_songs(songs)
+            if self._online_catalog:
+                by_path = {song["path"]: song for song in self._online_catalog}
+                for song in songs:
+                    cached = by_path.get(song.get("path"))
+                    if cached is not None:
+                        cached.update(
+                            {
+                                "has_lrc": song.get("has_lrc", False),
+                                "lrc_path": song.get("lrc_path"),
+                            }
+                        )
+                self.online_lyrics_panel.set_songs(self._online_catalog)
+            else:
+                self.online_lyrics_panel.set_songs(songs)
         if hasattr(self, "batch_operations_panel"):
             self.batch_operations_panel.update_scope(songs)
-    
+
     def _connect_signals(self):
         """连接信号"""
         # 文件夹树 → 歌曲列表
@@ -309,14 +325,14 @@ class MainWindow(QMainWindow):
         self.library_panel.aggregate_requested.connect(self._on_video_aggregate)
         self.library_panel.export_requested.connect(self._on_video_export)
         self.right_tabs.currentChanged.connect(self._on_right_tab_changed)
-        
+
         # 歌曲列表 → 详情面板
         self.song_list_panel.song_selected.connect(self.detail_panel.show_song)
         self.song_list_panel.song_selected.connect(self.lyrics_preview_panel.show_song)
         self.song_list_panel.song_selected.connect(self.online_lyrics_panel.show_song)
         self.lyrics_preview_panel.lyrics_saved.connect(self._on_preview_lyrics_saved)
         self.ai_chat_panel.command_requested.connect(self._on_ai_command_requested)
-        
+
         # 详情面板 → 请求识别
         self.detail_panel.transcribe_clicked.connect(self._on_transcribe_single)
         self.detail_panel.edit_lyrics_clicked.connect(self._on_edit_lyrics)
@@ -331,17 +347,17 @@ class MainWindow(QMainWindow):
         self.batch_operations_panel.batch_online_requested.connect(
             self._on_batch_online_lyrics
         )
-        
+
         # 刷新计数
         self.song_list_panel.model_updated.connect(self._refresh_statusbar)
-        
+
         self._refresh_statusbar()
     # ─── 事件处理 ─────────────────────────────
 
     def _on_open_folder(self):
         """向当前素材模式添加文件夹"""
         self.library_panel.open_directory_picker()
-    
+
     def _on_folder_selected(self, folder_path: str):
         """文件夹被选中 → 扫描当前模式的素材"""
         self._selected_material_folder = folder_path
@@ -561,6 +577,7 @@ class MainWindow(QMainWindow):
         if current_panel is self.library_panel:
             left_panel = self.lyrics_preview_panel
         elif current_panel is self.online_lyrics_panel:
+            self._refresh_online_catalog()
             left_panel = self.online_comparison_panel
         else:
             left_panel = self.song_list_panel
@@ -574,7 +591,41 @@ class MainWindow(QMainWindow):
                 self.config.video_time_offsets.pop(str(Path(folder_path).resolve()), None)
         else:
             self.config.music_dirs = directories
+        self._online_catalog_dirty = True
         config_manager.save()
+
+    def _refresh_online_catalog(self, *, force: bool = False):
+        """Load both media libraries for Online Matching and label their sources."""
+        if self._online_catalog and not self._online_catalog_dirty and not force:
+            self.online_lyrics_panel.set_songs(self._online_catalog)
+            return
+        catalog = []
+        failures = []
+        for directory in self.config.music_dirs:
+            try:
+                catalog.extend(scan_audio(directory))
+            except (OSError, ValueError) as exc:
+                failures.append(str(exc))
+        for directory in self.config.video_dirs:
+            try:
+                catalog.extend(scan_video_catalog(directory))
+            except (OSError, ValueError) as exc:
+                failures.append(str(exc))
+        unique = {song["path"]: song for song in catalog}
+        self._online_catalog = sorted(
+            unique.values(),
+            key=lambda song: (
+                song.get("material_type", "music"),
+                song.get("name", "").casefold(),
+                song["path"].casefold(),
+            ),
+        )
+        self._online_catalog_dirty = False
+        self.online_lyrics_panel.set_songs(self._online_catalog)
+        if failures:
+            self.online_lyrics_panel.status_label.setText(
+                f"部分素材目录无法读取：{failures[0]}"
+            )
 
     def _on_video_calibration_changed(self, folder_path: str, source, target):
         key = str(Path(folder_path).resolve())
@@ -626,7 +677,7 @@ class MainWindow(QMainWindow):
             "导出完成",
             f"已导出 {row_count} 条文字时间记录。\n输出文件：{output_path}",
         )
-    
+
     def _on_transcribe_single(self, file_path: str):
         """识别单首歌"""
         self._run_transcription([file_path])
@@ -768,7 +819,7 @@ class MainWindow(QMainWindow):
                 f"成功 {len(successes)} 份，失败 {len(failures)} 份。\n\n"
                 + "\n".join(unique_errors[:3]),
             )
-    
+
     def _on_transcribe_selected(self):
         """识别选中的歌曲"""
         selected = self.song_list_panel.get_selected_songs()
@@ -780,7 +831,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "选中的歌曲都已有歌词。")
             return
         self._run_transcription(files)
-    
+
     def _on_transcribe_all(self):
         """识别全部未完成素材"""
         songs = self.song_list_panel.get_all_songs()
@@ -788,22 +839,22 @@ class MainWindow(QMainWindow):
         if not files:
             QMessageBox.information(self, "提示", "当前素材均已完成识别！")
             return
-        
+
         reply = QMessageBox.question(
             self, "确认", f"将为 {len(files)} 个素材识别音轨，是否继续？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._run_transcription(files)
-    
+
     def _run_transcription(self, files: list[str]):
         """执行批量识别"""
         from ui.transcribe_worker import TranscribeWorker
-        
+
         # 检查当前配置的 Provider 是否可用
         provider_name = self.config.asr.provider
         provider = self.router.get(provider_name)
-        
+
         if not provider or not provider.is_available():
             if provider_name == "groq":
                 msg = "Groq 云端引擎不可用。\n\n请确认已设置 Groq API Key。\n免费获取: https://console.groq.com/keys"
@@ -815,22 +866,23 @@ class MainWindow(QMainWindow):
                 )
             elif provider_name == "local":
                 msg = "本地 Whisper 引擎不可用。\n\n"
-                try: import whisper
-                except ImportError: msg += "- openai-whisper 未安装: pip install openai-whisper\n"
-                else: msg += "- 模型未下载，请在设置中下载模型\n"
+                if importlib.util.find_spec("whisper") is None:
+                    msg += "- openai-whisper 未安装: pip install openai-whisper\n"
+                else:
+                    msg += "- 模型未下载，请在设置中下载模型\n"
             else:
                 msg = f"引擎 '{provider_name}' 不可用。"
             QMessageBox.warning(self, "引擎不可用", msg)
             self._on_settings()
             return
-        
+
         self.worker = TranscribeWorker(files, self.router, self.config)
         self.worker.progress.connect(self._on_transcribe_progress)
         self.worker.song_progress.connect(self._on_song_progress)
         self.worker.stage_progress.connect(self._on_stage_progress)
         self.worker.finished.connect(self._on_transcribe_finished)
         self.worker.song_done.connect(self._on_song_done)
-        
+
         self.btn_stop_transcribe.setVisible(True)
         self.trans_progress.setVisible(True)
         self.trans_progress.setRange(0, 0)
@@ -847,7 +899,7 @@ class MainWindow(QMainWindow):
         else:
             self._stop_resource_monitor()
         self.worker.start()
-    
+
     def _on_transcribe_progress(self, current: int, total: int, filename: str):
         if total > 1:
             self.total_trans_progress.setValue(current - 1)
@@ -864,16 +916,16 @@ class MainWindow(QMainWindow):
         chunk_total: int,
     ):
         self.status_label.setText(message)
-    
+
     def _on_stage_progress(self, msg: str):
         self.status_label.setText(msg)
-    
+
     def _on_stop_transcribe(self):
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.worker.requestInterruption()
             self.btn_stop_transcribe.setEnabled(False)
             self.status_label.setText("正在停止...")
-    
+
     def _on_song_done(self, file_path: str, lrc_path: str, success: bool):
         self._batch_completed += 1
         if self._transcription_total > 1:
@@ -889,19 +941,26 @@ class MainWindow(QMainWindow):
             if self.online_lyrics_panel._song.get("path") == file_path:
                 self.online_lyrics_panel.reload_local_lyrics()
         # 自动检测纯音乐：歌词太短（<20字）可能是纯音乐
-        if self.library_panel.mode == "music" and success and lrc_path and os.path.exists(lrc_path):
+        if (
+            self.library_panel.mode == "music"
+            and success
+            and lrc_path
+            and os.path.exists(lrc_path)
+        ):
             try:
                 text = Path(lrc_path).read_text(encoding="utf-8")
                 # 提取所有歌词文本（去掉时间戳和元数据）
-                import re
-                lyric_text = "".join(re.findall(r'\](\S.*)', text))
+                lyric_text = "".join(re.findall(r"\](\S.*)", text))
                 chars = len(lyric_text.replace(" ", ""))
                 if chars < 20:
                     self.song_list_panel.mark_instrumental(file_path, auto=True)
-                    self.status_label.setText(f"检测到疑似纯音乐: {Path(file_path).name} ({chars}字)")
-            except: pass
+                    self.status_label.setText(
+                        f"检测到疑似纯音乐: {Path(file_path).name} ({chars}字)"
+                    )
+            except (OSError, UnicodeError):
+                pass
         self._refresh_statusbar()
-    
+
     def _on_transcribe_finished(self, results: dict):
         self._stop_resource_monitor()
         self.btn_stop_transcribe.setVisible(False)
@@ -914,7 +973,7 @@ class MainWindow(QMainWindow):
         failed = len(results) - success
         self.status_label.setText(f"识别完成: 成功 {success}, 失败 {failed}")
         self._refresh_statusbar()
-        
+
         if failed > 0:
             # 收集实际的错误信息
             errors = []
@@ -926,7 +985,7 @@ class MainWindow(QMainWindow):
             err_detail = "\n".join(errors[:3])  # 最多显示 3 条
             if len(errors) > 3:
                 err_detail += f"\n... 还有 {len(errors)-3} 条"
-            
+
             provider_name = self.config.asr.provider
             if provider_name == "local":
                 hint = "请确认已在设置中下载模型，且 ffmpeg 已安装。"
@@ -939,25 +998,25 @@ class MainWindow(QMainWindow):
                     hint = "请检查网络连接和 Groq API Key 配置。"
             else:
                 hint = "请检查相关配置。"
-            
+
             QMessageBox.warning(
                 self, "识别完成",
                 f"成功: {success} 首\n失败: {failed} 首\n\n{err_detail}\n\n{hint}"
             )
-    
+
     def _on_edit_lyrics(self, file_path: str):
         """打开歌词编辑器"""
         from ui.lyrics_editor import LyricsEditorDialog
-        
+
         lrc_path = str(Path(file_path).with_suffix(".lrc"))
         dialog = LyricsEditorDialog(file_path, lrc_path, self)
         dialog.exec()
-        
+
         # 编辑器关闭后刷新状态
         has_lrc = os.path.exists(lrc_path)
         self.song_list_panel.update_song_status(file_path, has_lrc)
         self._refresh_statusbar()
-    
+
     def _on_settings(self, section: str = "recognition"):
         """从顶栏设置菜单打开指定分类的设置对话框。"""
         dialog = SettingsDialog(self.config, self, section=section)
@@ -1066,7 +1125,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText("请先启动 AI 模式，再使用语音输入快捷键。")
             return
         self.ai_chat_panel.toggle_voice_input()
-    
+
     def _do_restart(self):
         """重新启动应用"""
         import logging
@@ -1095,7 +1154,7 @@ class MainWindow(QMainWindow):
             logging.getLogger("linlangyuefu").error(f"重启失败: {e}")
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()
-    
+
     def _on_about(self):
         """关于对话框"""
         QMessageBox.about(

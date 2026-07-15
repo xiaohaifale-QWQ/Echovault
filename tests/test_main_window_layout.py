@@ -69,3 +69,29 @@ def test_main_window_applies_cross_merge_with_backup(monkeypatch, tmp_path):
         "[00:01.230]online one\n[00:04.50]online two\n"
     )
     assert lrc_path.with_suffix(".lrc.bak").read_text(encoding="utf-8") == local
+
+
+def test_online_catalog_includes_music_and_video(monkeypatch, tmp_path):
+    ensure_app()
+    monkeypatch.setattr("ui.main_window.config_manager.load", AppConfig)
+    monkeypatch.setattr(
+        "ui.main_window.build_environment_report",
+        lambda _config: {"ffmpeg": {"available": True}},
+    )
+    music_dir = tmp_path / "music"
+    video_dir = tmp_path / "video"
+    music_dir.mkdir()
+    video_dir.mkdir()
+    (music_dir / "Song.mp3").write_bytes(b"audio")
+    (video_dir / "Clip.mp4").write_bytes(b"video")
+    window = keep_widget(MainWindow())
+    window.config.music_dirs = [str(music_dir)]
+    window.config.video_dirs = [str(video_dir)]
+
+    window._refresh_online_catalog(force=True)
+
+    assert {song["material_type"] for song in window._online_catalog} == {
+        "music",
+        "video",
+    }
+    assert window.online_lyrics_panel.song_selector.count() == 2

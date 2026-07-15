@@ -133,3 +133,32 @@ def test_online_panel_simplifies_selected_candidate(monkeypatch, tmp_path):
     panel._show_results([match])
 
     assert comparison.online_content() == "[00:01.00]繁体歌词：爱与梦"
+
+
+def test_online_panel_separates_music_and_video_sources():
+    ensure_app()
+    panel = keep_widget(OnlineLyricsPanel())
+    panel.set_songs(
+        [
+            {
+                "name": "Audio.mp3",
+                "path": "C:/media/Audio.mp3",
+                "material_type": "music",
+            },
+            {
+                "name": "Clip.mp4",
+                "path": "C:/video/Clip.mp4",
+                "material_type": "video",
+            },
+        ]
+    )
+
+    assert [panel.song_selector.itemText(index) for index in range(2)] == [
+        "[音乐] Audio",
+        "[视频] Clip",
+    ]
+
+    panel.source_filter.setCurrentIndex(panel.source_filter.findData("video"))
+
+    assert panel.song_selector.count() == 1
+    assert panel.song_selector.itemText(0) == "[视频] Clip"

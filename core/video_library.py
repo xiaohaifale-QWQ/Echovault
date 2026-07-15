@@ -91,6 +91,44 @@ def calibration_offset_seconds(recorded_start: datetime, actual_start: datetime)
     return int((actual_start - recorded_start).total_seconds())
 
 
+def scan_video_catalog(folder: str | Path) -> list[dict]:
+    """Scan video paths for selectors without probing capture timestamps."""
+    root = Path(folder).expanduser().resolve()
+    if not root.is_dir():
+        raise NotADirectoryError(f"视频素材文件夹不存在: {root}")
+    videos = []
+    for path in root.rglob("*"):
+        if (
+            not path.is_file()
+            or path.suffix.lower() not in VIDEO_FORMATS
+            or any(
+                parent.name.startswith(AGGREGATE_DIRECTORY_PREFIX)
+                for parent in path.parents
+            )
+        ):
+            continue
+        resolved = path.resolve()
+        lrc_path = resolved.with_suffix(".lrc")
+        videos.append(
+            {
+                "path": str(resolved),
+                "name": resolved.name,
+                "material_type": "video",
+                "folder": (
+                    str(resolved.parent.relative_to(root))
+                    if resolved.parent != root
+                    else ""
+                ),
+                "size": resolved.stat().st_size,
+                "has_lrc": lrc_path.exists(),
+                "lrc_path": str(lrc_path) if lrc_path.exists() else None,
+            }
+        )
+    return sorted(
+        videos, key=lambda video: (video["name"].casefold(), video["path"].casefold())
+    )
+
+
 def scan_videos(folder: str | Path, offset_seconds: int = 0) -> list[dict]:
     """Recursively scan video material, excluding previous aggregate outputs."""
     root = Path(folder).expanduser().resolve()

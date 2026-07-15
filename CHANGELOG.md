@@ -63,6 +63,8 @@
 - LRCLIB candidates are converted from Traditional to Simplified Chinese before preview,
   merge, calibration, or batch application. AI calibration now uses the current edited left
   timeline, the current right reference text, and immediately refreshes the left result.
+- Online Matching now builds a combined catalog from configured music and video libraries,
+  labels and filters them by source, and places Start/Re-recognize beside Search LRCLIB.
 
 ## 0.3.0-dev — 2026-07-13
 

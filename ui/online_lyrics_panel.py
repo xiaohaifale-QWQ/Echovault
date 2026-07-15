@@ -341,12 +341,23 @@ class OnlineLyricsPanel(QWidget):
         heading.setStyleSheet("font-weight:bold;font-size:14px;padding:4px")
         heading_row.addWidget(heading)
         heading_row.addStretch()
+        self.transcribe_button = QPushButton("开始识别")
+        self.transcribe_button.clicked.connect(
+            lambda: self._request_action("transcribe_local")
+        )
+        heading_row.addWidget(self.transcribe_button)
         self.search_button = QPushButton("搜索 LRCLIB")
         self.search_button.clicked.connect(self._start_search)
         heading_row.addWidget(self.search_button)
         layout.addLayout(heading_row)
 
         form = QFormLayout()
+        self.source_filter = QComboBox()
+        self.source_filter.addItem("全部素材", "all")
+        self.source_filter.addItem("音乐库", "music")
+        self.source_filter.addItem("视频库", "video")
+        self.source_filter.currentIndexChanged.connect(self._rebuild_song_selector)
+        form.addRow("素材来源:", self.source_filter)
         self.song_selector = QComboBox()
         self.song_selector.setMinimumContentsLength(24)
         self.song_selector.currentIndexChanged.connect(self._on_song_selected)
@@ -397,34 +408,29 @@ class OnlineLyricsPanel(QWidget):
 
         action_group = QGroupBox("识别、应用与校准")
         action_grid = QGridLayout(action_group)
-        self.transcribe_button = QPushButton("本地暂无歌词：立即识别本地歌词")
-        self.transcribe_button.clicked.connect(
-            lambda: self._request_action("transcribe_local")
-        )
-        action_grid.addWidget(self.transcribe_button, 0, 0, 1, 2)
         self.use_local_button = QPushButton("直接应用左侧本地歌词")
         self.use_local_button.clicked.connect(lambda: self._request_action("use_local"))
-        action_grid.addWidget(self.use_local_button, 1, 0)
+        action_grid.addWidget(self.use_local_button, 0, 0)
         self.use_online_button = QPushButton("直接应用右侧在线歌词")
         self.use_online_button.clicked.connect(
             lambda: self._request_action("use_online")
         )
-        action_grid.addWidget(self.use_online_button, 1, 1)
+        action_grid.addWidget(self.use_online_button, 0, 1)
         self.merge_local_button = QPushButton("左时间轴 + 右文字")
         self.merge_local_button.clicked.connect(
             lambda: self._request_action("merge_local_timeline")
         )
-        action_grid.addWidget(self.merge_local_button, 2, 0)
+        action_grid.addWidget(self.merge_local_button, 1, 0)
         self.merge_online_button = QPushButton("右时间轴 + 左文字")
         self.merge_online_button.clicked.connect(
             lambda: self._request_action("merge_online_timeline")
         )
-        action_grid.addWidget(self.merge_online_button, 2, 1)
+        action_grid.addWidget(self.merge_online_button, 1, 1)
         self.calibrate_button = QPushButton("AI 核对并校准左侧歌词")
         self.calibrate_button.clicked.connect(
             lambda: self._request_action("calibrate")
         )
-        action_grid.addWidget(self.calibrate_button, 3, 0, 1, 2)
+        action_grid.addWidget(self.calibrate_button, 2, 0, 1, 2)
         layout.addWidget(action_group)
 
         self.status_label = QLabel("LRCLIB 只提供歌词，不提供歌曲音频。")
@@ -454,23 +460,39 @@ class OnlineLyricsPanel(QWidget):
         return self._comparison.online_content() if self._comparison is not None else ""
 
     def set_songs(self, songs: list[dict]):
-        current_path = self._song.get("path", "")
         self._songs = [dict(song) for song in songs if song.get("path")]
+        self._rebuild_song_selector()
+
+    def _rebuild_song_selector(self, *_args):
+        current_path = self._song.get("path", "")
+        source = self.source_filter.currentData()
+        visible_songs = [
+            song
+            for song in self._songs
+            if source == "all" or song.get("material_type", "music") == source
+        ]
         self.song_selector.blockSignals(True)
         self.song_selector.clear()
-        for song in self._songs:
+        for song in visible_songs:
             name = Path(song.get("name") or song["path"]).stem
-            self.song_selector.addItem(name, song)
+            material_type = song.get("material_type", "music")
+            type_name = "视频" if material_type == "video" else "音乐"
+            self.song_selector.addItem(f"[{type_name}] {name}", song)
         selected_index = next(
-            (index for index, song in enumerate(self._songs) if song.get("path") == current_path),
+            (
+                index
+                for index, song in enumerate(visible_songs)
+                if song.get("path") == current_path
+            ),
             -1,
         )
         self.song_selector.setCurrentIndex(selected_index)
         self.song_selector.blockSignals(False)
 
     def _on_song_selected(self, index: int):
-        if 0 <= index < len(self._songs):
-            self.show_song(self._songs[index], sync_selector=False)
+        song = self.song_selector.itemData(index) if index >= 0 else None
+        if song:
+            self.show_song(song, sync_selector=False)
 
     def show_song(self, song: dict, *, sync_selector: bool = True):
         if not song or not song.get("path"):
@@ -615,8 +637,10 @@ class OnlineLyricsPanel(QWidget):
         has_online_timeline = bool(timed_text_entries(online_content))
         has_online_text = bool(online_content.strip())
         has_song = bool(self._song.get("path"))
-        self.transcribe_button.setVisible(not has_local_timeline)
-        self.transcribe_button.setEnabled(has_song and not has_local_timeline)
+        self.transcribe_button.setText(
+            "重新识别" if has_local_timeline else "开始识别"
+        )
+        self.transcribe_button.setEnabled(has_song)
         self.use_local_button.setEnabled(has_local_timeline)
         self.use_online_button.setEnabled(has_online_timeline)
         self.merge_local_button.setEnabled(has_local_timeline and has_online_text)
