@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-CONFIG_SCHEMA_VERSION = 3
+CONFIG_SCHEMA_VERSION = 4
+SUPPORTED_AI_PROVIDERS = {"online", "local"}
 SUPPORTED_PROVIDERS = {"groq", "local", "xunfei"}
 SUPPORTED_LOCAL_MODELS = {"tiny", "base", "small", "medium", "large"}
 SUPPORTED_LANGUAGES = {"zh", "en", "ja", "ko"}
@@ -55,6 +56,10 @@ class AppConfig:
     ai_model_api_key: str = ""
     ai_base_url: str = "https://api.deepseek.com"
     ai_model_name: str = "deepseek-chat"
+    ai_provider: str = "online"
+    local_ai_base_url: str = "http://127.0.0.1:11434/v1"
+    local_ai_model_name: str = ""
+    local_ai_api_key: str = ""
     voice_input_shortcut: str = "Ctrl+Shift+Space"
 
     def __post_init__(self):
@@ -69,6 +74,14 @@ class AppConfig:
             self.xunfei_api_secret = os.environ.get("XUNFEI_API_SECRET", "")
         if not self.ai_model_api_key:
             self.ai_model_api_key = os.environ.get("ECHOVAULT_AI_API_KEY", "")
+        if not self.local_ai_api_key:
+            self.local_ai_api_key = os.environ.get("ECHOVAULT_LOCAL_AI_API_KEY", "")
+        self.local_ai_base_url = os.environ.get(
+            "ECHOVAULT_LOCAL_AI_BASE_URL", self.local_ai_base_url
+        )
+        self.local_ai_model_name = os.environ.get(
+            "ECHOVAULT_LOCAL_AI_MODEL", self.local_ai_model_name
+        )
 
     @property
     def has_xunfei_credentials(self) -> bool:
@@ -131,6 +144,10 @@ class ConfigManager:
             "ai_model_api_key": c.ai_model_api_key,
             "ai_base_url": c.ai_base_url,
             "ai_model_name": c.ai_model_name,
+            "ai_provider": c.ai_provider,
+            "local_ai_base_url": c.local_ai_base_url,
+            "local_ai_model_name": c.local_ai_model_name,
+            "local_ai_api_key": c.local_ai_api_key,
             "voice_input_shortcut": c.voice_input_shortcut,
             "asr": {
                 "provider": c.asr.provider,
@@ -172,6 +189,17 @@ class ConfigManager:
         )
         c.ai_base_url = data.get("ai_base_url", "https://api.deepseek.com")
         c.ai_model_name = data.get("ai_model_name", "deepseek-chat")
+        ai_provider = data.get("ai_provider", "online")
+        c.ai_provider = ai_provider if ai_provider in SUPPORTED_AI_PROVIDERS else "online"
+        c.local_ai_base_url = os.environ.get("ECHOVAULT_LOCAL_AI_BASE_URL") or data.get(
+            "local_ai_base_url", "http://127.0.0.1:11434/v1"
+        )
+        c.local_ai_model_name = os.environ.get("ECHOVAULT_LOCAL_AI_MODEL") or data.get(
+            "local_ai_model_name", ""
+        )
+        c.local_ai_api_key = os.environ.get("ECHOVAULT_LOCAL_AI_API_KEY") or data.get(
+            "local_ai_api_key", ""
+        )
         shortcut = data.get("voice_input_shortcut", "Ctrl+Shift+Space")
         c.voice_input_shortcut = shortcut if isinstance(shortcut, str) else "Ctrl+Shift+Space"
         asr_data = data.get("asr", {})
@@ -232,6 +260,16 @@ def update_config_value(config: AppConfig, key: str, value: str) -> None:
         config.ai_base_url = value.rstrip("/")
     elif key == "ai_model_name":
         config.ai_model_name = value
+    elif key == "ai_provider":
+        if value not in SUPPORTED_AI_PROVIDERS:
+            raise ValueError(f"不支持的 AI Provider: {value}")
+        config.ai_provider = value
+    elif key == "local_ai_base_url":
+        config.local_ai_base_url = value.rstrip("/")
+    elif key == "local_ai_model_name":
+        config.local_ai_model_name = value
+    elif key == "local_ai_api_key":
+        config.local_ai_api_key = value
     elif key == "voice_input_shortcut":
         config.voice_input_shortcut = value
     else:

@@ -16,6 +16,10 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     manager.config.ai_model_api_key = "ai-secret"
     manager.config.ai_base_url = "https://example.invalid"
     manager.config.ai_model_name = "test-model"
+    manager.config.ai_provider = "local"
+    manager.config.local_ai_base_url = "http://127.0.0.1:1234/v1"
+    manager.config.local_ai_model_name = "local-model"
+    manager.config.local_ai_api_key = "local-ai-secret"
     manager.config.voice_input_shortcut = "Ctrl+Alt+V"
     manager.config.music_dirs = ["D:/Music"]
     manager.config.video_dirs = ["D:/Video"]
@@ -35,6 +39,10 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     assert loaded.ai_model_api_key == "ai-secret"
     assert loaded.ai_base_url == "https://example.invalid"
     assert loaded.ai_model_name == "test-model"
+    assert loaded.ai_provider == "local"
+    assert loaded.local_ai_base_url == "http://127.0.0.1:1234/v1"
+    assert loaded.local_ai_model_name == "local-model"
+    assert loaded.local_ai_api_key == "local-ai-secret"
     assert loaded.voice_input_shortcut == "Ctrl+Alt+V"
     assert loaded.music_dirs == ["D:/Music"]
     assert loaded.video_dirs == ["D:/Video"]
@@ -55,6 +63,9 @@ def test_environment_api_key_takes_precedence(tmp_path, monkeypatch):
             "xunfei_app_id": "file-app-id",
             "xunfei_api_key": "file-xunfei",
             "xunfei_api_secret": "file-api-secret",
+            "local_ai_api_key": "file-local-ai-secret",
+            "local_ai_base_url": "http://file.invalid/v1",
+            "local_ai_model_name": "file-model",
         }),
         encoding="utf-8",
     )
@@ -62,6 +73,9 @@ def test_environment_api_key_takes_precedence(tmp_path, monkeypatch):
     monkeypatch.setenv("XUNFEI_APP_ID", "environment-app-id")
     monkeypatch.setenv("XUNFEI_API_KEY", "environment-xunfei")
     monkeypatch.setenv("XUNFEI_API_SECRET", "environment-api-secret")
+    monkeypatch.setenv("ECHOVAULT_LOCAL_AI_API_KEY", "environment-local-ai-secret")
+    monkeypatch.setenv("ECHOVAULT_LOCAL_AI_BASE_URL", "http://environment.invalid/v1")
+    monkeypatch.setenv("ECHOVAULT_LOCAL_AI_MODEL", "environment-model")
 
     loaded = ConfigManager(path).load()
 
@@ -69,6 +83,9 @@ def test_environment_api_key_takes_precedence(tmp_path, monkeypatch):
     assert loaded.xunfei_app_id == "environment-app-id"
     assert loaded.xunfei_api_key == "environment-xunfei"
     assert loaded.xunfei_api_secret == "environment-api-secret"
+    assert loaded.local_ai_api_key == "environment-local-ai-secret"
+    assert loaded.local_ai_base_url == "http://environment.invalid/v1"
+    assert loaded.local_ai_model_name == "environment-model"
 
 
 def test_update_config_value_validates_provider_and_booleans():
@@ -78,6 +95,10 @@ def test_update_config_value_validates_provider_and_booleans():
     update_config_value(config, "asr.use_gpu", "yes")
     update_config_value(config, "asr.language", "auto")
     update_config_value(config, "ai_model_api_key", "local-only-secret")
+    update_config_value(config, "ai_provider", "local")
+    update_config_value(config, "local_ai_base_url", "http://127.0.0.1:1234/v1/")
+    update_config_value(config, "local_ai_model_name", "qwen")
+    update_config_value(config, "local_ai_api_key", "optional-key")
     update_config_value(config, "xunfei_app_id", "app-id")
     update_config_value(config, "xunfei_api_key", "api-key")
     update_config_value(config, "xunfei_api_secret", "api-secret")
@@ -87,6 +108,10 @@ def test_update_config_value_validates_provider_and_booleans():
     assert config.asr.use_gpu is True
     assert config.asr.language is None
     assert config.ai_model_api_key == "local-only-secret"
+    assert config.ai_provider == "local"
+    assert config.local_ai_base_url == "http://127.0.0.1:1234/v1"
+    assert config.local_ai_model_name == "qwen"
+    assert config.local_ai_api_key == "optional-key"
     assert config.has_xunfei_credentials is True
     assert config.voice_input_shortcut == "Ctrl+Alt+V"
 
@@ -96,3 +121,5 @@ def test_update_config_value_validates_provider_and_booleans():
         update_config_value(config, "asr.use_gpu", "maybe")
     with pytest.raises(ValueError, match="未知配置项"):
         update_config_value(config, "asr.unknown", "value")
+    with pytest.raises(ValueError, match="AI Provider"):
+        update_config_value(config, "ai_provider", "unsupported")

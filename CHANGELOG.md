@@ -12,6 +12,10 @@
 
 ### Added
 
+- A fifth Settings entry for local AI, with online/local switching, Ollama and LM Studio
+  presets, an optional local bearer token, and a shared OpenAI-compatible chat interface.
+- Detailed online/local AI request schema, configuration, environment variable, security,
+  and troubleshooting documentation.
 - MCP stdio/Streamable HTTP server backed by the existing CLI whitelist, with read-only
   defaults and two-step authorization for mutating commands.
 - Detailed MCP client configuration, tool schema, security, and validation guide.

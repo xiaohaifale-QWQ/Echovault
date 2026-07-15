@@ -27,3 +27,20 @@ def test_enter_sends_and_ctrl_enter_inserts_a_newline():
 
     assert sent == [True]
     assert panel.input.toPlainText() == "\n"
+
+
+def test_panel_selects_local_ai_settings():
+    _app()
+    config = AppConfig(
+        ai_provider="local",
+        local_ai_base_url="http://127.0.0.1:1234/v1",
+        local_ai_model_name="loaded-model",
+    )
+    panel = AIChatPanel(config)
+
+    settings = panel._settings()
+
+    assert settings.provider_name == "本地 AI"
+    assert settings.base_url == "http://127.0.0.1:1234/v1"
+    assert settings.model == "loaded-model"
+    assert settings.requires_api_key is False

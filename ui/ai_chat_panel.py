@@ -274,11 +274,9 @@ class AIChatPanel(QWidget):
         self.voice_status.setVisible(True)
 
     def _settings(self) -> AISettings:
-        return AISettings(
-            api_key=self.config.ai_model_api_key,
-            base_url=self.config.ai_base_url,
-            model=self.config.ai_model_name,
-        )
+        from core.ai_assistant import settings_from_config
+
+        return settings_from_config(self.config)
 
     @staticmethod
     def _escape(text: str) -> str:

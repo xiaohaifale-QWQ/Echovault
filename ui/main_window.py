@@ -180,6 +180,9 @@ class MainWindow(QMainWindow):
         cache_settings_action = QAction("缓存", self)
         cache_settings_action.triggered.connect(lambda: self._on_settings("cache"))
         settings_menu.addAction(cache_settings_action)
+        local_ai_settings_action = QAction("本地部署 AI", self)
+        local_ai_settings_action.triggered.connect(lambda: self._on_settings("local_ai"))
+        settings_menu.addAction(local_ai_settings_action)
 
         key_action = QAction("密钥管理(&K)...", self)
         key_action.triggered.connect(self._on_key_manager)
@@ -722,11 +725,21 @@ class MainWindow(QMainWindow):
             self.outer_splitter.setSizes([0, max(1, self.width())])
             self._ai_mode_enabled = False
             return
-        if not self.config.ai_model_api_key:
+        from core.ai_assistant import settings_from_config
+
+        ai_settings = settings_from_config(self.config)
+        if ai_settings.requires_api_key and not ai_settings.api_key:
             QMessageBox.information(
                 self,
                 "AI 模式",
-                "请先在“密钥管理”中填写 DeepSeek API Key，然后再启动 AI 模式。",
+                "请先在“密钥管理”中填写在线 AI 的 API Key，然后再启动 AI 模式。",
+            )
+            return
+        if not ai_settings.base_url.strip() or not ai_settings.model.strip():
+            QMessageBox.information(
+                self,
+                "AI 模式",
+                "请先在“设置 → 本地部署 AI”中填写接口地址和模型名称。",
             )
             return
         self.ai_chat_panel.setVisible(True)

@@ -305,10 +305,14 @@ def cmd_config(args):
                 "groq_configured": bool(c.groq_api_key),
                 "xunfei_configured": c.has_xunfei_credentials,
                 "deepseek_configured": bool(c.ai_model_api_key),
+                "local_ai_key_configured": bool(c.local_ai_api_key),
             },
             "ai": {
+                "provider": c.ai_provider,
                 "base_url": c.ai_base_url,
                 "model": c.ai_model_name,
+                "local_base_url": c.local_ai_base_url,
+                "local_model": c.local_ai_model_name,
                 "voice_input_shortcut": c.voice_input_shortcut,
             },
             "asr": {
@@ -334,6 +338,7 @@ def cmd_config(args):
             "xunfei_api_key",
             "xunfei_api_secret",
             "ai_model_api_key",
+            "local_ai_api_key",
         ) else args.value
         print(f"OK: {args.key} = {shown_value}")
 
@@ -367,12 +372,12 @@ def cmd_library(args):
 
 
 def cmd_ai(args):
-    from core.ai_assistant import AISettings, chat
+    from core.ai_assistant import chat, settings_from_config
 
     config = config_manager.load()
     try:
         answer = chat(
-            AISettings(config.ai_model_api_key, config.ai_base_url, config.ai_model_name),
+            settings_from_config(config),
             args.question,
         )
     except RuntimeError as exc:

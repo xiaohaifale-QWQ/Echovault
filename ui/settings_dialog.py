@@ -238,8 +238,9 @@ class SettingsDialog(QDialog):
             "lyrics": 1,
             "shortcuts": 2,
             "cache": 3,
+            "local_ai": 4,
         }.get(self.section, 0)
-        section_title = ("语音识别", "歌词输出", "快捷键", "缓存")[section_index]
+        section_title = ("语音识别", "歌词输出", "快捷键", "缓存", "本地部署 AI")[section_index]
         self.setWindowTitle(f"偏好设置 - {section_title}"); self.setMinimumWidth(500)
         l = QVBoxLayout(self)
 
@@ -249,7 +250,8 @@ class SettingsDialog(QDialog):
         lyrics_page, lyrics_layout = self._create_settings_section("歌词输出")
         shortcut_page, shortcut_layout = self._create_settings_section("快捷键")
         cache_page, cache_layout = self._create_settings_section("缓存")
-        for page in (recognition_page, lyrics_page, shortcut_page, cache_page):
+        local_ai_page, local_ai_layout = self._create_settings_section("本地部署 AI")
+        for page in (recognition_page, lyrics_page, shortcut_page, cache_page, local_ai_page):
             self.settings_stack.addWidget(page)
         l.addWidget(self.settings_stack)
         self.settings_stack.setCurrentIndex(section_index)
@@ -417,6 +419,40 @@ class SettingsDialog(QDialog):
         cache_layout.addWidget(cache_group)
         cache_layout.addStretch()
 
+        local_ai_group = QGroupBox("OpenAI 兼容接口")
+        local_ai_form = QFormLayout(local_ai_group)
+        self.ai_provider_combo = QComboBox()
+        self.ai_provider_combo.addItem("在线 AI（密钥管理中的 DeepSeek）", "online")
+        self.ai_provider_combo.addItem("本地部署 AI", "local")
+        local_ai_form.addRow("AI 来源:", self.ai_provider_combo)
+
+        self.local_ai_preset = QComboBox()
+        self.local_ai_preset.addItem("自定义", "custom")
+        self.local_ai_preset.addItem("Ollama", "http://127.0.0.1:11434/v1")
+        self.local_ai_preset.addItem("LM Studio", "http://127.0.0.1:1234/v1")
+        self.local_ai_preset.currentIndexChanged.connect(self._apply_local_ai_preset)
+        local_ai_form.addRow("快速预设:", self.local_ai_preset)
+
+        self.local_ai_base_url_input = QLineEdit()
+        self.local_ai_base_url_input.setPlaceholderText("http://127.0.0.1:11434/v1")
+        local_ai_form.addRow("接口地址:", self.local_ai_base_url_input)
+        self.local_ai_model_input = QLineEdit()
+        self.local_ai_model_input.setPlaceholderText("例如 qwen3:8b 或当前已加载模型名")
+        local_ai_form.addRow("模型名称:", self.local_ai_model_input)
+        self.local_ai_key_input = QLineEdit()
+        self.local_ai_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.local_ai_key_input.setPlaceholderText("可选；本地服务要求鉴权时再填写")
+        local_ai_form.addRow("API Key:", self.local_ai_key_input)
+        local_ai_hint = QLabel(
+            "软件调用标准的 /v1/chat/completions 接口。Ollama、LM Studio 和其他 OpenAI "
+            "兼容服务均可接入；本地接口默认不要求 API Key。"
+        )
+        local_ai_hint.setWordWrap(True)
+        local_ai_hint.setStyleSheet("font-size:11px;color:#666")
+        local_ai_form.addRow("", local_ai_hint)
+        local_ai_layout.addWidget(local_ai_group)
+        local_ai_layout.addStretch()
+
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btns.accepted.connect(self._save); btns.rejected.connect(self.reject); l.addWidget(btns)
 
@@ -443,9 +479,20 @@ class SettingsDialog(QDialog):
         self.gpu_check.setChecked(c.asr.use_gpu)
         if c.output_lrc_dir: self.lrc_input.setText(c.output_lrc_dir)
         self.voice_shortcut_edit.setKeySequence(QKeySequence(c.voice_input_shortcut))
-        # 自动扫描显卡
-        self._on_scan_gpu()
+        ai_provider_index = self.ai_provider_combo.findData(c.ai_provider)
+        self.ai_provider_combo.setCurrentIndex(max(0, ai_provider_index))
+        self.local_ai_base_url_input.setText(c.local_ai_base_url)
+        self.local_ai_model_input.setText(c.local_ai_model_name)
+        self.local_ai_key_input.setText(c.local_ai_api_key)
+        # 仅打开语音识别分类时扫描显卡，避免其他设置页启动无关后台任务。
+        if self.section == "recognition":
+            self._on_scan_gpu()
         self._refresh_cloud_provider_state()
+
+    def _apply_local_ai_preset(self, index: int):
+        endpoint = self.local_ai_preset.itemData(index)
+        if endpoint and endpoint != "custom":
+            self.local_ai_base_url_input.setText(endpoint)
 
     def _on_prov(self, idx):
         is_local = self.provider_combo.itemData(idx) == "local"
@@ -714,5 +761,9 @@ class SettingsDialog(QDialog):
         d = self.lrc_input.text().strip(); c.output_lrc_dir = d if d else None
         shortcut = self.voice_shortcut_edit.keySequence().toString().strip()
         c.voice_input_shortcut = shortcut or "Ctrl+Shift+Space"
+        c.ai_provider = self.ai_provider_combo.currentData()
+        c.local_ai_base_url = self.local_ai_base_url_input.text().strip().rstrip("/")
+        c.local_ai_model_name = self.local_ai_model_input.text().strip()
+        c.local_ai_api_key = self.local_ai_key_input.text().strip()
         config_manager.config = c; config_manager.save()
         self.accept()

@@ -25,7 +25,7 @@
 | 视频时间 | 读取视频时间元数据；左、右时间可精确编辑到秒；使用小时偏移快速校准并导出视频文字时间轴。 |
 | LRC | 生成、繁转简、编辑、时间戳调整、歌词预览与同名 LRC 自动刷新。 |
 | 密钥管理 | 顶栏集中管理 Groq、讯飞和 DeepSeek Key；Key 仅保存在当前 Windows 用户的本机配置中。 |
-| AI 助手 | 可展开的最左侧聊天栏，默认调用 DeepSeek，并在每次对话中加载内置使用手册与系统提示词。 |
+| AI 助手 | 可展开的最左侧聊天栏，可切换 DeepSeek 或本地 OpenAI 兼容模型，并在每次对话中加载内置使用手册与系统提示词。 |
 | 同步 | LocalSend 接收端、文件夹差异比较、单向/双向/镜像同步与冲突确认。 |
 | CLI | 支持识别、配置、模型、GPU 和环境诊断命令，并提供 JSON 输出。 |
 
@@ -34,7 +34,7 @@
 - 使用本地 Whisper 时，音频与模型均在本机处理。
 - 使用 Groq 在线识别时，待识别音频会发送给 Groq API；请只对允许上传的素材使用该模式。
 - API Key 不写入项目、源码、Git 或日志，保存在 `~/.music-lyrics-sync/config.json`。该文件属于当前 Windows 用户，应妥善保护。
-- AI 模式默认调用 DeepSeek；只有手动启动 AI 模式并发送消息时才会发起请求。
+- AI 模式默认调用 DeepSeek；切换到本地 AI 后只访问用户填写的本地兼容接口。
 
 ## 快速开始（源码运行）
 
@@ -98,7 +98,9 @@ Groq 连接失败时会区分 Key 无效、调用额度不足和 `api.groq.com:4
 
 ### 4. AI 模式
 
-点击顶栏“AI 模式”，在弹出的菜单中选择“启动”。已填写 DeepSeek Key 时，主窗口最左侧会出现聊天栏；再次点击“AI 模式 → 关闭”即可收起。AI 每次请求都会读取内置的 Echovault 使用手册和系统提示词，因此可以介绍软件、解释界面或给出 CLI 操作建议。
+点击顶栏“AI 模式”，在弹出的菜单中选择“启动”。在线模式需先填写 DeepSeek Key；本地模式在“设置 → 本地部署 AI”中选择 Ollama、LM Studio 预设或自定义 OpenAI 兼容接口，并填写模型名称，本地 Key 可留空。主窗口最左侧会出现聊天栏；再次点击“AI 模式 → 关闭”即可收起。
+
+完整请求格式、配置字段与故障排查见 [AI 接口与本地模型接入指南](docs/AI接口与本地模型接入指南.md)。
 
 ### 5. 视频时间校准与汇总
 
@@ -146,7 +148,7 @@ python main.py library select-all on --mode music
 python main.py video calibrate E:\\video --source 2026-07-15T10:00:00 --target 2026-07-15T12:00:00
 python main.py video timeline E:\\video
 
-# 内置 DeepSeek 助手
+# 内置 AI 助手（使用设置中选中的在线或本地接口）
 python main.py ai chat "这个软件如何离线识别？"
 ```
 

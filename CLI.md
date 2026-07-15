@@ -238,11 +238,18 @@ python main.py config set <key> <value>
 
 | 配置键 | 可选值 | 说明 |
 |--------|--------|------|
-| `asr.provider` | `groq` / `local` | 识别引擎 |
+| `asr.provider` | `groq` / `xunfei` / `local` | 识别引擎 |
 | `asr.local_model` | `tiny` / `base` / `small` / `medium` | 本地模型大小 |
 | `asr.language` | `zh` / `en` / `ja` / `ko` / `null` | 默认语言 |
 | `asr.use_gpu` | `true` / `false` | GPU 加速开关 |
 | `groq_api_key` | API Key 字符串 | Groq API Key |
+| `ai_provider` | `online` / `local` | AI 助手来源 |
+| `ai_model_api_key` | API Key 字符串 | 在线 AI Key |
+| `ai_base_url` | URL | 在线 AI 的 OpenAI 兼容接口根地址 |
+| `ai_model_name` | 模型 ID | 在线 AI 模型 |
+| `local_ai_base_url` | URL | 本地 AI 的 OpenAI 兼容接口根地址 |
+| `local_ai_model_name` | 模型 ID | 本地服务已加载的模型 |
+| `local_ai_api_key` | 可选 API Key | 本地兼容服务的 Bearer Key |
 | `output_lrc_dir` | 路径 或 `none` | LRC 输出目录 |
 | `music_dirs` | 文件夹路径 | 默认音乐目录 |
 
@@ -256,6 +263,11 @@ python main.py config set asr.language zh
 
 # 启用 GPU
 python main.py config set asr.use_gpu true
+
+# 切换到本地 Ollama 模型
+python main.py config set ai_provider local
+python main.py config set local_ai_base_url http://127.0.0.1:11434/v1
+python main.py config set local_ai_model_name qwen3:8b
 ```
 
 #### 3.5.3 `config path` — 配置文件路径
