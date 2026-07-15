@@ -1,18 +1,15 @@
-from PyQt6.QtWidgets import QApplication, QLabel
+from PyQt6.QtWidgets import QLabel
 
 from core.config import AppConfig, config_manager
+from tests.qt_test_app import ensure_app, keep_widget
 from ui.key_manager_dialog import KeyManagerDialog
 
 
-def _app():
-    return QApplication.instance() or QApplication([])
-
-
 def test_key_manager_saves_all_keys_locally(tmp_path, monkeypatch):
-    _app()
+    ensure_app()
     monkeypatch.setattr(config_manager, "config_path", tmp_path / "config.json")
     config = AppConfig()
-    dialog = KeyManagerDialog(config)
+    dialog = keep_widget(KeyManagerDialog(config))
     dialog.groq_input.setText("groq-key")
     dialog.groq_proxy_input.setText("http://127.0.0.1:7890")
     dialog.xunfei_app_id_input.setText("xunfei-app-id")
@@ -37,8 +34,8 @@ def test_key_manager_saves_all_keys_locally(tmp_path, monkeypatch):
 
 
 def test_provider_names_link_to_their_official_consoles():
-    _app()
-    dialog = KeyManagerDialog(AppConfig())
+    ensure_app()
+    dialog = keep_widget(KeyManagerDialog(AppConfig()))
     links = {label.text() for label in dialog.findChildren(QLabel) if "href=" in label.text()}
 
     assert any("https://console.groq.com/keys" in link for link in links)

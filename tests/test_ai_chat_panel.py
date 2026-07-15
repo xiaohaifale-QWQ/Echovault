@@ -3,16 +3,13 @@ from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QApplication
 
 from core.config import AppConfig
+from tests.qt_test_app import ensure_app, keep_widget
 from ui.ai_chat_panel import AIChatPanel
 
 
-def _app():
-    return QApplication.instance() or QApplication([])
-
-
 def test_enter_sends_and_ctrl_enter_inserts_a_newline():
-    _app()
-    panel = AIChatPanel(AppConfig())
+    ensure_app()
+    panel = keep_widget(AIChatPanel(AppConfig()))
     sent = []
     panel.input.send_requested.connect(lambda: sent.append(True))
 
@@ -30,13 +27,13 @@ def test_enter_sends_and_ctrl_enter_inserts_a_newline():
 
 
 def test_panel_selects_local_ai_settings():
-    _app()
+    ensure_app()
     config = AppConfig(
         ai_provider="local",
         local_ai_base_url="http://127.0.0.1:1234/v1",
         local_ai_model_name="loaded-model",
     )
-    panel = AIChatPanel(config)
+    panel = keep_widget(AIChatPanel(config))
 
     settings = panel._settings()
 

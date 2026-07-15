@@ -3,5 +3,4 @@
 # Groq Whisper 云端识别
 groq>=0.9.0,<1
 
-# 讯飞极速录音转写 HTTP 客户端
-requests>=2.31.0,<3
+# 讯飞 HTTP 客户端已放在基础依赖中，因为桌面程序会加载该 Provider。

@@ -12,6 +12,9 @@ pydub>=0.25.1,<1
 mutagen>=1.47.0,<2
 opencc-python-reimplemented>=0.1.7,<1
 
+# 讯飞极速录音转写 Provider 会随基础桌面程序加载
+requests>=2.31.0,<3
+
 # 文件同步与 LocalSend
 aiohttp>=3.9.0,<4
 zeroconf>=0.131.0,<1

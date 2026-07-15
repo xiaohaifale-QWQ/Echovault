@@ -5,7 +5,10 @@ import pytest
 from core.asr.xunfei_transcription import XunfeiTranscriptionProvider
 
 
-def test_xunfei_requires_all_three_credentials():
+def test_xunfei_requires_all_three_credentials(monkeypatch):
+    monkeypatch.delenv("XUNFEI_APP_ID", raising=False)
+    monkeypatch.delenv("XUNFEI_API_KEY", raising=False)
+    monkeypatch.delenv("XUNFEI_API_SECRET", raising=False)
     assert not XunfeiTranscriptionProvider(app_id="app", api_key="key").is_available()
     assert XunfeiTranscriptionProvider(
         app_id="app", api_key="key", api_secret="secret"

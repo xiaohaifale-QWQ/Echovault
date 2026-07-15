@@ -3,8 +3,6 @@
 import os
 from collections.abc import Mapping
 
-import torch
-
 
 def _convert_hf_state_dict(state_dict: Mapping[str, object]) -> dict[str, object]:
     """Convert Hugging Face Whisper parameter names to openai-whisper names."""
@@ -45,14 +43,15 @@ def _convert_hf_state_dict(state_dict: Mapping[str, object]) -> dict[str, object
 
 
 def load_hf_whisper(model_name, cache_dir=None, device="cpu"):
+    import torch
+    import whisper
+
     if cache_dir is None:
         cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
 
     model_file = os.path.join(cache_dir, f"{model_name}.pt")
     if not os.path.exists(model_file):
         raise FileNotFoundError(f"Model not found: {model_file}")
-
-    import whisper
 
     ckpt = torch.load(model_file, map_location="cpu")
 

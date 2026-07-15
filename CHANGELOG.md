@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Clean CI/base installations now include the Requests dependency required while loading
+  the Xunfei provider, while the optional Torch runtime is imported only when a local
+  Whisper model is actually loaded; official checkout/setup actions now use Node 24.
 - Packaged offline translation now keeps Argos diagnostic logging out of the structured
   CLI capture file, so AI/MCP callers always receive parseable JSON.
 - Xunfei Speed Transcription now uses the documented `zh_cn` language modes, accepts

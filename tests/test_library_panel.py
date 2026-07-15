@@ -1,18 +1,14 @@
 from datetime import datetime
 
 from PyQt6.QtCore import QDateTime
-from PyQt6.QtWidgets import QApplication
 
+from tests.qt_test_app import ensure_app, keep_widget
 from ui.library_panel import LibraryPanel
 
 
-def _app():
-    return QApplication.instance() or QApplication([])
-
-
 def test_inline_video_calibration_uses_empty_right_time_as_no_calibration(tmp_path):
-    _app()
-    panel = LibraryPanel()
+    ensure_app()
+    panel = keep_widget(LibraryPanel())
     video = {
         "name": "camera.mp4",
         "path": str(tmp_path / "camera.mp4"),
@@ -34,16 +30,16 @@ def test_inline_video_calibration_uses_empty_right_time_as_no_calibration(tmp_pa
 
 
 def test_double_clicking_folder_opens_a_new_material_column(tmp_path):
-    _app()
+    app = ensure_app()
     root = tmp_path / "root"
     child = root / "child"
     child.mkdir(parents=True)
     (child / "audio.mp3").write_bytes(b"")
-    panel = LibraryPanel()
+    panel = keep_widget(LibraryPanel())
     panel.resize(600, 600)
     panel.set_directories([str(root)], [])
     panel.show()
-    _app().processEvents()
+    app.processEvents()
 
     assert len(panel.folder_browser._columns) == 2
     assert panel.folder_browser._columns[1][1].count() == 1
@@ -64,8 +60,8 @@ def test_double_clicking_folder_opens_a_new_material_column(tmp_path):
 
 
 def test_hour_offset_fills_right_time_and_tracks_left_time(tmp_path):
-    _app()
-    panel = LibraryPanel()
+    ensure_app()
+    panel = keep_widget(LibraryPanel())
     recorded = datetime(2026, 7, 14, 10, 0, 0)
     panel.set_video_materials(
         str(tmp_path),
@@ -82,8 +78,8 @@ def test_hour_offset_fills_right_time_and_tracks_left_time(tmp_path):
 
 
 def test_select_all_is_tracked_per_material_mode():
-    _app()
-    panel = LibraryPanel()
+    ensure_app()
+    panel = keep_widget(LibraryPanel())
     changes = []
     panel.select_all_changed.connect(lambda mode, selected: changes.append((mode, selected)))
 
@@ -99,8 +95,8 @@ def test_select_all_is_tracked_per_material_mode():
 
 
 def test_select_all_precedes_add_folder_and_mode_text_is_on_the_switch():
-    _app()
-    panel = LibraryPanel()
+    ensure_app()
+    panel = keep_widget(LibraryPanel())
 
     select_all_index = panel.folder_header.indexOf(panel.select_all_check)
     add_folder_index = panel.folder_header.indexOf(panel.btn_add)
@@ -109,12 +105,12 @@ def test_select_all_precedes_add_folder_and_mode_text_is_on_the_switch():
 
 
 def test_removing_added_root_keeps_source_files_and_refreshes_roots(tmp_path):
-    _app()
+    ensure_app()
     root = tmp_path / "music"
     root.mkdir()
     source = root / "song.mp3"
     source.write_bytes(b"audio")
-    panel = LibraryPanel()
+    panel = keep_widget(LibraryPanel())
     changes = []
     selected = []
     panel.directories_changed.connect(lambda mode, directories: changes.append((mode, directories)))
@@ -129,15 +125,15 @@ def test_removing_added_root_keeps_source_files_and_refreshes_roots(tmp_path):
 
 
 def test_few_material_columns_expand_to_fill_the_available_width(tmp_path):
-    _app()
+    app = ensure_app()
     root = tmp_path / "root"
     root.mkdir()
     (root / "song.mp3").write_bytes(b"")
-    panel = LibraryPanel()
+    panel = keep_widget(LibraryPanel())
     panel.resize(900, 600)
     panel.set_directories([str(root)], [])
     panel.show()
-    _app().processEvents()
+    app.processEvents()
 
     columns = [listing.parentWidget() for _, listing in panel.folder_browser._columns]
     assert len(columns) == 2

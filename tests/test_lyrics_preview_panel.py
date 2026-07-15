@@ -1,15 +1,10 @@
-from PyQt6.QtWidgets import QApplication
-
+from tests.qt_test_app import ensure_app, keep_widget
 from ui.lyrics_preview_panel import LyricsPreviewPanel
 
 
-def _app():
-    return QApplication.instance() or QApplication([])
-
-
 def test_preview_shows_not_recognized_for_material_without_lrc(tmp_path):
-    _app()
-    panel = LyricsPreviewPanel()
+    ensure_app()
+    panel = keep_widget(LyricsPreviewPanel())
     panel.show_song(
         {
             "name": "clip.mp4",
@@ -22,10 +17,10 @@ def test_preview_shows_not_recognized_for_material_without_lrc(tmp_path):
 
 
 def test_double_click_edit_mode_saves_lrc_in_place(tmp_path):
-    _app()
+    ensure_app()
     lrc_path = tmp_path / "clip.lrc"
     lrc_path.write_text("[00:01.00]原歌词", encoding="utf-8")
-    panel = LyricsPreviewPanel()
+    panel = keep_widget(LyricsPreviewPanel())
     panel.show_song({"name": "clip.mp4", "lrc_path": str(lrc_path), "has_lrc": True})
 
     panel._start_editing()
