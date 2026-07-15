@@ -19,9 +19,14 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+CLI_OUTPUT_PATH_ENV = "ECHOVAULT_CLI_OUTPUT_PATH"
+
 def _configure_utf8_stream(stream):
     """Return a writable UTF-8 stream, including in windowed executables."""
     if stream is None:
+        output_path = os.environ.get(CLI_OUTPUT_PATH_ENV, "").strip()
+        if output_path:
+            return open(output_path, "a", encoding="utf-8", newline="\n")
         return open(os.devnull, "w", encoding="utf-8")
     if getattr(stream, "encoding", None) == "utf-8":
         return stream

@@ -24,6 +24,7 @@ if not ffprobe_path or not Path(ffprobe_path).is_file():
 hidden_imports = [
     "groq",
     "opencc",
+    "psutil",
     "PyQt6.QtMultimedia",
     "torch",
     "zeroconf",
@@ -46,7 +47,6 @@ a = Analysis(
         "matplotlib",
         "pandas",
         "PIL",
-        "psutil",
         "torchaudio",
         "torchvision",
     ],

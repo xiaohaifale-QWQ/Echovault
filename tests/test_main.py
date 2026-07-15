@@ -1,4 +1,4 @@
-from main import _configure_utf8_stream
+from main import CLI_OUTPUT_PATH_ENV, _configure_utf8_stream
 
 
 class FakeStream:
@@ -28,3 +28,16 @@ def test_configure_utf8_stream_reconfigures_console():
 
     assert result is stream
     assert stream.options == {"encoding": "utf-8", "errors": "replace"}
+
+
+def test_configure_utf8_stream_captures_windowed_cli_output(tmp_path, monkeypatch):
+    output_path = tmp_path / "cli-output.log"
+    monkeypatch.setenv(CLI_OUTPUT_PATH_ENV, str(output_path))
+
+    stream = _configure_utf8_stream(None)
+    try:
+        stream.write("诊断结果")
+    finally:
+        stream.close()
+
+    assert output_path.read_text(encoding="utf-8") == "诊断结果"

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+
+- Windows CI test jobs now install ffmpeg/ffprobe before running the audio integration test.
+- The PyInstaller directory build now bundles `psutil`, so packaged local-ASR resource
+  monitoring can report CPU and memory usage instead of placeholders.
+- Windowed builds now return captured CLI output to the in-app AI command bridge without
+  showing a console window or exposing API keys.
+
 ### Added
 
 - Versioned UTF-8 JSON Lines protocol and a standalone ASR Worker diagnostic process.

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from core.process_utils import hidden_window_kwargs
 
+CLI_OUTPUT_PATH_ENV = "ECHOVAULT_CLI_OUTPUT_PATH"
 _DIRECTIVE = re.compile(r"\[\[ECHOVAULT_CLI:\s*(.+?)\s*\]\]", re.DOTALL)
 _UNSAFE_CHARS = frozenset(";&|><`$")
 _READ_ONLY = {
@@ -53,20 +56,35 @@ def validate_cli_command(command: str) -> CLICommand:
 
 
 def run_cli_command(command: CLICommand, timeout: int = 180) -> str:
+    output_path: Path | None = None
+    child_environment = None
     if getattr(sys, "frozen", False):
         invocation = [sys.executable]
+        handle, raw_output_path = tempfile.mkstemp(prefix="echovault-cli-", suffix=".log")
+        os.close(handle)
+        output_path = Path(raw_output_path)
+        child_environment = os.environ.copy()
+        child_environment[CLI_OUTPUT_PATH_ENV] = raw_output_path
     else:
         invocation = [sys.executable, str(Path(__file__).resolve().parents[1] / "main.py")]
-    completed = subprocess.run(
-        [*invocation, *command.args],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
-        **hidden_window_kwargs(),
-    )
-    output = (completed.stdout or completed.stderr).strip()
-    if completed.returncode:
-        raise RuntimeError(output or f"CLI 返回错误码 {completed.returncode}。")
-    return output or "命令执行完成。"
+    try:
+        completed = subprocess.run(
+            [*invocation, *command.args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            env=child_environment,
+            **hidden_window_kwargs(),
+        )
+        captured = ""
+        if output_path is not None and output_path.exists():
+            captured = output_path.read_text(encoding="utf-8", errors="replace")
+        output = (captured or completed.stdout or completed.stderr).strip()
+        if completed.returncode:
+            raise RuntimeError(output or f"CLI 返回错误码 {completed.returncode}。")
+        return output or "命令执行完成。"
+    finally:
+        if output_path is not None:
+            output_path.unlink(missing_ok=True)
