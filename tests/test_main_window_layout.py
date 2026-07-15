@@ -21,6 +21,8 @@ def test_main_window_has_six_right_tabs_and_no_scattered_batch_buttons(monkeypat
         window.right_tabs.tabText(index)
         for index in range(window.right_tabs.count())
     ] == ["详情", "素材库", "在线匹配", "人声分离", "批量处理", "同步"]
+    assert window.model_library_action.text() == "模型库"
+    assert window.model_library_action in window.menuBar().actions()
     assert not hasattr(window.song_list_panel, "btn_batch")
     assert not hasattr(window.detail_panel, "btn_batch_translate")
 

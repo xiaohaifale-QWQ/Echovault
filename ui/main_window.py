@@ -45,6 +45,7 @@ from ui.help_dialog import HelpDialog
 from ui.key_manager_dialog import KeyManagerDialog
 from ui.library_panel import LibraryPanel
 from ui.lyrics_preview_panel import LyricsPreviewPanel
+from ui.model_library_dialog import ModelLibraryDialog
 from ui.online_lyrics_panel import (
     LyricsCalibrationWorker,
     OnlineLyricsComparisonPane,
@@ -123,7 +124,10 @@ class MainWindow(QMainWindow):
         self.online_lyrics_panel.bind_comparison_pane(self.online_comparison_panel)
         self.right_tabs.addTab(self.online_lyrics_panel, "在线匹配")
 
-        self.vocal_separation_panel = VocalSeparationPanel()
+        self.vocal_separation_panel = VocalSeparationPanel(self.config)
+        self.vocal_separation_panel.model_library_requested.connect(
+            self._on_model_library
+        )
         self.right_tabs.addTab(self.vocal_separation_panel, "人声分离")
 
         self.batch_operations_panel = BatchOperationsPanel(self.config)
@@ -223,6 +227,10 @@ class MainWindow(QMainWindow):
         self.ai_mode_action = QAction("AI 模式", self)
         self.ai_mode_action.triggered.connect(self._show_ai_mode_menu)
         menubar.addAction(self.ai_mode_action)
+
+        self.model_library_action = QAction("模型库", self)
+        self.model_library_action.triggered.connect(self._on_model_library)
+        menubar.addAction(self.model_library_action)
 
         # 帮助菜单
         help_menu = menubar.addMenu("帮助(&H)")
@@ -1092,6 +1100,7 @@ class MainWindow(QMainWindow):
             self._configure_voice_input_shortcut()
             self.detail_panel.reload_translation_settings()
             self.batch_operations_panel.reload_translation_settings()
+            self.vocal_separation_panel.reload_settings()
             self._refresh_statusbar()
 
     def _on_key_manager(self):
@@ -1231,3 +1240,10 @@ class MainWindow(QMainWindow):
         """Show offline documentation bundled into the desktop UI."""
         self.help_dialog = HelpDialog(self)
         self.help_dialog.exec()
+
+    def _on_model_library(self):
+        dialog = ModelLibraryDialog(self, config=self.config)
+        result = dialog.exec()
+        if result == ModelLibraryDialog.OPEN_ASR_SETTINGS:
+            self._on_settings("recognition")
+        self.vocal_separation_panel.reload_settings()

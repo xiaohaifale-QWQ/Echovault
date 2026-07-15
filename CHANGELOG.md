@@ -5,8 +5,9 @@
 ### Fixed
 
 - Local lyric playback and the two-stem preview now expose the actual Windows output device,
-  rebind and unmute it immediately before playback, refresh after device hot-plug, and report
-  the selected speaker or decoder errors instead of silently playing through the wrong device.
+  remember an explicit choice, avoid known virtual defaults when a physical speaker is available,
+  rebind and unmute it immediately before playback, refresh after hot-plug, and report decoder
+  errors instead of silently playing through the wrong device.
 - Batch recognition, translation, and online matching now stream the current file, active
   stage, per-item result, overall progress, and final success/failure counts into the Batch
   workspace instead of showing most work only in the status bar after completion.
@@ -31,12 +32,15 @@
 
 ### Added
 
+- A top-level Model Library beside AI Mode and Help opens two white cards for text-recognition
+  and audio-separation models. Each card includes its CPU/GPU-shared models and the matching
+  GPU runtime status or configuration entry.
 - A verified Demucs model catalog and real separation core that produces lossless vocal and
   accompaniment stems, reports processing stages, supports cancellation, and renders an
   independently volume-adjusted mix through the bundled ffmpeg.
 - A unified searchable model library for local Whisper recognition and Demucs separation,
   including model purpose, speed, quality, size, installation state, verified downloads,
-  retry, cancellation, and direct access from Recognition settings.
+  retry, cancellation, and direct access from the main menu bar.
 - A sixth right-side Vocal Separation workspace with processing settings above a synchronized
   two-waveform mixer, shared seek/playback, independent accompaniment/vocal volumes, and
   lossless export of the adjusted mix.
@@ -77,8 +81,9 @@
 
 ### Changed
 
-- The vocal mixer now aligns accompaniment and vocal volume rows, provides separate atomic
-  export buttons for each stem, and places the adjusted combined-result export on its own row.
+- The vocal mixer now aligns accompaniment and vocal volume rows and uses one larger adjusted-
+  result button. The upper form uses the material selected on the left, removes redundant
+  material/mode rows, and can output both stems, vocals only, or accompaniment only.
 - The existing “Enable Demucs vocal separation” recognition option now runs the selected
   local ASR against a temporary vocal stem and cleans all intermediate files, instead of
   being a saved but unused setting.

@@ -89,8 +89,11 @@ class TranscribeWorker(QThread):
                     overwrite=True,
                     progress_callback=on_stage,
                     use_vocal_separation=self.config.asr.use_vocal_separation,
+                    separation_model=self.config.asr.vocal_separation_model,
                     separation_device=(
-                        recommended_device() if self.config.asr.use_gpu else "cpu"
+                        recommended_device()
+                        if self.config.asr.vocal_separation_use_gpu
+                        else "cpu"
                     ),
                 )
                 self._results[file_path] = {"success": True, "lrc_path": lrc_path, "error": None}

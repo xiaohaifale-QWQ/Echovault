@@ -349,8 +349,11 @@ def transcribe_and_save_lrc(
                 separation_temp_dir,
                 model=separation_model,
                 device=separation_device,
+                output_content="vocals",
                 progress=on_separation_progress,
             )
+            if result.vocals_path is None:
+                raise RuntimeError("人声分离未生成可识别的人声音轨")
             recognition_path = str(result.vocals_path)
         except Exception:
             shutil.rmtree(separation_temp_dir, ignore_errors=True)

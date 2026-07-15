@@ -28,11 +28,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.config import config_manager
 from core.vocal_separation import (
     SEPARATION_MODELS,
     SeparationCancelled,
     SeparationResult,
-    export_stem,
     mix_stems,
     recommended_device,
     separate_vocals,
@@ -40,19 +40,27 @@ from core.vocal_separation import (
     separation_model_installed,
 )
 from ui.audio_device_combo import AudioDeviceCombo
-from ui.model_library_dialog import ModelLibraryDialog
 
 
 class SeparationWorker(QThread):
     progress = pyqtSignal(int, str)
     completed = pyqtSignal(bool, object)
 
-    def __init__(self, input_path: str, output_dir: str, model: str, device: str, parent=None):
+    def __init__(
+        self,
+        input_path: str,
+        output_dir: str,
+        model: str,
+        device: str,
+        output_content: str,
+        parent=None,
+    ):
         super().__init__(parent)
         self.input_path = input_path
         self.output_dir = output_dir
         self.model = model
         self.device = device
+        self.output_content = output_content
 
     def run(self):
         try:
@@ -61,6 +69,7 @@ class SeparationWorker(QThread):
                 self.output_dir,
                 model=self.model,
                 device=self.device,
+                output_content=self.output_content,
                 progress=lambda percent, message: self.progress.emit(percent, message),
                 cancelled=self.isInterruptionRequested,
             )
@@ -99,22 +108,6 @@ class MixExportWorker(QThread):
                 vocal_volume=self.vocal_volume,
                 accompaniment_volume=self.accompaniment_volume,
             )
-            self.completed.emit(True, str(result))
-        except Exception as exc:
-            self.completed.emit(False, str(exc))
-
-
-class StemExportWorker(QThread):
-    completed = pyqtSignal(bool, str)
-
-    def __init__(self, source_path: str, output_path: str, parent=None):
-        super().__init__(parent)
-        self.source_path = source_path
-        self.output_path = output_path
-
-    def run(self):
-        try:
-            result = export_stem(self.source_path, self.output_path)
             self.completed.emit(True, str(result))
         except Exception as exc:
             self.completed.emit(False, str(exc))
@@ -201,10 +194,13 @@ class WaveformView(QWidget):
 class VocalSeparationPanel(QWidget):
     """Separation settings above, synchronized stem mixer below."""
 
+    model_library_requested = pyqtSignal()
+
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
         self.config = config
         self._songs: list[dict] = []
+        self._selected_path = ""
         self._result: SeparationResult | None = None
         self._seeking = False
         self._setup_players()
@@ -220,8 +216,11 @@ class VocalSeparationPanel(QWidget):
         self.accompaniment_audio.setVolume(1.0)
         self.vocal_audio.setVolume(1.0)
         self.accompaniment_player.positionChanged.connect(self._position_changed)
+        self.vocal_player.positionChanged.connect(self._position_changed)
         self.accompaniment_player.durationChanged.connect(self._duration_changed)
+        self.vocal_player.durationChanged.connect(self._duration_changed)
         self.accompaniment_player.playbackStateChanged.connect(self._play_state_changed)
+        self.vocal_player.playbackStateChanged.connect(self._play_state_changed)
         self.accompaniment_player.errorOccurred.connect(
             lambda _error, message: self._player_error("伴奏", message)
         )
@@ -236,15 +235,10 @@ class VocalSeparationPanel(QWidget):
 
         settings_group = QGroupBox("处理设置")
         form = QFormLayout(settings_group)
-        self.song_combo = QComboBox()
-        self.song_combo.currentIndexChanged.connect(self._song_changed)
-        form.addRow("处理素材:", self.song_combo)
-
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItem("分离原声人声与伴奏", "separate")
-        form.addRow("处理模式:", self.mode_combo)
         self.output_type_combo = QComboBox()
         self.output_type_combo.addItem("人声 + 伴奏（推荐）", "both")
+        self.output_type_combo.addItem("仅人声", "vocals")
+        self.output_type_combo.addItem("仅伴奏", "accompaniment")
         form.addRow("输出内容:", self.output_type_combo)
         self.format_combo = QComboBox()
         self.format_combo.addItem("WAV（无损）", "wav")
@@ -259,15 +253,11 @@ class VocalSeparationPanel(QWidget):
         output_row.addWidget(browse_button)
         form.addRow("输出目录:", output_row)
 
-        model_row = QHBoxLayout()
         self.model_combo = QComboBox()
         for spec in SEPARATION_MODELS.values():
             self.model_combo.addItem(spec.name, spec.key)
-        model_row.addWidget(self.model_combo, 1)
-        library_button = QPushButton("模型库")
-        library_button.clicked.connect(self._open_model_library)
-        model_row.addWidget(library_button)
-        form.addRow("分离模型:", model_row)
+        self.model_combo.currentIndexChanged.connect(self._save_preferences)
+        form.addRow("分离模型:", self.model_combo)
 
         self.denoise_check = QCheckBox("降噪（模型尚未接入）")
         self.denoise_check.setEnabled(False)
@@ -280,6 +270,7 @@ class VocalSeparationPanel(QWidget):
         self.device_combo.addItem("CPU（通用）", "cpu")
         if recommended_device() == "cuda":
             self.device_combo.insertItem(0, "NVIDIA CUDA（推荐）", "cuda")
+        self.device_combo.currentIndexChanged.connect(self._save_preferences)
         form.addRow("硬件加速:", self.device_combo)
         self.reload_settings()
 
@@ -345,12 +336,6 @@ class VocalSeparationPanel(QWidget):
         self.accompaniment_volume_label = QLabel("100%")
         self.accompaniment_volume_label.setMinimumWidth(42)
         volume_grid.addWidget(self.accompaniment_volume_label, 0, 2)
-        self.save_accompaniment_button = QPushButton("单独保存伴奏")
-        self.save_accompaniment_button.setEnabled(False)
-        self.save_accompaniment_button.clicked.connect(
-            lambda: self._save_stem("accompaniment")
-        )
-        volume_grid.addWidget(self.save_accompaniment_button, 0, 3)
 
         volume_grid.addWidget(QLabel("人声音量"), 1, 0)
         self.vocal_volume = QSlider(Qt.Orientation.Horizontal)
@@ -361,15 +346,13 @@ class VocalSeparationPanel(QWidget):
         self.vocal_volume_label = QLabel("100%")
         self.vocal_volume_label.setMinimumWidth(42)
         volume_grid.addWidget(self.vocal_volume_label, 1, 2)
-        self.save_vocal_button = QPushButton("单独保存人声")
-        self.save_vocal_button.setEnabled(False)
-        self.save_vocal_button.clicked.connect(lambda: self._save_stem("vocals"))
-        volume_grid.addWidget(self.save_vocal_button, 1, 3)
         mixer_layout.addLayout(volume_grid)
 
         save_mix_row = QHBoxLayout()
         save_mix_row.addStretch()
         self.save_mix_button = QPushButton("✓ 保存调音结果（伴奏 + 人声）")
+        self.save_mix_button.setMinimumHeight(42)
+        self.save_mix_button.setMinimumWidth(260)
         self.save_mix_button.setEnabled(False)
         self.save_mix_button.clicked.connect(self._save_mix)
         save_mix_row.addWidget(self.save_mix_button)
@@ -380,21 +363,16 @@ class VocalSeparationPanel(QWidget):
         splitter.setSizes([360, 360])
 
     def set_songs(self, songs: list[dict]):
-        current_path = self.song_combo.currentData()
         self._songs = [song for song in songs if song.get("path")]
-        self.song_combo.blockSignals(True)
-        self.song_combo.clear()
-        for song in self._songs:
-            self.song_combo.addItem(song.get("name") or Path(song["path"]).name, song["path"])
-        index = self.song_combo.findData(current_path)
-        self.song_combo.setCurrentIndex(index if index >= 0 else (0 if self._songs else -1))
-        self.song_combo.blockSignals(False)
-        self._song_changed()
+        available = {song["path"] for song in self._songs}
+        if self._selected_path not in available:
+            self._selected_path = self._songs[0]["path"] if self._songs else ""
+        self._selected_song_changed()
 
     def select_song(self, file_path: str):
-        index = self.song_combo.findData(file_path)
-        if index >= 0:
-            self.song_combo.setCurrentIndex(index)
+        if any(song["path"] == file_path for song in self._songs):
+            self._selected_path = file_path
+            self._selected_song_changed()
 
     def reload_settings(self):
         if not hasattr(self, "model_combo") or self.config is None:
@@ -408,8 +386,18 @@ class VocalSeparationPanel(QWidget):
         device_index = self.device_combo.findData("cuda" if wants_gpu else "cpu")
         self.device_combo.setCurrentIndex(max(0, device_index))
 
-    def _song_changed(self, _index: int = -1):
-        file_path = self.song_combo.currentData()
+    def _save_preferences(self, _index: int = -1):
+        if self.config is None:
+            return
+        self.config.asr.vocal_separation_model = self.model_combo.currentData()
+        self.config.asr.vocal_separation_use_gpu = (
+            self.device_combo.currentData() == "cuda"
+        )
+        config_manager.config = self.config
+        config_manager.save()
+
+    def _selected_song_changed(self):
+        file_path = self._selected_path
         if file_path and not self.output_input.text().strip():
             self.output_input.setText(str(Path(file_path).parent / "Separated"))
 
@@ -420,12 +408,8 @@ class VocalSeparationPanel(QWidget):
         if directory:
             self.output_input.setText(directory)
 
-    def _open_model_library(self):
-        dialog = ModelLibraryDialog(self, initial_category="separation")
-        dialog.exec()
-
     def _start_separation(self):
-        input_path = self.song_combo.currentData()
+        input_path = self._selected_path
         if not input_path:
             QMessageBox.information(self, "人声分离", "请先在素材库中添加并选择音频或视频。")
             return
@@ -445,7 +429,7 @@ class VocalSeparationPanel(QWidget):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.Yes:
-                self._open_model_library()
+                self.model_library_requested.emit()
             return
         output_dir = self.output_input.text().strip()
         if not output_dir:
@@ -463,6 +447,7 @@ class VocalSeparationPanel(QWidget):
             output_dir,
             model,
             self.device_combo.currentData(),
+            self.output_type_combo.currentData(),
             self,
         )
         self.worker.progress.connect(self._show_processing_progress)
@@ -489,29 +474,57 @@ class VocalSeparationPanel(QWidget):
             return
         self._result = result
         self.processing_progress.setValue(100)
-        self.processing_status.setText(
-            f"处理完成：{result.vocals_path.name}、{result.accompaniment_path.name}"
-        )
+        names = [
+            path.name
+            for path in (result.vocals_path, result.accompaniment_path)
+            if path is not None
+        ]
+        self.processing_status.setText(f"处理完成：{'、'.join(names)}")
         self._load_preview(result)
 
     def _load_preview(self, result: SeparationResult):
-        self.accompaniment_player.setSource(QUrl.fromLocalFile(str(result.accompaniment_path)))
-        self.vocal_player.setSource(QUrl.fromLocalFile(str(result.vocals_path)))
-        self.accompaniment_waveform.load_wav(str(result.accompaniment_path))
-        self.vocal_waveform.load_wav(str(result.vocals_path))
-        self.current_file_label.setText(
-            f"伴奏：{result.accompaniment_path.name}　人声：{result.vocals_path.name}"
+        if result.accompaniment_path is not None:
+            self.accompaniment_player.setSource(
+                QUrl.fromLocalFile(str(result.accompaniment_path))
+            )
+            self.accompaniment_waveform.load_wav(str(result.accompaniment_path))
+        else:
+            self.accompaniment_player.setSource(QUrl())
+            self.accompaniment_waveform.samples = []
+            self.accompaniment_waveform.update()
+        if result.vocals_path is not None:
+            self.vocal_player.setSource(QUrl.fromLocalFile(str(result.vocals_path)))
+            self.vocal_waveform.load_wav(str(result.vocals_path))
+        else:
+            self.vocal_player.setSource(QUrl())
+            self.vocal_waveform.samples = []
+            self.vocal_waveform.update()
+        accompaniment_name = (
+            result.accompaniment_path.name if result.accompaniment_path else "未输出"
         )
+        vocals_name = result.vocals_path.name if result.vocals_path else "未输出"
+        self.current_file_label.setText(
+            f"伴奏：{accompaniment_name}　人声：{vocals_name}"
+        )
+        has_accompaniment = result.accompaniment_path is not None
+        has_vocals = result.vocals_path is not None
+        self.accompaniment_volume.setEnabled(has_accompaniment)
+        self.vocal_volume.setEnabled(has_vocals)
         self.play_button.setEnabled(True)
         self.seek_slider.setEnabled(True)
-        self.save_mix_button.setEnabled(True)
-        self.save_accompaniment_button.setEnabled(True)
-        self.save_vocal_button.setEnabled(True)
+        self.save_mix_button.setEnabled(has_accompaniment and has_vocals)
+        self.save_mix_button.setToolTip(
+            "" if has_accompaniment and has_vocals else "保存调音结果需要同时输出人声和伴奏"
+        )
         self._apply_audio_device()
         self._volume_changed()
 
     def _toggle_playback(self):
-        if self.accompaniment_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+        is_playing = any(
+            player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+            for player in (self.accompaniment_player, self.vocal_player)
+        )
+        if is_playing:
             self.accompaniment_player.pause()
             self.vocal_player.pause()
         else:
@@ -525,12 +538,26 @@ class VocalSeparationPanel(QWidget):
             self.accompaniment_audio.setMuted(False)
             self.vocal_audio.setMuted(False)
             self._volume_changed()
-            position = self.accompaniment_player.position()
+            master = (
+                self.accompaniment_player
+                if self._result and self._result.accompaniment_path is not None
+                else self.vocal_player
+            )
+            position = master.position()
             self.vocal_player.setPosition(position)
-            self.vocal_player.play()
-            self.accompaniment_player.play()
+            if self._result and self._result.vocals_path is not None:
+                self.vocal_player.play()
+            if self._result and self._result.accompaniment_path is not None:
+                self.accompaniment_player.play()
+            track_count = sum(
+                path is not None
+                for path in (
+                    self._result.vocals_path,
+                    self._result.accompaniment_path,
+                )
+            )
             self.processing_status.setText(
-                f"正在通过“{self.audio_device_combo.currentText()}”播放两条音轨。"
+                f"正在通过“{self.audio_device_combo.currentText()}”播放{track_count}条音轨。"
             )
 
     def _stop_players(self):
@@ -551,8 +578,12 @@ class VocalSeparationPanel(QWidget):
         )
 
     def _play_state_changed(self, state):
+        playing = any(
+            player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+            for player in (self.accompaniment_player, self.vocal_player)
+        )
         self.play_button.setText(
-            "❚❚ 暂停" if state == QMediaPlayer.PlaybackState.PlayingState else "▶ 试听"
+            "❚❚ 暂停" if playing else "▶ 试听"
         )
 
     @staticmethod
@@ -561,7 +592,18 @@ class VocalSeparationPanel(QWidget):
         return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
     def _position_changed(self, position: int):
-        duration = self.accompaniment_player.duration()
+        if (
+            self.sender() is self.vocal_player
+            and self._result is not None
+            and self._result.accompaniment_path is not None
+        ):
+            return
+        master = (
+            self.accompaniment_player
+            if self._result and self._result.accompaniment_path is not None
+            else self.vocal_player
+        )
+        duration = master.duration()
         if duration > 0:
             ratio = position / duration
             if not self._seeking:
@@ -572,17 +614,31 @@ class VocalSeparationPanel(QWidget):
             f"{self._format_time(position)} / {self._format_time(duration)}"
         )
         if (
-            self.vocal_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+            self._result is not None
+            and self._result.vocals_path is not None
+            and self.vocal_player.playbackState()
+            == QMediaPlayer.PlaybackState.PlayingState
             and abs(self.vocal_player.position() - position) > 120
         ):
             self.vocal_player.setPosition(position)
 
     def _duration_changed(self, duration: int):
+        if (
+            self.sender() is self.vocal_player
+            and self._result is not None
+            and self._result.accompaniment_path is not None
+        ):
+            return
         self.time_label.setText(f"00:00 / {self._format_time(duration)}")
 
     def _seek_released(self):
         self._seeking = False
-        duration = self.accompaniment_player.duration()
+        master = (
+            self.accompaniment_player
+            if self._result and self._result.accompaniment_path is not None
+            else self.vocal_player
+        )
+        duration = master.duration()
         position = int(duration * self.seek_slider.value() / 1000)
         self.accompaniment_player.setPosition(position)
         self.vocal_player.setPosition(position)
@@ -596,7 +652,11 @@ class VocalSeparationPanel(QWidget):
         self.vocal_volume_label.setText(f"{vocals}%")
 
     def _save_mix(self):
-        if self._result is None:
+        if (
+            self._result is None
+            or self._result.vocals_path is None
+            or self._result.accompaniment_path is None
+        ):
             return
         default_path = self._result.accompaniment_path.with_name(
             f"{self._result.accompaniment_path.stem.removesuffix('_accompaniment')}_mixed.wav"
@@ -618,34 +678,6 @@ class VocalSeparationPanel(QWidget):
         )
         self.mix_worker.completed.connect(self._mix_finished)
         self.mix_worker.start()
-
-    def _save_stem(self, stem: str):
-        if self._result is None:
-            return
-        is_vocal = stem == "vocals"
-        source = self._result.vocals_path if is_vocal else self._result.accompaniment_path
-        title = "保存人声音轨" if is_vocal else "保存伴奏音轨"
-        output_path, _selected_filter = QFileDialog.getSaveFileName(
-            self, title, str(source), "WAV 音频 (*.wav)"
-        )
-        if not output_path:
-            return
-        self.save_accompaniment_button.setEnabled(False)
-        self.save_vocal_button.setEnabled(False)
-        self.processing_status.setText(f"正在{title}…")
-        self.stem_worker = StemExportWorker(str(source), output_path, self)
-        self.stem_worker.completed.connect(self._stem_finished)
-        self.stem_worker.start()
-
-    def _stem_finished(self, success: bool, message: str):
-        self.save_accompaniment_button.setEnabled(self._result is not None)
-        self.save_vocal_button.setEnabled(self._result is not None)
-        if success:
-            self.processing_status.setText(f"分离音轨已保存：{message}")
-            QMessageBox.information(self, "保存完成", f"分离音轨已保存：\n{message}")
-        else:
-            self.processing_status.setText(message)
-            QMessageBox.warning(self, "保存失败", message)
 
     def _mix_finished(self, success: bool, message: str):
         self.save_mix_button.setEnabled(True)

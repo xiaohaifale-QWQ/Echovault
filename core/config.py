@@ -9,11 +9,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-CONFIG_SCHEMA_VERSION = 5
+CONFIG_SCHEMA_VERSION = 6
 SUPPORTED_AI_PROVIDERS = {"online", "local"}
 SUPPORTED_TRANSLATION_ENGINES = {"ai", "local"}
 SUPPORTED_PROVIDERS = {"groq", "local", "xunfei"}
 SUPPORTED_LOCAL_MODELS = {"tiny", "base", "small", "medium", "large"}
+SUPPORTED_SEPARATION_MODELS = {"htdemucs", "htdemucs_ft", "mdx_extra_q"}
 SUPPORTED_LANGUAGES = {"zh", "en", "ja", "ko"}
 SUPPORTED_TRANSLATION_SOURCE_LANGUAGES = SUPPORTED_LANGUAGES | {"auto"}
 
@@ -26,6 +27,8 @@ class ASRConfig:
     language: Optional[str] = None   # None=自动检测, "zh"=中文, "en"=英语, "ja"=日语, "ko"=韩语
     use_vocal_separation: bool = False  # 是否启用 Demucs 人声分离
     use_gpu: bool = False               # 是否启用 GPU 加速（默认 CPU）
+    vocal_separation_model: str = "htdemucs"
+    vocal_separation_use_gpu: bool = False
 
 
 @dataclass
@@ -163,6 +166,8 @@ class ConfigManager:
                 "language": c.asr.language,
                 "use_vocal_separation": c.asr.use_vocal_separation,
                 "use_gpu": c.asr.use_gpu,
+                "vocal_separation_model": c.asr.vocal_separation_model,
+                "vocal_separation_use_gpu": c.asr.vocal_separation_use_gpu,
             },
             "sync": {
                 "direction": c.sync.direction,
@@ -230,6 +235,15 @@ class ConfigManager:
         c.asr.language = asr_data.get("language")
         c.asr.use_vocal_separation = asr_data.get("use_vocal_separation", False)
         c.asr.use_gpu = asr_data.get("use_gpu", False)
+        separation_model = asr_data.get("vocal_separation_model", "htdemucs")
+        c.asr.vocal_separation_model = (
+            separation_model
+            if separation_model in SUPPORTED_SEPARATION_MODELS
+            else "htdemucs"
+        )
+        c.asr.vocal_separation_use_gpu = bool(
+            asr_data.get("vocal_separation_use_gpu", False)
+        )
         sync_data = data.get("sync", {})
         c.sync.direction = sync_data.get("direction", "bidirectional")
         c.sync.conflict_resolution = sync_data.get("conflict_resolution", "manual")
@@ -255,7 +269,15 @@ def update_config_value(config: AppConfig, key: str, value: str) -> None:
             config.asr.language = normalized
         else:
             raise ValueError(f"不支持的语言: {value}")
-    elif key in {"asr.use_vocal_separation", "asr.use_gpu"}:
+    elif key == "asr.vocal_separation_model":
+        if value not in SUPPORTED_SEPARATION_MODELS:
+            raise ValueError(f"不支持的人声分离模型: {value}")
+        config.asr.vocal_separation_model = value
+    elif key in {
+        "asr.use_vocal_separation",
+        "asr.use_gpu",
+        "asr.vocal_separation_use_gpu",
+    }:
         normalized = value.lower()
         if normalized not in {"true", "1", "yes", "false", "0", "no"}:
             raise ValueError(f"无效的布尔值: {value}")

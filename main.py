@@ -442,6 +442,8 @@ def cmd_config(args):
                 "provider": c.asr.provider, "local_model": c.asr.local_model,
                 "language": c.asr.language, "use_vocal_separation": c.asr.use_vocal_separation,
                 "use_gpu": c.asr.use_gpu,
+                "vocal_separation_model": c.asr.vocal_separation_model,
+                "vocal_separation_use_gpu": c.asr.vocal_separation_use_gpu,
             },
             "config_path": str(config_manager.config_path),
         }

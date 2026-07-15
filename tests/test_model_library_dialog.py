@@ -1,3 +1,5 @@
+from core.config import AppConfig
+from core.runtime_detection import HardwareReport
 from core.vocal_separation import SEPARATION_MODELS
 from tests.qt_test_app import ensure_app, keep_widget
 from ui.model_library_dialog import ModelLibraryDialog
@@ -10,10 +12,16 @@ def test_model_library_contains_asr_and_separation_models(monkeypatch):
         "_installed",
         staticmethod(lambda _model: False),
     )
-    dialog = keep_widget(ModelLibraryDialog())
+    monkeypatch.setattr(
+        "ui.model_library_dialog.detect_hardware",
+        lambda: HardwareReport("win_amd64", 19045, ()),
+    )
+    monkeypatch.setattr("ui.model_library_dialog.recommended_device", lambda: "cpu")
+    dialog = keep_widget(ModelLibraryDialog(config=AppConfig()))
 
-    categories = {
-        dialog.table.item(row, 0).text() for row in range(dialog.table.rowCount())
-    }
-    assert categories == {"本地识别", "人声分离"}
-    assert dialog.table.rowCount() == 4 + len(SEPARATION_MODELS)
+    assert dialog.asr_card.objectName() == "asrModelCard"
+    assert dialog.separation_card.objectName() == "separationModelCard"
+    assert dialog.asr_table.rowCount() == 4
+    assert dialog.separation_table.rowCount() == len(SEPARATION_MODELS)
+    assert not dialog.separation_gpu_check.isEnabled()
+    assert "CPU 运行时" in dialog.separation_runtime_label.text()

@@ -276,6 +276,8 @@ python main.py config set <key> <value>
 | `asr.local_model` | `tiny` / `base` / `small` / `medium` | 本地模型大小 |
 | `asr.language` | `zh` / `en` / `ja` / `ko` / `null` | 默认语言 |
 | `asr.use_gpu` | `true` / `false` | GPU 加速开关 |
+| `asr.vocal_separation_model` | `htdemucs` / `htdemucs_ft` / `mdx_extra_q` | 默认分离模型 |
+| `asr.vocal_separation_use_gpu` | `true` / `false` | Demucs CUDA 偏好 |
 | `groq_api_key` | API Key 字符串 | Groq API Key |
 | `ai_provider` | `online` / `local` | AI 助手来源 |
 | `ai_model_api_key` | API Key 字符串 | 在线 AI Key |
@@ -575,7 +577,9 @@ python main.py mark "E:/music/instrumental.mp3"
     "local_model": "tiny | base | small | medium",
     "language": "zh | en | ja | ko | null",
     "use_vocal_separation": "boolean",
-    "use_gpu": "boolean"
+    "use_gpu": "boolean",
+    "vocal_separation_model": "htdemucs | htdemucs_ft | mdx_extra_q",
+    "vocal_separation_use_gpu": "boolean"
   },
   "config_path": "string"
 }

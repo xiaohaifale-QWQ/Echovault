@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
 import subprocess
 import time
 import urllib.request
@@ -37,8 +36,8 @@ class SeparationModel:
 
 @dataclass(frozen=True)
 class SeparationResult:
-    vocals_path: Path
-    accompaniment_path: Path
+    vocals_path: Path | None
+    accompaniment_path: Path | None
     sample_rate: int
 
 
@@ -265,6 +264,7 @@ def separate_vocals(
     *,
     model: str = "htdemucs",
     device: str = "cpu",
+    output_content: str = "both",
     progress: ProgressCallback | None = None,
     cancelled: CancelCallback | None = None,
 ) -> SeparationResult:
@@ -279,6 +279,8 @@ def separate_vocals(
         raise SeparationError("人声分离运行时未安装，请先安装 demucs、torch 和 torchaudio")
     if model not in SEPARATION_MODELS:
         raise SeparationError(f"不支持的人声分离模型：{model}")
+    if output_content not in {"both", "vocals", "accompaniment"}:
+        raise SeparationError(f"不支持的输出内容：{output_content}")
     if not separation_model_installed(model):
         raise SeparationError("所选人声分离模型尚未下载，请先打开模型库安装")
     if cancelled():
@@ -326,19 +328,25 @@ def separate_vocals(
             raise SeparationError("模型输出中没有 vocals 音轨")
         vocals = stems["vocals"]
         accompaniment = origin - vocals
-        progress(88, "正在写入人声音轨…")
-        save_audio(vocals, temporary_vocals, separator.samplerate, bits_per_sample=24)
-        progress(94, "正在写入伴奏音轨…")
-        save_audio(
-            accompaniment,
-            temporary_accompaniment,
-            separator.samplerate,
-            bits_per_sample=24,
-        )
-        os.replace(temporary_vocals, vocals_path)
-        os.replace(temporary_accompaniment, accompaniment_path)
+        saved_vocals = None
+        saved_accompaniment = None
+        if output_content in {"both", "vocals"}:
+            progress(88, "正在写入人声音轨…")
+            save_audio(vocals, temporary_vocals, separator.samplerate, bits_per_sample=24)
+            os.replace(temporary_vocals, vocals_path)
+            saved_vocals = vocals_path
+        if output_content in {"both", "accompaniment"}:
+            progress(94, "正在写入伴奏音轨…")
+            save_audio(
+                accompaniment,
+                temporary_accompaniment,
+                separator.samplerate,
+                bits_per_sample=24,
+            )
+            os.replace(temporary_accompaniment, accompaniment_path)
+            saved_accompaniment = accompaniment_path
         progress(100, "人声与伴奏分离完成")
-        return SeparationResult(vocals_path, accompaniment_path, separator.samplerate)
+        return SeparationResult(saved_vocals, saved_accompaniment, separator.samplerate)
     except SeparationCancelled:
         raise
     except Exception as exc:
@@ -397,24 +405,3 @@ def mix_stems(
     finally:
         temp_path.unlink(missing_ok=True)
     return output_path
-
-
-def export_stem(
-    source_path: str | os.PathLike[str], output_path: str | os.PathLike[str]
-) -> Path:
-    """Copy one generated stem to a user-selected path with atomic replacement."""
-
-    source = Path(source_path)
-    output = Path(output_path)
-    if not source.is_file():
-        raise SeparationError(f"分离音轨不存在：{source}")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_name(f".{output.stem}.copying{output.suffix}")
-    try:
-        shutil.copyfile(source, temporary)
-        os.replace(temporary, output)
-    except OSError as exc:
-        raise SeparationError(f"保存分离音轨失败：{exc}") from exc
-    finally:
-        temporary.unlink(missing_ok=True)
-    return output

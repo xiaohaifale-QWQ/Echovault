@@ -29,6 +29,8 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     manager.config.music_select_all = True
     manager.config.video_select_all = True
     manager.config.video_time_offsets = {"D:/Video": 120}
+    manager.config.asr.vocal_separation_model = "htdemucs_ft"
+    manager.config.asr.vocal_separation_use_gpu = True
 
     manager.save()
     loaded = ConfigManager(path).load()
@@ -55,6 +57,8 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     assert loaded.music_select_all is True
     assert loaded.video_select_all is True
     assert loaded.video_time_offsets == {"D:/Video": 120}
+    assert loaded.asr.vocal_separation_model == "htdemucs_ft"
+    assert loaded.asr.vocal_separation_use_gpu is True
 
     raw = json.loads(path.read_text(encoding="utf-8"))
     assert raw["schema_version"] == CONFIG_SCHEMA_VERSION
@@ -99,6 +103,8 @@ def test_update_config_value_validates_provider_and_booleans():
 
     update_config_value(config, "asr.provider", "local")
     update_config_value(config, "asr.use_gpu", "yes")
+    update_config_value(config, "asr.vocal_separation_model", "mdx_extra_q")
+    update_config_value(config, "asr.vocal_separation_use_gpu", "yes")
     update_config_value(config, "asr.language", "auto")
     update_config_value(config, "ai_model_api_key", "local-only-secret")
     update_config_value(config, "ai_provider", "local")
@@ -115,6 +121,8 @@ def test_update_config_value_validates_provider_and_booleans():
 
     assert config.asr.provider == "local"
     assert config.asr.use_gpu is True
+    assert config.asr.vocal_separation_model == "mdx_extra_q"
+    assert config.asr.vocal_separation_use_gpu is True
     assert config.asr.language is None
     assert config.ai_model_api_key == "local-only-secret"
     assert config.ai_provider == "local"
