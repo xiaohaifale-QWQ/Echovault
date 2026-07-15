@@ -7,8 +7,8 @@
 - Online Matching and Vocal Separation no longer expose per-page output selectors or persist a
   device choice; both players bind to the current Windows system default and follow default-device
   changes while the application is running.
-- Windows CI now reuses a preinstalled ffmpeg when available and retries transient Chocolatey
-  installation failures, preventing a third identical install from failing an otherwise green run.
+- Windows CI now reuses a preinstalled ffmpeg/ffprobe or downloads the pinned FFmpeg 7.1 Windows
+  archive from its GitHub release, avoiding Chocolatey rate limits that failed otherwise green runs.
 - Demucs GPU selection now reuses the active external CUDA Worker's Torch in an isolated
   process, so an installed RTX/CUDA runtime is no longer hidden by the desktop bundle's CPU
   Torch. Progress identifies the actual GPU, and CPU/GPU processes remain isolated.
