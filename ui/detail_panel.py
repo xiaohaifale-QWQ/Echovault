@@ -10,7 +10,6 @@ class DetailPanel(QWidget):
     transcribe_clicked = pyqtSignal(str)
     edit_lyrics_clicked = pyqtSignal(str)
     translate_requested = pyqtSignal(str, str, str, str)
-    batch_translate_requested = pyqtSignal(str, str, str)
 
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
@@ -62,9 +61,6 @@ class DetailPanel(QWidget):
         self.btn_translate.setEnabled(False)
         self.btn_translate.clicked.connect(self._request_translation)
         translation_row.addWidget(self.btn_translate)
-        self.btn_batch_translate = QPushButton("批量翻译")
-        self.btn_batch_translate.clicked.connect(self._request_batch_translation)
-        translation_row.addWidget(self.btn_batch_translate)
         self.btn_view_translation = QPushButton("查看译文")
         self.btn_view_translation.setEnabled(False)
         self.btn_view_translation.clicked.connect(self._toggle_translation_view)
@@ -140,13 +136,6 @@ class DetailPanel(QWidget):
             return
         self.translate_requested.emit(
             str(self._current_lrc_path),
-            self.translation_engine.currentData(),
-            self.translation_source.currentData(),
-            self.translation_target.currentData(),
-        )
-
-    def _request_batch_translation(self):
-        self.batch_translate_requested.emit(
             self.translation_engine.currentData(),
             self.translation_source.currentData(),
             self.translation_target.currentData(),

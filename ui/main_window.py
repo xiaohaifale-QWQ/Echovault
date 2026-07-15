@@ -37,6 +37,7 @@ from ui.settings_dialog import SettingsDialog
 from ui.key_manager_dialog import KeyManagerDialog
 from ui.help_dialog import HelpDialog
 from ui.ai_chat_panel import AIChatPanel, CLICommandWorker
+from ui.batch_operations_panel import BatchOnlineLyricsWorker, BatchOperationsPanel
 from ui.online_lyrics_panel import OnlineLyricsPanel, LyricsCalibrationWorker
 from core.ai_control import validate_cli_command
 from ui.sync_panel import SyncPanel
@@ -104,6 +105,9 @@ class MainWindow(QMainWindow):
         self.online_lyrics_panel = OnlineLyricsPanel()
         self.right_tabs.addTab(self.online_lyrics_panel, "在线匹配")
 
+        self.batch_operations_panel = BatchOperationsPanel(self.config)
+        self.right_tabs.addTab(self.batch_operations_panel, "批量处理")
+
         self.sync_panel = SyncPanel()
         self.right_tabs.addTab(self.sync_panel, "同步")
         
@@ -164,7 +168,9 @@ class MainWindow(QMainWindow):
         
         sync_goto_action = QAction("打开同步面板(&S)", self)
         sync_goto_action.setShortcut("Ctrl+D")
-        sync_goto_action.triggered.connect(lambda: self.right_tabs.setCurrentIndex(3))
+        sync_goto_action.triggered.connect(
+            lambda: self.right_tabs.setCurrentWidget(self.sync_panel)
+        )
         sync_menu.addAction(sync_goto_action)
         
         # 设置菜单
@@ -269,6 +275,8 @@ class MainWindow(QMainWindow):
             self.provider_label.setText("引擎: 讯飞（请补齐三项密钥）")
         else:
             self.provider_label.setText("引擎: 不可用 (请检查设置)")
+        if hasattr(self, "batch_operations_panel"):
+            self.batch_operations_panel.update_scope(songs)
     
     def _connect_signals(self):
         """连接信号"""
@@ -294,14 +302,19 @@ class MainWindow(QMainWindow):
         self.detail_panel.transcribe_clicked.connect(self._on_transcribe_single)
         self.detail_panel.edit_lyrics_clicked.connect(self._on_edit_lyrics)
         self.detail_panel.translate_requested.connect(self._on_translate_lyrics)
-        self.detail_panel.batch_translate_requested.connect(self._on_batch_translate_lyrics)
         self.online_lyrics_panel.action_requested.connect(self._on_online_lyrics_action)
+        self.batch_operations_panel.batch_transcribe_requested.connect(
+            self._on_transcribe_all
+        )
+        self.batch_operations_panel.batch_translate_requested.connect(
+            self._on_batch_translate_lyrics
+        )
+        self.batch_operations_panel.batch_online_requested.connect(
+            self._on_batch_online_lyrics
+        )
         
         # 刷新计数
         self.song_list_panel.model_updated.connect(self._refresh_statusbar)
-        
-        # 批量识别按钮
-        self.song_list_panel.batch_transcribe.connect(self._on_transcribe_all)
         
         self._refresh_statusbar()
     # ─── 事件处理 ─────────────────────────────
@@ -587,6 +600,61 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.StandardButton.Yes:
             self._run_translation(lrc_paths, engine, source_language, target_language)
 
+    def _on_batch_online_lyrics(self, apply_best: bool, minimum_score: float):
+        songs = [
+            song
+            for song in self.song_list_panel.get_all_songs()
+            if not song.get("instrumental")
+        ]
+        if not songs:
+            QMessageBox.information(
+                self, "批量在线匹配", "当前列表没有可在线匹配的素材。"
+            )
+            return
+        if apply_best:
+            reply = QMessageBox.question(
+                self,
+                "批量在线匹配",
+                f"将搜索 {len(songs)} 个素材，并自动写入匹配分不低于 "
+                f"{minimum_score:.0f}% 的最佳同步歌词。\n"
+                "已有 LRC 会先备份，媒体文件不会修改。是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        self.batch_operations_panel.begin_online_task(len(songs))
+        self.batch_online_worker = BatchOnlineLyricsWorker(
+            songs,
+            apply_best=apply_best,
+            minimum_score=minimum_score,
+            parent=self,
+        )
+        self.batch_online_worker.progress.connect(
+            self.batch_operations_panel.show_online_progress
+        )
+        self.batch_online_worker.completed.connect(
+            self._on_batch_online_lyrics_finished
+        )
+        self.batch_online_worker.start()
+
+    def _on_batch_online_lyrics_finished(self, results: list[dict]):
+        self.batch_operations_panel.finish_online_task(results)
+        applied = [item for item in results if item["status"] == "applied"]
+        matched = [item for item in results if item["status"] == "matched"]
+        failed = [item for item in results if item["status"] == "failed"]
+        for item in applied:
+            self.song_list_panel.update_song_status(item["path"], True)
+        self._refresh_statusbar()
+        self.status_label.setText(
+            f"批量在线匹配完成：匹配 {len(matched) + len(applied)}，"
+            f"写入 {len(applied)}，失败 {len(failed)}"
+        )
+        if applied:
+            selected = self.song_list_panel.get_selected_songs()
+            if selected:
+                self.online_lyrics_panel.show_song(selected[0])
+
     def _run_translation(
         self,
         lrc_paths: list[str],
@@ -845,6 +913,7 @@ class MainWindow(QMainWindow):
             self.router = get_router(self.config)
             self._configure_voice_input_shortcut()
             self.detail_panel.reload_translation_settings()
+            self.batch_operations_panel.reload_translation_settings()
             self._refresh_statusbar()
 
     def _on_key_manager(self):

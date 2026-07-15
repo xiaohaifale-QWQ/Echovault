@@ -11,6 +11,7 @@ from core.online_lyrics import (
     compare_lyrics,
     media_search_metadata,
     search_lrclib,
+    select_best_synced_match,
 )
 
 
@@ -182,3 +183,13 @@ def test_compare_lyrics_reports_line_counts_and_similarity():
     assert comparison["similarity"] == 1.0
     assert comparison["local_lines"] == 2
     assert comparison["reference_lines"] == 2
+
+
+def test_select_best_synced_match_obeys_threshold_and_requires_timeline():
+    assert select_best_synced_match(
+        [_match(score=82.0), _match(score=94.0, synced_lyrics="")],
+        minimum_score=80,
+    ).score == 82.0
+    assert (
+        select_best_synced_match([_match(score=79.9)], minimum_score=80) is None
+    )

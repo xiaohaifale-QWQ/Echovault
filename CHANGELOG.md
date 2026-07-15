@@ -20,6 +20,8 @@
 
 ### Added
 
+- A fifth right-side Batch workspace consolidating batch recognition, batch translation,
+  and thresholded LRCLIB matching, with optional backup-first application and a progress log.
 - An F1 Help dialog with offline quick guides for local AI deployment, OpenAI-compatible
   endpoints, MCP write authorization, translation, and online lyric matching.
 - A fourth right-side Online Matching tab backed by LRCLIB, with metadata-assisted search,

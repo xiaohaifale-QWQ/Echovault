@@ -151,6 +151,18 @@ def search_lrclib(
     return sorted(matches, key=lambda item: item.score, reverse=True)
 
 
+def select_best_synced_match(
+    matches: list[LyricsMatch], *, minimum_score: float = 80.0
+) -> LyricsMatch | None:
+    """Return the highest-scoring synchronized match above a safety threshold."""
+    candidates = [
+        match
+        for match in matches
+        if match.has_synced_lyrics and match.score >= minimum_score
+    ]
+    return max(candidates, key=lambda item: item.score, default=None)
+
+
 def get_lrclib_record(record_id: int, *, timeout: float = 20.0, opener=None) -> LyricsMatch:
     payload = _request_json(
         f"{LRCLIB_API_BASE}/get/{int(record_id)}", timeout=timeout, opener=opener

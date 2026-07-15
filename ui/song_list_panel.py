@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
-    QLabel, QLineEdit, QHBoxLayout, QAbstractItemView, QComboBox, QMessageBox, QPushButton, QMenu)
+    QLabel, QLineEdit, QHBoxLayout, QAbstractItemView, QComboBox, QMessageBox, QMenu)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush, QAction
 from services.library_service import InstrumentalStore
@@ -15,7 +15,6 @@ def _fmt_size(b): return f"{b/1024:.0f}KB" if b>1024 else f"{b}B"
 class SongListPanel(QWidget):
     song_selected = pyqtSignal(dict)
     model_updated = pyqtSignal()
-    batch_transcribe = pyqtSignal()
     COL_NAME, COL_FORMAT, COL_STATUS, COL_SIZE, COL_FOLDER, COL_PATH = 0, 1, 2, 3, 4, 5
 
     def __init__(self, parent=None):
@@ -41,10 +40,6 @@ class SongListPanel(QWidget):
         self.fmt_filter = QComboBox(); self.fmt_filter.addItem("全部格式")
         self.fmt_filter.setMaximumWidth(85); self.fmt_filter.currentIndexChanged.connect(self._do_refresh)
         h.addWidget(self.fmt_filter)
-        self.btn_batch = QPushButton("批量识别"); self.btn_batch.setStyleSheet(
-            "QPushButton{background:#1976D2;color:white;border-radius:3px;padding:2px 8px;font-size:12px}"
-            "QPushButton:hover{background:#1565C0}")
-        self.btn_batch.clicked.connect(self.batch_transcribe.emit); h.addWidget(self.btn_batch)
         l.addLayout(h)
         self.table = QTableWidget(); self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(["音频名称","格式","完成","大小","文件夹","路径"])
@@ -104,7 +99,6 @@ class SongListPanel(QWidget):
         self.lyric_filter.setCurrentIndex(2)
         self.lyric_filter.blockSignals(False)
         self.lyric_filter.setVisible(True)
-        self.btn_batch.setVisible(True)
         self._do_refresh()
 
     def _do_refresh(self, *a):
