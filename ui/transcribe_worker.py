@@ -11,6 +11,7 @@ from core.audio_utils import get_audio_info
 from core.config import AppConfig
 from core.lrc_writer import transcribe_and_save_lrc
 from core.recognition_progress import RecognitionProgress
+from core.vocal_separation import recommended_device
 
 
 class TranscribeWorker(QThread):
@@ -87,6 +88,10 @@ class TranscribeWorker(QThread):
                     output_dir=self.config.output_lrc_dir,
                     overwrite=True,
                     progress_callback=on_stage,
+                    use_vocal_separation=self.config.asr.use_vocal_separation,
+                    separation_device=(
+                        recommended_device() if self.config.asr.use_gpu else "cpu"
+                    ),
                 )
                 self._results[file_path] = {"success": True, "lrc_path": lrc_path, "error": None}
                 self.song_done.emit(file_path, lrc_path, True)

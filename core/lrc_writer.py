@@ -11,6 +11,8 @@ LRC 歌词生成器
 
 import os
 import re
+import shutil
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 from typing import List, Optional
@@ -299,6 +301,9 @@ def transcribe_and_save_lrc(
     output_dir: Optional[str] = None,
     overwrite: bool = False,
     progress_callback=None,
+    use_vocal_separation: bool = False,
+    separation_model: str = "htdemucs",
+    separation_device: str = "cpu",
 ) -> str:
     """
     一站式：音频 → 识别 → 后处理 → 保存 LRC
@@ -320,12 +325,47 @@ def transcribe_and_save_lrc(
     from .recognition_progress import RecognitionProgress
 
     song_name = os.path.basename(audio_path)
+    recognition_path = audio_path
+    separation_temp_dir = None
+
+    if use_vocal_separation:
+        from .vocal_separation import separate_vocals
+
+        separation_temp_dir = tempfile.mkdtemp(prefix="echovault_asr_vocals_")
+
+        def on_separation_progress(percent: int, message: str) -> None:
+            if progress_callback:
+                progress_callback(
+                    RecognitionProgress(
+                        min(30, int(percent * 0.3)),
+                        "separate",
+                        f"{message} {song_name}",
+                    )
+                )
+
+        try:
+            result = separate_vocals(
+                audio_path,
+                separation_temp_dir,
+                model=separation_model,
+                device=separation_device,
+                progress=on_separation_progress,
+            )
+            recognition_path = str(result.vocals_path)
+        except Exception:
+            shutil.rmtree(separation_temp_dir, ignore_errors=True)
+            raise
 
     # 1. 转换并切分音频。仅在超过 10 分钟时切分，以保留 Whisper 的上下文
     # 和歌词质量；普通单个素材始终以完整音轨一次识别。
     if progress_callback:
         progress_callback(RecognitionProgress(0, "prepare", f"正在转换音频… {song_name}"))
-    wav_paths = split_audio(audio_path, max_duration=600.0)
+    try:
+        wav_paths = split_audio(recognition_path, max_duration=600.0)
+    except Exception:
+        if separation_temp_dir:
+            shutil.rmtree(separation_temp_dir, ignore_errors=True)
+        raise
 
     try:
         # 2. ASR 识别
@@ -402,3 +442,5 @@ def transcribe_and_save_lrc(
     finally:
         # 5. 清理临时文件
         cleanup_temp_files(wav_paths)
+        if separation_temp_dir:
+            shutil.rmtree(separation_temp_dir, ignore_errors=True)

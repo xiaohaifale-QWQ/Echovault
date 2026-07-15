@@ -72,6 +72,9 @@
 
 ### Changed
 
+- The existing “Enable Demucs vocal separation” recognition option now runs the selected
+  local ASR against a temporary vocal stem and cleans all intermediate files, instead of
+  being a saved but unused setting.
 - LRCLIB candidates are converted from Traditional to Simplified Chinese before preview,
   merge, calibration, or batch application. AI calibration now uses the current edited left
   timeline, the current right reference text, and immediately refreshes the left result.
