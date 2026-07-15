@@ -7,12 +7,20 @@ if ((Get-Command ffmpeg -ErrorAction SilentlyContinue) -and
     exit 0
 }
 
-$archive = Join-Path $env:RUNNER_TEMP "ffmpeg-n7.1-win64-gpl.zip"
+$archive = Join-Path $env:RUNNER_TEMP "ffmpeg-release-essentials.7z"
 $destination = Join-Path $env:RUNNER_TEMP "echovault-ffmpeg"
-$url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-gpl-7.1.zip"
+$url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.7z"
 
 Invoke-WebRequest -Uri $url -OutFile $archive
-Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+$sevenZip = Get-Command 7z -ErrorAction SilentlyContinue
+if (-not $sevenZip) {
+    throw "7-Zip was not found on the Windows runner"
+}
+New-Item -ItemType Directory -Force -Path $destination | Out-Null
+& $sevenZip.Source x $archive "-o$destination" -y
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to extract the FFmpeg archive (exit code $LASTEXITCODE)"
+}
 $ffmpeg = Get-ChildItem -LiteralPath $destination -Recurse -Filter "ffmpeg.exe" |
     Select-Object -First 1
 if (-not $ffmpeg) {
