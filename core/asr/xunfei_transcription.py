@@ -65,6 +65,7 @@ class XunfeiTranscriptionProvider(ASRProvider):
                 "讯飞配置不完整。请在“密钥管理”中填写同一应用的 "
                 "AppID、API Key 和 API Secret，并开通极速录音转写服务。"
             )
+        self._language_type(language)
         source = Path(audio_path)
         if not source.is_file():
             raise FileNotFoundError(audio_path)
@@ -112,16 +113,17 @@ class XunfeiTranscriptionProvider(ASRProvider):
     def _create_task(
         self, audio_url: str, audio_size: int, language: Optional[str], duration: float
     ) -> str:
-        language_code = {"en": "en_us"}.get(language or "", "zh_cn")
+        language_type = self._language_type(language)
         payload = {
             "common": {"app_id": self._app_id},
             "business": {
                 "request_id": uuid.uuid4().hex,
-                "language": language_code,
+                "language": "zh_cn",
                 "domain": "pro_ost_ed",
                 "accent": "mandarin",
                 "duration": max(1, int(duration)),
                 "enable_subtitle": 1,
+                "language_type": language_type,
             },
             "data": {
                 "audio_url": audio_url,
@@ -150,14 +152,38 @@ class XunfeiTranscriptionProvider(ASRProvider):
             if not isinstance(data, dict):
                 raise RuntimeError("讯飞返回了无效的任务状态。")
             status = str(data.get("task_status", ""))
-            if status in {"3", "4"} and isinstance(data.get("result"), dict):
-                return data["result"]
+            result = self._json_object(data.get("result"))
+            if status in {"3", "4"} and result is not None:
+                return result
             if status and status not in {"1", "2", "3", "4"}:
                 raise RuntimeError(f"讯飞转写任务失败（状态 {status}）。")
             last_status = status or last_status
             time.sleep(2)
         suffix = f"（最后状态 {last_status}）" if last_status else ""
         raise RuntimeError(f"讯飞转写等待超时{suffix}。")
+
+    @staticmethod
+    def _language_type(language: Optional[str]) -> int:
+        """Map app language choices to the API's zh_cn language mode."""
+        if language in {None, "", "auto"}:
+            return 1
+        if language == "zh":
+            return 2
+        if language == "en":
+            return 3
+        raise RuntimeError("讯飞极速录音转写当前仅支持中文、英文或自动中英混合识别。")
+
+    @staticmethod
+    def _json_object(value: Any) -> Optional[dict[str, Any]]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+            except json.JSONDecodeError:
+                return None
+            return decoded if isinstance(decoded, dict) else None
+        return None
 
     def _parse_result(
         self, result: dict[str, Any], language: Optional[str], duration: float
@@ -261,6 +287,14 @@ class XunfeiTranscriptionProvider(ASRProvider):
         if isinstance(payload, dict):
             message = payload.get("message") or payload.get("desc") or "未知错误"
             code = payload.get("code")
+            if str(code) == "11200":
+                return (
+                    "讯飞极速录音转写未获授权（错误码 11200）。当前 AppID 未开通该服务、"
+                    "授权已过期或额度许可不可用；请在讯飞控制台为同一 AppID 开通"
+                    "“极速录音转写”后重试。"
+                )
+            if str(code) == "11201":
+                return "讯飞极速录音转写当日授权额度已用完（错误码 11201）。"
             return f"讯飞识别失败（HTTP {status_code}，错误码 {code}）：{message}"
         return f"讯飞识别失败（HTTP {status_code}）。"
 

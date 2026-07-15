@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Xunfei Speed Transcription now uses the documented `zh_cn` language modes, accepts
+  JSON-string task results, rejects unsupported languages before upload, and explains
+  service-license error 11200 with the required console action.
 - Windows CI test jobs now install ffmpeg/ffprobe before running the audio integration test.
 - The PyInstaller directory build now bundles `psutil`, so packaged local-ASR resource
   monitoring can report CPU and memory usage instead of placeholders.
