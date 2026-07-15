@@ -36,6 +36,14 @@ class CLICommand:
     needs_confirmation: bool
 
 
+def allowed_cli_commands() -> dict[str, list[str]]:
+    """Return the command prefixes shared by AI and MCP integrations."""
+    return {
+        "read_only": sorted(" ".join(signature) for signature in _READ_ONLY),
+        "mutating": sorted(" ".join(signature) for signature in _MUTATING),
+    }
+
+
 def extract_cli_directives(answer: str) -> tuple[str, list[str]]:
     commands = [match.strip() for match in _DIRECTIVE.findall(answer) if match.strip()]
     return _DIRECTIVE.sub("", answer).strip(), commands
@@ -70,6 +78,7 @@ def run_cli_command(command: CLICommand, timeout: int = 180) -> str:
     try:
         completed = subprocess.run(
             [*invocation, *command.args],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             encoding="utf-8",

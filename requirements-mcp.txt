@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# 官方 Model Context Protocol Python SDK；v2 稳定版发布前固定使用兼容的 v1。
+mcp>=1.27,<2

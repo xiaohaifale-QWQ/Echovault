@@ -1,4 +1,4 @@
--r requirements.txt
+-r requirements-mcp.txt
 
 pytest>=8.0,<9
 pytest-qt>=4.4,<5

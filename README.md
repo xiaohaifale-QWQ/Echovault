@@ -162,12 +162,24 @@ Echovault/
 ├── worker/                  # 独立 CPU/CUDA Whisper Worker
 ├── services/                # 素材扫描等业务服务
 ├── server/                  # LocalSend 与 HTTP 服务
+├── mcp_server.py            # MCP stdio / Streamable HTTP 接口
 ├── tests/                   # pytest 回归测试
 ├── Echovault.spec           # PyInstaller 发布目录配置
 ├── build.ps1                # Windows 构建脚本
 ├── requirements-cloud.txt   # Groq 在线模式依赖
 └── requirements-local.txt   # 本地 Whisper 依赖
 ```
+
+## MCP 接口
+
+现有 CLI 白名单可通过 MCP 提供给 AI 客户端。默认只读；写操作需要启动参数与逐次确认两道授权。
+
+```powershell
+pip install -r requirements-mcp.txt
+python mcp_server.py
+```
+
+详细配置与安全边界见 [MCP 接口使用指南](docs/MCP接口使用指南.md)。
 
 ## 致谢
 

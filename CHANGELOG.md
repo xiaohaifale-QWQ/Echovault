@@ -12,6 +12,9 @@
 
 ### Added
 
+- MCP stdio/Streamable HTTP server backed by the existing CLI whitelist, with read-only
+  defaults and two-step authorization for mutating commands.
+- Detailed MCP client configuration, tool schema, security, and validation guide.
 - Versioned UTF-8 JSON Lines protocol and a standalone ASR Worker diagnostic process.
 - Main-process Worker client with request timeouts, structured remote errors, progress events,
   and safe child-process shutdown.
