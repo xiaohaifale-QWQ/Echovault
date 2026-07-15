@@ -1,19 +1,36 @@
 """设置对话框"""
-import os, subprocess, sys
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLineEdit, QComboBox, QCheckBox, QPushButton,
-    QGroupBox, QLabel, QDialogButtonBox, QFileDialog, QKeySequenceEdit, QProgressBar, QMessageBox,
-    QWidget, QStackedWidget,
-)
-from PyQt6.QtCore import QUrl, pyqtSignal, QThread
+import os
+import subprocess
+import sys
+
+from PyQt6.QtCore import QThread, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QKeySequence
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QKeySequenceEdit,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
 from core.config import AppConfig, config_manager
 from core.model_download import DownloadCancelled, ModelDownloadError, download_model
+from core.process_utils import hidden_window_kwargs
 from core.runtime_detection import detect_hardware, select_runtime
 from core.runtime_manager import RuntimeInstallCancelled, RuntimeManagerError
 from core.runtime_setup import RuntimeSetupResult, RuntimeSetupService
-from core.process_utils import hidden_window_kwargs
 from core.voice_cache import clear_voice_cache, voice_cache_dir
 
 
@@ -32,7 +49,7 @@ class _CurrentPageStack(QStackedWidget):
 class _GPUDetectWorker(QThread):
     """后台扫描显卡"""
     result_ready = pyqtSignal(str)  # GPU 名称 或 错误信息
-    
+
     def run(self):
         try:
             # 先试 nvidia-smi
@@ -46,7 +63,7 @@ class _GPUDetectWorker(QThread):
                 return
         except Exception:
             pass
-        
+
         # 回退：检查 torch.cuda
         try:
             import torch
@@ -56,7 +73,7 @@ class _GPUDetectWorker(QThread):
                 return
         except ImportError:
             pass
-        
+
         self.result_ready.emit("❌ 未检测到 NVIDIA 显卡")
 
 
@@ -64,24 +81,24 @@ class _GPUInstallWorker(QThread):
     """后台安装 PyTorch CUDA 版本 — 双源 + 可取消"""
     progress = pyqtSignal(int, str)  # percent, message
     finished = pyqtSignal(bool, str)
-    
+
     def __init__(self):
         super().__init__()
         self._cancelled = False
         self._proc = None
-    
+
     def cancel(self):
         self._cancelled = True
         self.requestInterruption()
         if self._proc:
             try: self._proc.terminate()
             except: pass
-    
+
     def run(self):
         try:
             import re
             self.progress.emit(0, "正在解析 PyTorch CUDA 12.1 依赖...")
-            
+
             # 只用 PyTorch CDN（不用清华镜像，它会优先给 CPU 版 torch）
             self._proc = subprocess.Popen(
                 [sys.executable, "-m", "pip", "install", "torch", "torchvision", "torchaudio",
@@ -90,7 +107,7 @@ class _GPUInstallWorker(QThread):
                 text=True, bufsize=1, universal_newlines=True,
                 **hidden_window_kwargs(),
             )
-            
+
             pkg_name = ""
             for line in iter(self._proc.stdout.readline, ""):
                 if self._cancelled or self.isInterruptionRequested():
@@ -100,7 +117,7 @@ class _GPUInstallWorker(QThread):
                 line = line.strip()
                 if not line:
                     continue
-                
+
                 # "Downloading <url> (<size>)"
                 m = re.search(r'Downloading\s+(\S+)\s+\(([\d.]+\s*\w+)\)', line)
                 if m:
@@ -108,7 +125,7 @@ class _GPUInstallWorker(QThread):
                     size_str = m.group(2)
                     self.progress.emit(0, f"⬇ {pkg_name} ({size_str})")
                     continue
-                
+
                 # " 1.2/2.5 GB 5.2 MB/s eta 0:04:01"
                 m2 = re.search(r'(\d+\.?\d*)\s*/\s*(\d+\.?\d*)\s*(\w+)', line)
                 if m2:
@@ -121,7 +138,7 @@ class _GPUInstallWorker(QThread):
                         self.progress.emit(pct, f"⬇ {pkg_name} — {speed} ({pct}%)")
                     except: pass
                     continue
-                
+
                 # pip 百分比: "━━━━━ 45%"
                 m3 = re.search(r'(\d+)%', line)
                 if m3 and pkg_name:
@@ -130,12 +147,12 @@ class _GPUInstallWorker(QThread):
                     speed = speed_match.group(1) if speed_match else ""
                     self.progress.emit(pct, f"⬇ {pkg_name} — {speed} ({pct}%)")
                     continue
-                
+
                 if "already satisfied" in line.lower():
                     self.progress.emit(100, "已安装，跳过")
                 elif any(kw in line.lower() for kw in ['installing', 'successfully installed', 'collecting']):
                     self.progress.emit(-1, line[:100])
-            
+
             self._proc.wait()
             if self._cancelled or self.isInterruptionRequested():
                 self.finished.emit(False, "安装已取消")
@@ -246,7 +263,7 @@ class _TranslationInstallWorker(QThread):
 
 class SettingsDialog(QDialog):
     restart_requested = pyqtSignal()  # GPU 安装完成后请求重启
-    
+
     def __init__(self, config: AppConfig, parent=None, section: str = "recognition"):
         super().__init__(parent); self.config = config
         self.section = section
@@ -347,12 +364,12 @@ class SettingsDialog(QDialog):
         dl_btn_row.addStretch()
         self.download_buttons_row = af.rowCount()
         af.addRow("", dl_btn_row)
-        
+
         # 进度条行
         self.dl_bar = QProgressBar(); self.dl_bar.setVisible(False); self.dl_bar.setMaximum(100)
         self.download_progress_row = af.rowCount()
         af.addRow("", self.dl_bar)
-        
+
         # 速度/进度信息行
         self.dl_label = QLabel(""); self.dl_label.setStyleSheet("font-size:11px;color:#666;padding:2px 0")
         self.dl_label.setVisible(False)
@@ -366,7 +383,7 @@ class SettingsDialog(QDialog):
         # ── GPU 加速 ──
         self.gpu_group = QGroupBox("本地识别运行时"); gf = QFormLayout(self.gpu_group)
         self.gpu_group.setVisible(False)
-        
+
         gpu_scan_row = QHBoxLayout()
         self.btn_scan_gpu = QPushButton("重新检测"); self.btn_scan_gpu.setMaximumWidth(80)
         self.btn_scan_gpu.clicked.connect(self._on_scan_gpu)
@@ -375,7 +392,7 @@ class SettingsDialog(QDialog):
         gpu_scan_row.addWidget(self.gpu_info_label)
         gpu_scan_row.addStretch()
         gf.addRow("", gpu_scan_row)
-        
+
         gpu_install_row = QHBoxLayout()
         self.btn_install_gpu = QPushButton("自动配置本地识别")
         self.btn_install_gpu.clicked.connect(self._on_install_gpu)
@@ -387,13 +404,13 @@ class SettingsDialog(QDialog):
         gpu_install_row.addWidget(self.btn_cancel_gpu)
         gpu_install_row.addStretch()
         gf.addRow("", gpu_install_row)
-        
+
         self.gpu_progress = QProgressBar(); self.gpu_progress.setVisible(False); self.gpu_progress.setMaximum(100)
         gf.addRow("", self.gpu_progress)
         self.gpu_progress_label = QLabel(""); self.gpu_progress_label.setStyleSheet("font-size:11px;color:#666")
         self.gpu_progress_label.setVisible(False)
         gf.addRow("", self.gpu_progress_label)
-        
+
         self.gpu_check = QCheckBox("当前 GPU 运行时已启用")
         self.gpu_check.setEnabled(False)
         gf.addRow("", self.gpu_check)
@@ -414,6 +431,7 @@ class SettingsDialog(QDialog):
         language_items = [("中文", "zh"), ("英语", "en"), ("日语", "ja"), ("韩语", "ko")]
         self.translation_source_combo = QComboBox()
         self.translation_target_combo = QComboBox()
+        self.translation_source_combo.addItem("自动检测", "auto")
         for label, code in language_items:
             self.translation_source_combo.addItem(label, code)
             self.translation_target_combo.addItem(label, code)
@@ -560,6 +578,12 @@ class SettingsDialog(QDialog):
     def _refresh_translation_package_status(self, _index: int = -1):
         source = self.translation_source_combo.currentData()
         target = self.translation_target_combo.currentData()
+        if source == "auto":
+            self.translation_package_status.setText(
+                "批量翻译会逐份自动检测；下载本地库时请先选择具体源语言"
+            )
+            self.translation_download_button.setEnabled(False)
+            return
         if source == target:
             self.translation_package_status.setText("源语言和目标语言不能相同")
             self.translation_download_button.setEnabled(False)
@@ -575,7 +599,7 @@ class SettingsDialog(QDialog):
     def _on_download_translation_package(self):
         source = self.translation_source_combo.currentData()
         target = self.translation_target_combo.currentData()
-        if source == target:
+        if source == "auto" or source == target:
             return
         self.translation_download_button.setEnabled(False)
         self.translation_package_status.setText(f"正在下载并安装 {source} → {target}…")
@@ -682,7 +706,7 @@ class SettingsDialog(QDialog):
         self._gpu_detector = _GPUDetectWorker()
         self._gpu_detector.result_ready.connect(self._on_gpu_detected)
         self._gpu_detector.start()
-    
+
     def _on_gpu_detected(self, info: str):
         self.btn_scan_gpu.setEnabled(True)
         self.gpu_info_label.setText(info)
@@ -698,7 +722,7 @@ class SettingsDialog(QDialog):
         else:
             self.btn_install_gpu.setEnabled(has_gpu)
             self.btn_install_gpu.setText("安装 GPU 加速 (PyTorch CUDA ~2.5GB)")
-    
+
     def _on_install_gpu(self):
         self.btn_install_gpu.setVisible(False)
         self.btn_cancel_gpu.setVisible(True)
@@ -708,18 +732,18 @@ class SettingsDialog(QDialog):
         self._gpu_installer.progress.connect(self._on_gpu_dl_progress)
         self._gpu_installer.finished.connect(self._on_gpu_installed)
         self._gpu_installer.start()
-    
+
     def _on_cancel_gpu(self):
         if hasattr(self, '_gpu_installer') and self._gpu_installer.isRunning():
             self._gpu_installer.cancel()
             self.gpu_progress_label.setText("正在取消...")
             self.btn_cancel_gpu.setEnabled(False)
-    
+
     def _on_gpu_dl_progress(self, pct: int, msg: str):
         if pct >= 0:
             self.gpu_progress.setValue(pct)
         self.gpu_progress_label.setText(msg)
-    
+
     def _on_gpu_installed(self, ok: bool, msg: str):
         self.btn_install_gpu.setVisible(True)
         self.btn_cancel_gpu.setVisible(False)

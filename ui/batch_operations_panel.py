@@ -144,8 +144,8 @@ class BatchOperationsPanel(QWidget):
         translation_row.addWidget(self.translation_engine)
         self.translation_source = QComboBox()
         self.translation_target = QComboBox()
+        self.translation_source.addItem("自动检测", "auto")
         for label, code in [("中", "zh"), ("英", "en"), ("日", "ja"), ("韩", "ko")]:
-            self.translation_source.addItem(label, code)
             self.translation_target.addItem(label, code)
         translation_row.addWidget(self.translation_source)
         translation_row.addWidget(QLabel("→"))
@@ -198,9 +198,7 @@ class BatchOperationsPanel(QWidget):
         if self.config is None:
             return
         self._select_data(self.translation_engine, self.config.translation_engine)
-        self._select_data(
-            self.translation_source, self.config.translation_source_language
-        )
+        self._select_data(self.translation_source, "auto")
         self._select_data(
             self.translation_target, self.config.translation_target_language
         )
@@ -245,4 +243,3 @@ class BatchOperationsPanel(QWidget):
         )
         failed = sum(1 for item in results if item["status"] == "failed")
         self.log.append(f"\n完成：匹配 {matched} 个，失败 {failed} 个。")
-

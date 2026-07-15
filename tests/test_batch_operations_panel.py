@@ -33,6 +33,8 @@ def test_batch_panel_consolidates_three_operations_and_reports_scope():
     assert panel.batch_transcribe_button.text() == "开始批量识别"
     assert panel.batch_translate_button.text() == "开始批量翻译"
     assert panel.batch_online_button.text() == "开始批量在线匹配"
+    assert panel.translation_source.currentText() == "自动检测"
+    assert panel.translation_source.currentData() == "auto"
     assert "当前素材：3 个" in panel.scope_label.text()
     assert "待识别 1 个" in panel.scope_label.text()
     assert "可翻译 1 个" in panel.scope_label.text()
@@ -65,4 +67,3 @@ def test_batch_online_worker_reports_best_match_without_writing(monkeypatch, tmp
     assert captured[0]["status"] == "matched"
     assert captured[0]["score"] == 93.0
     assert not media_path.with_suffix(".lrc").exists()
-

@@ -65,6 +65,8 @@
   timeline, the current right reference text, and immediately refreshes the left result.
 - Online Matching now builds a combined catalog from configured music and video libraries,
   labels and filters them by source, and places Start/Re-recognize beside Search LRCLIB.
+- Batch translation now uses automatic per-file source-language detection and translates
+  each LRC into the selected target language; AI and offline translation both accept Auto.
 
 ## 0.3.0-dev — 2026-07-13
 

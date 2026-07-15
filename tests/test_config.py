@@ -127,6 +127,9 @@ def test_update_config_value_validates_provider_and_booleans():
     assert config.has_xunfei_credentials is True
     assert config.voice_input_shortcut == "Ctrl+Alt+V"
 
+    update_config_value(config, "translation_source_language", "auto")
+    assert config.translation_source_language == "auto"
+
     update_config_value(config, "asr.provider", "xunfei")
     assert config.asr.provider == "xunfei"
     with pytest.raises(ValueError, match="布尔值"):

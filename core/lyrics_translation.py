@@ -15,6 +15,7 @@ _TIMED_LINE = re.compile(
     r"^(?P<prefix>(?:\[\d{1,3}:\d{2}(?:\.\d{2,3})?\])+)(?P<text>.*)$"
 )
 LANGUAGE_NAMES = {
+    "auto": "自动检测的源语言",
     "zh": "简体中文",
     "en": "英语",
     "ja": "日语",
@@ -25,6 +26,20 @@ LANGUAGE_NAMES = {
     "ru": "俄语",
 }
 logging.getLogger("argostranslate").setLevel(logging.WARNING)
+
+
+def detect_lyrics_language(lines: Sequence[str]) -> str:
+    """Detect the supported source language from lyric writing systems."""
+    text = "\n".join(lines)
+    if re.search(r"[\u3040-\u30ff]", text):
+        return "ja"
+    if re.search(r"[\uac00-\ud7af]", text):
+        return "ko"
+    if re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", text):
+        return "zh"
+    if re.search(r"[A-Za-z]", text):
+        return "en"
+    raise RuntimeError("无法自动检测歌词语言，请手工选择源语言。")
 
 
 def translation_output_path(lrc_path: str | Path, target_language: str) -> Path:
@@ -102,6 +117,10 @@ def translate_lines_with_ai(
 def translate_lines_locally(
     lines: Sequence[str], *, source_language: str, target_language: str
 ) -> list[str]:
+    if source_language == "auto":
+        source_language = detect_lyrics_language(lines)
+    if source_language == target_language:
+        return list(lines)
     try:
         import argostranslate.translate
     except ImportError as exc:

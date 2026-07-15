@@ -1,10 +1,21 @@
 """Song detail + lyrics preview panel"""
-import os
 from pathlib import Path
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QTextEdit,
-    QGroupBox, QHBoxLayout, QFrame, QComboBox)
+
 from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
 from core.lrc_parser import parse_lrc_file
+
 
 class DetailPanel(QWidget):
     transcribe_clicked = pyqtSignal(str)
@@ -23,7 +34,7 @@ class DetailPanel(QWidget):
         l = QVBoxLayout(self); l.setContentsMargins(6,6,6,6)
         t = QLabel("歌曲详情"); t.setStyleSheet("font-weight:bold;font-size:13px;padding:4px")
         l.addWidget(t)
-        
+
         ig = QGroupBox("歌曲信息"); il = QVBoxLayout(ig)
         self.lbl_name = QLabel("未选择歌曲"); self.lbl_name.setWordWrap(True)
         self.lbl_name.setStyleSheet("font-size:14px;font-weight:bold"); il.addWidget(self.lbl_name)
@@ -31,7 +42,7 @@ class DetailPanel(QWidget):
         self.lbl_path.setStyleSheet("color:#666;font-size:11px"); il.addWidget(self.lbl_path)
         self.lbl_status = QLabel(""); self.lbl_status.setStyleSheet("font-size:12px;margin-top:4px")
         il.addWidget(self.lbl_status); l.addWidget(ig)
-        
+
         bl = QHBoxLayout()
         self.btn_transcribe = QPushButton("识别歌词"); self.btn_transcribe.setMinimumHeight(36)
         self.btn_transcribe.setStyleSheet("QPushButton{background:#1976D2;color:white;border-radius:4px;font-size:13px;font-weight:bold}QPushButton:hover{background:#1565C0}QPushButton:disabled{background:#ccc}")
@@ -40,9 +51,9 @@ class DetailPanel(QWidget):
         self.btn_edit = QPushButton("编辑歌词"); self.btn_edit.setMinimumHeight(36); self.btn_edit.setEnabled(False)
         self.btn_edit.clicked.connect(lambda: self._current_song and self.edit_lyrics_clicked.emit(self._current_song["path"]))
         bl.addWidget(self.btn_edit); l.addLayout(bl)
-        
+
         line = QFrame(); line.setFrameShape(QFrame.Shape.HLine); line.setStyleSheet("color:#ddd"); l.addWidget(line)
-        
+
         lg = QGroupBox("歌词预览与翻译"); ll = QVBoxLayout(lg)
         translation_row = QHBoxLayout()
         self.translation_engine = QComboBox()
@@ -51,6 +62,7 @@ class DetailPanel(QWidget):
         translation_row.addWidget(self.translation_engine)
         self.translation_source = QComboBox()
         self.translation_target = QComboBox()
+        self.translation_source.addItem("自动", "auto")
         for label, code in [("中", "zh"), ("英", "en"), ("日", "ja"), ("韩", "ko")]:
             self.translation_source.addItem(label, code)
             self.translation_target.addItem(label, code)
@@ -181,7 +193,7 @@ class DetailPanel(QWidget):
     def _load(self, path):
         try:
             lrc = parse_lrc_file(path)
-            lines = []; 
+            lines = []
             for ln in sorted(lrc.lines, key=lambda x: x.timestamp):
                 m,s=divmod(ln.timestamp,60); lines.append(f"[{int(m):02d}:{s:05.2f}] {ln.text}")
             self.lyrics_text.setPlainText("\n".join(lines))

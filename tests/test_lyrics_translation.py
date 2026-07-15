@@ -7,7 +7,9 @@ import pytest
 from core.ai_assistant import AISettings
 from core.lyrics_translation import (
     _decode_translation_response,
+    detect_lyrics_language,
     local_translation_available,
+    translate_lines_locally,
     translate_lines_with_ai,
     translate_lrc_file,
     translation_output_path,
@@ -110,3 +112,41 @@ def test_local_translation_status_requires_an_actual_translation(monkeypatch):
     assert local_translation_available("en", "zh") is False
     source.translation = object()
     assert local_translation_available("en", "zh") is True
+
+
+@pytest.mark.parametrize(
+    ("lyrics", "expected"),
+    [
+        (["Hello world"], "en"),
+        (["繁體歌詞"], "zh"),
+        (["夢を見ている"], "ja"),
+        (["사랑해"], "ko"),
+    ],
+)
+def test_detect_lyrics_language_by_writing_system(lyrics, expected):
+    assert detect_lyrics_language(lyrics) == expected
+
+
+def test_ai_translation_prompt_requests_automatic_source_detection(monkeypatch):
+    captured = {}
+
+    def fake_complete(_settings, messages, temperature):
+        captured["prompt"] = messages[1]["content"]
+        return '{"translations":["你好"]}'
+
+    monkeypatch.setattr("core.lyrics_translation.complete", fake_complete)
+
+    translate_lines_with_ai(
+        ["Hello"],
+        settings=AISettings(api_key="secret"),
+        source_language="auto",
+        target_language="zh",
+    )
+
+    assert "自动检测" in captured["prompt"]
+
+
+def test_local_auto_detection_skips_translation_when_already_target_language():
+    assert translate_lines_locally(
+        ["已经是中文"], source_language="auto", target_language="zh"
+    ) == ["已经是中文"]

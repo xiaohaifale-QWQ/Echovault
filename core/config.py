@@ -15,6 +15,7 @@ SUPPORTED_TRANSLATION_ENGINES = {"ai", "local"}
 SUPPORTED_PROVIDERS = {"groq", "local", "xunfei"}
 SUPPORTED_LOCAL_MODELS = {"tiny", "base", "small", "medium", "large"}
 SUPPORTED_LANGUAGES = {"zh", "en", "ja", "ko"}
+SUPPORTED_TRANSLATION_SOURCE_LANGUAGES = SUPPORTED_LANGUAGES | {"auto"}
 
 
 @dataclass
@@ -62,7 +63,7 @@ class AppConfig:
     local_ai_model_name: str = ""
     local_ai_api_key: str = ""
     translation_engine: str = "ai"
-    translation_source_language: str = "en"
+    translation_source_language: str = "auto"
     translation_target_language: str = "zh"
     voice_input_shortcut: str = "Ctrl+Shift+Space"
 
@@ -211,10 +212,12 @@ class ConfigManager:
         c.translation_engine = (
             translation_engine if translation_engine in SUPPORTED_TRANSLATION_ENGINES else "ai"
         )
-        source_language = data.get("translation_source_language", "en")
+        source_language = data.get("translation_source_language", "auto")
         target_language = data.get("translation_target_language", "zh")
         c.translation_source_language = (
-            source_language if source_language in SUPPORTED_LANGUAGES else "en"
+            source_language
+            if source_language in SUPPORTED_TRANSLATION_SOURCE_LANGUAGES
+            else "auto"
         )
         c.translation_target_language = (
             target_language if target_language in SUPPORTED_LANGUAGES else "zh"
@@ -293,7 +296,11 @@ def update_config_value(config: AppConfig, key: str, value: str) -> None:
         if value not in SUPPORTED_TRANSLATION_ENGINES:
             raise ValueError(f"不支持的翻译引擎: {value}")
         config.translation_engine = value
-    elif key in {"translation_source_language", "translation_target_language"}:
+    elif key == "translation_source_language":
+        if value not in SUPPORTED_TRANSLATION_SOURCE_LANGUAGES:
+            raise ValueError(f"不支持的翻译语言: {value}")
+        setattr(config, key, value)
+    elif key == "translation_target_language":
         if value not in SUPPORTED_LANGUAGES:
             raise ValueError(f"不支持的翻译语言: {value}")
         setattr(config, key, value)

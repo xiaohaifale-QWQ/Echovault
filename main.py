@@ -844,7 +844,11 @@ def main():
     x = s2.add_parser("translate", help="Translate one LRC file or a folder")
     x.add_argument("target")
     x.add_argument("--engine", choices=["ai", "local"])
-    x.add_argument("--source", dest="source_language", choices=["zh", "en", "ja", "ko"])
+    x.add_argument(
+        "--source",
+        dest="source_language",
+        choices=["auto", "zh", "en", "ja", "ko"],
+    )
     x.add_argument("--target-language", choices=["zh", "en", "ja", "ko"])
     x.add_argument("--json", dest="json_output", action="store_true")
     x.set_defaults(func=cmd_lyrics)
