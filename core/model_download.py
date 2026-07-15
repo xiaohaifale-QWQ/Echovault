@@ -116,6 +116,15 @@ def _is_valid_cached_model(path: Path, model: str) -> bool:
     return path.is_file() and bool(accepted) and file_sha256(path) in accepted
 
 
+def whisper_model_installed(
+    model: str, cache_dir: str | os.PathLike[str] | None = None
+) -> bool:
+    """Return whether a cached Whisper checkpoint exists and passes SHA-256."""
+
+    target_dir = Path(cache_dir) if cache_dir is not None else default_cache_dir()
+    return _is_valid_cached_model(target_dir / f"{model}.pt", model)
+
+
 def download_model(
     model: str,
     cache_dir: str | os.PathLike[str] | None = None,
