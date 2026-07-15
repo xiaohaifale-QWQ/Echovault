@@ -14,5 +14,11 @@ def test_vocal_separation_panel_has_settings_above_mixer(tmp_path):
     assert panel.model_combo.count() == len(SEPARATION_MODELS)
     assert panel.accompaniment_waveform is not None
     assert panel.vocal_waveform is not None
+    assert panel.audio_device_combo.count() >= 1
     assert not panel.play_button.isEnabled()
     assert not panel.save_mix_button.isEnabled()
+    assert not panel.save_accompaniment_button.isEnabled()
+    assert not panel.save_vocal_button.isEnabled()
+    assert panel.save_accompaniment_button.text() == "单独保存伴奏"
+    assert panel.save_vocal_button.text() == "单独保存人声"
+    assert "保存调音结果" in panel.save_mix_button.text()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import subprocess
 import time
 import urllib.request
@@ -396,3 +397,24 @@ def mix_stems(
     finally:
         temp_path.unlink(missing_ok=True)
     return output_path
+
+
+def export_stem(
+    source_path: str | os.PathLike[str], output_path: str | os.PathLike[str]
+) -> Path:
+    """Copy one generated stem to a user-selected path with atomic replacement."""
+
+    source = Path(source_path)
+    output = Path(output_path)
+    if not source.is_file():
+        raise SeparationError(f"分离音轨不存在：{source}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(f".{output.stem}.copying{output.suffix}")
+    try:
+        shutil.copyfile(source, temporary)
+        os.replace(temporary, output)
+    except OSError as exc:
+        raise SeparationError(f"保存分离音轨失败：{exc}") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+    return output

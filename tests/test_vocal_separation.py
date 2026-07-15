@@ -87,3 +87,15 @@ def test_mix_stems_builds_independent_volume_filter(monkeypatch, tmp_path):
     filter_value = calls[0][calls[0].index("-filter_complex") + 1]
     assert "volume=0.400" in filter_value
     assert "volume=0.700" in filter_value
+
+
+def test_export_stem_copies_atomically(tmp_path):
+    source = tmp_path / "vocals.wav"
+    source.write_bytes(b"vocal stem")
+    output = tmp_path / "exports" / "song-vocals.wav"
+
+    result = vocal_separation.export_stem(source, output)
+
+    assert result == output
+    assert output.read_bytes() == b"vocal stem"
+    assert not output.with_name(".song-vocals.copying.wav").exists()

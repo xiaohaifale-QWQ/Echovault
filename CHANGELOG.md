@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Local lyric playback and the two-stem preview now expose the actual Windows output device,
+  rebind and unmute it immediately before playback, refresh after device hot-plug, and report
+  the selected speaker or decoder errors instead of silently playing through the wrong device.
 - Batch recognition, translation, and online matching now stream the current file, active
   stage, per-item result, overall progress, and final success/failure counts into the Batch
   workspace instead of showing most work only in the status bar after completion.
@@ -74,6 +77,8 @@
 
 ### Changed
 
+- The vocal mixer now aligns accompaniment and vocal volume rows, provides separate atomic
+  export buttons for each stem, and places the adjusted combined-result export on its own row.
 - The existing “Enable Demucs vocal separation” recognition option now runs the selected
   local ASR against a temporary vocal stem and cleans all intermediate files, instead of
   being a saved but unused setting.
