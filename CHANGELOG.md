@@ -20,6 +20,8 @@
 
 ### Added
 
+- An F1 Help dialog with offline quick guides for local AI deployment, OpenAI-compatible
+  endpoints, MCP write authorization, translation, and online lyric matching.
 - A fourth right-side Online Matching tab backed by LRCLIB, with metadata-assisted search,
   ranked candidates, online preview, local/reference similarity, and synchronized-LRC download.
 - AI lyric calibration against a public reference while preserving every local timestamp

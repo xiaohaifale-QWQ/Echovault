@@ -35,6 +35,7 @@ from ui.song_list_panel import SongListPanel
 from ui.detail_panel import DetailPanel
 from ui.settings_dialog import SettingsDialog
 from ui.key_manager_dialog import KeyManagerDialog
+from ui.help_dialog import HelpDialog
 from ui.ai_chat_panel import AIChatPanel, CLICommandWorker
 from ui.online_lyrics_panel import OnlineLyricsPanel, LyricsCalibrationWorker
 from core.ai_control import validate_cli_command
@@ -198,7 +199,12 @@ class MainWindow(QMainWindow):
         
         # 帮助菜单
         help_menu = menubar.addMenu("帮助(&H)")
-        
+
+        guide_action = QAction("使用与接口说明(&G)", self)
+        guide_action.setShortcut("F1")
+        guide_action.triggered.connect(self._on_help_guide)
+        help_menu.addAction(guide_action)
+
         about_action = QAction("关于(&A)", self)
         about_action.triggered.connect(self._on_about)
         help_menu.addAction(about_action)
@@ -968,8 +974,13 @@ class MainWindow(QMainWindow):
             self, "关于 琳琅乐府",
             "<h3>琳琅乐府</h3>"
             "<p>AI 歌词识别 + 文件同步</p>"
-            "<p>版本: 0.1.0 (Phase 1)</p>"
+            "<p>版本: 0.4.0-dev</p>"
             "<hr>"
             "<p>技术栈: Python + PyQt6 + Whisper</p>"
             "<p>ASR: Groq Whisper / OpenAI Whisper</p>"
         )
+
+    def _on_help_guide(self):
+        """Show offline documentation bundled into the desktop UI."""
+        self.help_dialog = HelpDialog(self)
+        self.help_dialog.exec()
