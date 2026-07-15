@@ -34,6 +34,7 @@ from core.online_lyrics import (
     compare_lyrics,
     media_search_metadata,
     search_lrclib,
+    simplify_lyrics_content,
     timed_text_entries,
 )
 
@@ -75,11 +76,14 @@ class LyricsCalibrationWorker(QThread):
     completed = pyqtSignal(str, str)
     failed = pyqtSignal(str)
 
-    def __init__(self, lrc_path, match, ai_settings, parent=None):
+    def __init__(
+        self, lrc_path, match, ai_settings, local_content=None, parent=None
+    ):
         super().__init__(parent)
         self.lrc_path = lrc_path
         self.match = match
         self.ai_settings = ai_settings
+        self.local_content = local_content
 
     def run(self):
         reference = self.match.synced_lyrics or self.match.plain_lyrics
@@ -90,6 +94,7 @@ class LyricsCalibrationWorker(QThread):
                 ai_settings=self.ai_settings,
                 track_name=self.match.track_name,
                 artist_name=self.match.artist_name,
+                local_content=self.local_content,
             )
             self.completed.emit(str(output), str(backup))
         except Exception as exc:
@@ -415,7 +420,7 @@ class OnlineLyricsPanel(QWidget):
             lambda: self._request_action("merge_online_timeline")
         )
         action_grid.addWidget(self.merge_online_button, 2, 1)
-        self.calibrate_button = QPushButton("AI 匹配核对并校准")
+        self.calibrate_button = QPushButton("AI 核对并校准左侧歌词")
         self.calibrate_button.clicked.connect(
             lambda: self._request_action("calibrate")
         )
@@ -579,7 +584,9 @@ class OnlineLyricsPanel(QWidget):
             return
         if self._comparison is not None:
             self._comparison.set_online_content(
-                match.synced_lyrics or match.plain_lyrics
+                simplify_lyrics_content(
+                    match.synced_lyrics or match.plain_lyrics
+                )
             )
         self.refresh_local_comparison()
         self._refresh_action_state()

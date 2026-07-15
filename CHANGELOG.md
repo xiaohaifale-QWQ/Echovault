@@ -58,6 +58,12 @@
 - One-click local runtime setup in Settings: cross-vendor detection, signed Release manifest
   retrieval, staged Worker self-test, activation, cancellation, and CPU selection.
 
+### Changed
+
+- LRCLIB candidates are converted from Traditional to Simplified Chinese before preview,
+  merge, calibration, or batch application. AI calibration now uses the current edited left
+  timeline, the current right reference text, and immediately refreshes the left result.
+
 ## 0.3.0-dev — 2026-07-13
 
 ### Added

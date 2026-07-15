@@ -15,6 +15,7 @@ from core.online_lyrics import (
     merge_lrc_timeline_text,
     search_lrclib,
     select_best_synced_match,
+    simplify_lyrics_content,
 )
 
 
@@ -231,3 +232,26 @@ def test_apply_edited_lyrics_backs_up_before_replacing(tmp_path):
     assert output == lrc
     assert backup.read_text(encoding="utf-8") == original
     assert lrc.read_text(encoding="utf-8") == "[00:01.00]edited\n"
+
+
+def test_online_lyrics_are_simplified_without_changing_timestamps():
+    assert simplify_lyrics_content(
+        "[00:01.00]繁體歌詞：愛與夢\n"
+    ) == "[00:01.00]繁体歌词：爱与梦\n"
+
+
+def test_calibration_uses_current_left_editor_content(tmp_path):
+    lrc = tmp_path / "song.lrc"
+    original = "[00:01.00]disk old\n"
+    lrc.write_text(original, encoding="utf-8")
+
+    calibrate_lrc_with_reference(
+        lrc,
+        "reference",
+        ai_settings=AISettings(api_key="unused"),
+        local_content="[00:02.50]edited left\n",
+        calibrator=lambda local, reference: ["corrected from right"],
+    )
+
+    assert lrc.read_text(encoding="utf-8") == "[00:02.50]corrected from right\n"
+    assert lrc.with_suffix(".lrc.bak").read_text(encoding="utf-8") == original

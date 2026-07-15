@@ -109,3 +109,27 @@ def test_online_panel_offers_local_recognition_without_local_lrc(
     panel._request_action("transcribe_local")
 
     assert captured == [(str(media_path), None, "transcribe_local")]
+
+
+def test_online_panel_simplifies_selected_candidate(monkeypatch, tmp_path):
+    ensure_app()
+    monkeypatch.setattr(
+        "ui.online_lyrics_panel.media_search_metadata",
+        lambda _path: MediaSearchMetadata("Song", "", "", 10.0),
+    )
+    media_path = tmp_path / "Song.mp3"
+    panel = keep_widget(OnlineLyricsPanel())
+    comparison = keep_widget(OnlineLyricsComparisonPane())
+    panel.bind_comparison_pane(comparison)
+    panel.show_song({"name": media_path.name, "path": str(media_path)})
+    match = _match()
+    match = LyricsMatch(
+        **{
+            **match.__dict__,
+            "synced_lyrics": "[00:01.00]繁體歌詞：愛與夢",
+        }
+    )
+
+    panel._show_results([match])
+
+    assert comparison.online_content() == "[00:01.00]繁体歌词：爱与梦"

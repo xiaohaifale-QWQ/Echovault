@@ -502,16 +502,17 @@ class MainWindow(QMainWindow):
             return
         reply = QMessageBox.question(
             self,
-            "AI 核对并校准",
-            "AI 将参考所选公开歌词修正本地歌词文字。\n"
-            "本地时间戳和音频保持不变，原 LRC 会先备份。是否继续？",
+            "AI 核对并校准左侧歌词",
+            "AI 将保留左侧时间轴，用右侧在线歌词校正左侧文字，"
+            "完成后直接刷新左侧。\n"
+            "音频保持不变，原 LRC 会先备份。是否继续？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
         self.online_lyrics_panel.status_label.setText("AI 正在核对并校准歌词…")
         self.online_calibration_worker = LyricsCalibrationWorker(
-            str(lrc_path), match, ai_settings, self
+            str(lrc_path), match, ai_settings, payload.local_content, self
         )
         self.online_calibration_worker.completed.connect(
             lambda output, backup: self._on_online_calibration_finished(

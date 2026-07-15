@@ -14,6 +14,8 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
+from opencc import OpenCC
+
 from core.ai_assistant import AISettings, complete
 from core.lrc_parser import parse_timestamp
 from core.lyrics_translation import timed_text_positions
@@ -23,6 +25,7 @@ LRCLIB_USER_AGENT = "Echovault/0.3.0 (https://github.com/xiaohaifale-QWQ/Echovau
 _TIMESTAMP_PREFIX = re.compile(r"^(?:\[\d{1,3}:\d{2}(?:\.\d{2,3})?\])+\s*")
 _TIMESTAMP_TAG = re.compile(r"\[\d{1,3}:\d{2}(?:\.\d{2,3})?\]")
 _METADATA_LINE = re.compile(r"^\[[A-Za-z]+:.*\]$")
+_T2S_CONVERTER = OpenCC("t2s")
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,11 @@ class TimedTextEntry:
     prefix: str
     timestamp: float
     text: str
+
+
+def simplify_lyrics_content(content: str) -> str:
+    """Convert an online lyric payload to Simplified Chinese without changing timing."""
+    return _T2S_CONVERTER.convert(content)
 
 
 def _record_from_payload(payload: Any) -> LyricsMatch | None:
@@ -392,7 +400,9 @@ def apply_synced_lyrics(lrc_path: str | Path, match: LyricsMatch) -> tuple[Path,
     if not timed_lines:
         raise RuntimeError("所选 LRCLIB 同步歌词没有有效时间戳。")
     path = Path(lrc_path)
-    backup = _atomic_replace_with_backup(path, match.synced_lyrics)
+    backup = _atomic_replace_with_backup(
+        path, simplify_lyrics_content(match.synced_lyrics)
+    )
     return path, backup
 
 
@@ -423,9 +433,16 @@ def calibrate_lrc_with_reference(
     track_name: str = "",
     artist_name: str = "",
     calibrator=None,
+    local_content: str | None = None,
 ) -> tuple[Path, Path]:
     path = Path(lrc_path)
-    content = path.read_text(encoding="utf-8")
+    if not path.is_file():
+        raise RuntimeError("校准要求本地 LRC 已存在。")
+    content = (
+        local_content
+        if local_content is not None
+        else path.read_text(encoding="utf-8")
+    )
     raw_lines, positions, local_lines = timed_text_positions(content)
     reference_lines = _reference_lines(reference_lyrics)
     if not local_lines:
