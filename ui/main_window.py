@@ -13,33 +13,47 @@
 import os
 from pathlib import Path
 
-from PyQt6.QtWidgets import (
-    QMainWindow, QSplitter, QMenuBar, QMenu, QStatusBar,
-    QMessageBox, QFileDialog, QLabel, QWidget, QVBoxLayout,
-    QTabWidget, QPushButton, QProgressBar, QStackedWidget,
-)
-from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut
+from PyQt6.QtWidgets import (
+    QFileDialog,
+    QLabel,
+    QMainWindow,
+    QMenu,
+    QMenuBar,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSplitter,
+    QStackedWidget,
+    QStatusBar,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
-from core.config import config_manager, AppConfig
+from core.ai_control import validate_cli_command
 from core.asr.router import ASRRouter, get_router
+from core.config import AppConfig, config_manager
 from core.environment import build_environment_report
 from core.resource_monitor import format_resource_usage, sample_resource_usage
-from services.library_service import scan_audio
-from core.video_library import scan_videos
 from core.video_aggregation import write_video_transcript_timeline
-
-from ui.library_panel import LibraryPanel
-from ui.lyrics_preview_panel import LyricsPreviewPanel
-from ui.song_list_panel import SongListPanel
-from ui.detail_panel import DetailPanel
-from ui.settings_dialog import SettingsDialog
-from ui.key_manager_dialog import KeyManagerDialog
-from ui.help_dialog import HelpDialog
+from core.video_library import scan_videos
+from services.library_service import scan_audio
 from ui.ai_chat_panel import AIChatPanel, CLICommandWorker
 from ui.batch_operations_panel import BatchOnlineLyricsWorker, BatchOperationsPanel
-from ui.online_lyrics_panel import OnlineLyricsPanel, LyricsCalibrationWorker
-from core.ai_control import validate_cli_command
+from ui.detail_panel import DetailPanel
+from ui.help_dialog import HelpDialog
+from ui.key_manager_dialog import KeyManagerDialog
+from ui.library_panel import LibraryPanel
+from ui.lyrics_preview_panel import LyricsPreviewPanel
+from ui.online_lyrics_panel import (
+    LyricsCalibrationWorker,
+    OnlineLyricsComparisonPane,
+    OnlineLyricsPanel,
+)
+from ui.settings_dialog import SettingsDialog
+from ui.song_list_panel import SongListPanel
 from ui.sync_panel import SyncPanel
 
 
@@ -88,9 +102,11 @@ class MainWindow(QMainWindow):
         # 左侧：素材列表
         self.song_list_panel = SongListPanel()
         self.lyrics_preview_panel = LyricsPreviewPanel()
+        self.online_comparison_panel = OnlineLyricsComparisonPane()
         self.left_stack = QStackedWidget()
         self.left_stack.addWidget(self.song_list_panel)
         self.left_stack.addWidget(self.lyrics_preview_panel)
+        self.left_stack.addWidget(self.online_comparison_panel)
         splitter.addWidget(self.left_stack)
         
         # 右侧：选项卡
@@ -103,7 +119,7 @@ class MainWindow(QMainWindow):
         self.right_tabs.addTab(self.library_panel, "素材库")
 
         self.online_lyrics_panel = OnlineLyricsPanel()
-        self.online_lyrics_panel.bind_local_preview(self.lyrics_preview_panel)
+        self.online_lyrics_panel.bind_comparison_pane(self.online_comparison_panel)
         self.right_tabs.addTab(self.online_lyrics_panel, "在线匹配")
 
         self.batch_operations_panel = BatchOperationsPanel(self.config)
@@ -114,9 +130,9 @@ class MainWindow(QMainWindow):
         
         splitter.addWidget(self.right_tabs)
         
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        splitter.setSizes([520, 680])
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([720, 500])
         
         self._ai_panel_width = 340
         self._ai_mode_enabled = False
@@ -415,6 +431,10 @@ class MainWindow(QMainWindow):
         self.left_stack.setCurrentWidget(self.lyrics_preview_panel)
 
     def _on_online_lyrics_action(self, media_path: str, payload, action: str):
+        if action == "transcribe_local":
+            self._on_transcribe_single(media_path)
+            return
+
         lrc_path = Path(media_path).with_suffix(".lrc")
         if action in {
             "use_local",
@@ -523,7 +543,6 @@ class MainWindow(QMainWindow):
         self.lyrics_preview_panel.show_song(song)
         self.online_lyrics_panel._song = song
         self.online_lyrics_panel.reload_local_lyrics()
-        self.online_lyrics_panel.refresh_local_comparison()
         self.online_lyrics_panel.status_label.setText("本地歌词已更新，音频文件未修改。")
         self._refresh_statusbar()
 
@@ -538,16 +557,13 @@ class MainWindow(QMainWindow):
 
     def _on_right_tab_changed(self, index: int):
         current_panel = self.right_tabs.widget(index)
-        show_lyrics = current_panel in {
-            self.library_panel,
-            self.online_lyrics_panel,
-        }
-        self.lyrics_preview_panel.set_online_comparison_mode(
-            current_panel is self.online_lyrics_panel
-        )
-        self.left_stack.setCurrentWidget(
-            self.lyrics_preview_panel if show_lyrics else self.song_list_panel
-        )
+        if current_panel is self.library_panel:
+            left_panel = self.lyrics_preview_panel
+        elif current_panel is self.online_lyrics_panel:
+            left_panel = self.online_comparison_panel
+        else:
+            left_panel = self.song_list_panel
+        self.left_stack.setCurrentWidget(left_panel)
 
     def _on_material_directories_changed(self, mode: str, directories: list[str]):
         if mode == "video":
@@ -869,6 +885,8 @@ class MainWindow(QMainWindow):
                 if s["path"] == file_path:
                     self.detail_panel.show_song(s)
                     break
+            if self.online_lyrics_panel._song.get("path") == file_path:
+                self.online_lyrics_panel.reload_local_lyrics()
         # 自动检测纯音乐：歌词太短（<20字）可能是纯音乐
         if self.library_panel.mode == "music" and success and lrc_path and os.path.exists(lrc_path):
             try:

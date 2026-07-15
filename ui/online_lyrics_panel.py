@@ -1,4 +1,4 @@
-"""Five-workspace online lyric comparison, editing, merging, and playback UI."""
+"""Online lyric search controls and the separate left-side comparison workspace."""
 
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -7,16 +7,21 @@ from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor, QTextFormat
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QSlider,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -92,7 +97,7 @@ class LyricsCalibrationWorker(QThread):
 
 
 class LyricsCompareEditor(QPlainTextEdit):
-    """Read-only comparison view that enters edit mode on double click."""
+    """Read-only lyric view that enters edit mode on double click."""
 
     edit_requested = pyqtSignal(object)
 
@@ -123,7 +128,195 @@ class LyricsCompareEditor(QPlainTextEdit):
         return line_index
 
 
+class OnlineLyricsComparisonPane(QWidget):
+    """Main-window left pane: local/online lyrics side by side, player below."""
+
+    content_changed = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._song: dict = {}
+        self._seeking = False
+        self._setup_ui()
+        self._setup_player()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        heading = QLabel("歌词核对")
+        heading.setStyleSheet("font-weight:bold;font-size:14px;padding:4px")
+        layout.addWidget(heading)
+        self.song_label = QLabel("请在右侧选择歌曲并搜索在线歌词")
+        self.song_label.setWordWrap(True)
+        self.song_label.setStyleSheet("color:#666;padding:2px 4px")
+        layout.addWidget(self.song_label)
+
+        comparison = QSplitter(Qt.Orientation.Horizontal)
+        local_group = QGroupBox("左：本地识别歌词（双击修改）")
+        local_layout = QVBoxLayout(local_group)
+        self.local_editor = LyricsCompareEditor()
+        self.local_editor.setReadOnly(True)
+        self.local_editor.setPlaceholderText("本地尚未识别；请使用右侧“识别本地歌词”")
+        self.local_editor.edit_requested.connect(self._begin_editing)
+        self.local_editor.textChanged.connect(self.content_changed.emit)
+        local_layout.addWidget(self.local_editor)
+        comparison.addWidget(local_group)
+
+        online_group = QGroupBox("右：在线匹配歌词（双击修改）")
+        online_layout = QVBoxLayout(online_group)
+        self.online_editor = LyricsCompareEditor()
+        self.online_editor.setReadOnly(True)
+        self.online_editor.setPlaceholderText("右侧搜索并选择结果后显示在线歌词")
+        self.online_editor.edit_requested.connect(self._begin_editing)
+        self.online_editor.textChanged.connect(self.content_changed.emit)
+        online_layout.addWidget(self.online_editor)
+        comparison.addWidget(online_group)
+        comparison.setChildrenCollapsible(False)
+        comparison.setSizes([1, 1])
+        layout.addWidget(comparison, 1)
+
+        player_group = QGroupBox("播放器（播放本地素材，同步滚动两侧歌词）")
+        player_group.setMinimumHeight(82)
+        player_layout = QHBoxLayout(player_group)
+        self.play_button = QPushButton("播放")
+        self.play_button.setEnabled(False)
+        self.play_button.clicked.connect(self._toggle_playback)
+        player_layout.addWidget(self.play_button)
+        self.position_slider = QSlider(Qt.Orientation.Horizontal)
+        self.position_slider.setRange(0, 0)
+        self.position_slider.sliderPressed.connect(self._on_seek_started)
+        self.position_slider.sliderReleased.connect(self._on_seek_finished)
+        self.position_slider.sliderMoved.connect(self._preview_seek_position)
+        player_layout.addWidget(self.position_slider, 1)
+        self.time_label = QLabel("00:00 / 00:00")
+        player_layout.addWidget(self.time_label)
+        layout.addWidget(player_group)
+
+        self.status_label = QLabel("双击任一侧会暂停；右侧按钮使用当前编辑内容。")
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet("font-size:11px;color:#666")
+        layout.addWidget(self.status_label)
+
+    def _setup_player(self):
+        self.audio_output = QAudioOutput(self)
+        self.audio_output.setVolume(0.8)
+        self.player = QMediaPlayer(self)
+        self.player.setAudioOutput(self.audio_output)
+        self.player.positionChanged.connect(self._on_position_changed)
+        self.player.durationChanged.connect(self._on_duration_changed)
+        self.player.playbackStateChanged.connect(self._on_playback_state_changed)
+        self.player.errorOccurred.connect(
+            lambda _error, message: self.status_label.setText(
+                f"播放器错误：{message or '无法播放当前素材'}"
+            )
+        )
+
+    def show_song(self, song: dict):
+        if not song or not song.get("path"):
+            return
+        self.player.stop()
+        self._song = dict(song)
+        path = Path(song["path"])
+        self._song["lrc_path"] = str(path.with_suffix(".lrc"))
+        self.song_label.setText(path.name)
+        self.reload_local_lyrics()
+        self.set_online_content("")
+        if path.is_file():
+            self.player.setSource(QUrl.fromLocalFile(str(path.resolve())))
+            self.play_button.setEnabled(True)
+        else:
+            self.player.setSource(QUrl())
+            self.play_button.setEnabled(False)
+
+    def reload_local_lyrics(self):
+        lrc_path = Path(self._song.get("lrc_path", ""))
+        try:
+            content = lrc_path.read_text(encoding="utf-8") if lrc_path.is_file() else ""
+        except (OSError, UnicodeError) as exc:
+            content = ""
+            self.status_label.setText(f"无法读取本地歌词：{exc}")
+        self.local_editor.setPlainText(content)
+        self.local_editor.setReadOnly(True)
+
+    def set_online_content(self, content: str):
+        self.online_editor.setPlainText(content)
+        self.online_editor.setReadOnly(True)
+
+    def local_content(self) -> str:
+        return self.local_editor.toPlainText()
+
+    def online_content(self) -> str:
+        return self.online_editor.toPlainText()
+
+    def _begin_editing(self, editor: LyricsCompareEditor):
+        self.player.pause()
+        editor.setReadOnly(False)
+        editor.setFocus()
+        side = "本地" if editor is self.local_editor else "在线"
+        self.status_label.setText(
+            f"已暂停并进入{side}歌词编辑；右侧采用、合并或校准会使用当前内容。"
+        )
+
+    @staticmethod
+    def _format_milliseconds(milliseconds: int) -> str:
+        seconds = max(0, milliseconds // 1000)
+        minutes, seconds = divmod(seconds, 60)
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def _toggle_playback(self):
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.player.pause()
+        else:
+            self.local_editor.setReadOnly(True)
+            self.online_editor.setReadOnly(True)
+            self.player.play()
+
+    def _on_playback_state_changed(self, state):
+        self.play_button.setText(
+            "暂停" if state == QMediaPlayer.PlaybackState.PlayingState else "播放"
+        )
+
+    def _on_duration_changed(self, duration: int):
+        self.position_slider.setRange(0, max(0, duration))
+        self.time_label.setText(
+            f"{self._format_milliseconds(self.player.position())} / "
+            f"{self._format_milliseconds(duration)}"
+        )
+
+    def _highlight_both(self, position: int):
+        seconds = position / 1000.0
+        self.local_editor.highlight_at(seconds)
+        self.online_editor.highlight_at(seconds)
+
+    def _on_position_changed(self, position: int):
+        if not self._seeking:
+            self.position_slider.blockSignals(True)
+            self.position_slider.setValue(position)
+            self.position_slider.blockSignals(False)
+        self.time_label.setText(
+            f"{self._format_milliseconds(position)} / "
+            f"{self._format_milliseconds(self.player.duration())}"
+        )
+        self._highlight_both(position)
+
+    def _on_seek_started(self):
+        self._seeking = True
+
+    def _on_seek_finished(self):
+        self._seeking = False
+        self.player.setPosition(self.position_slider.value())
+
+    def _preview_seek_position(self, position: int):
+        self.time_label.setText(
+            f"{self._format_milliseconds(position)} / "
+            f"{self._format_milliseconds(self.player.duration())}"
+        )
+        self._highlight_both(position)
+
+
 class OnlineLyricsPanel(QWidget):
+    """Right pane: song/search results and all recognition/application actions."""
+
     action_requested = pyqtSignal(str, object, str)
 
     def __init__(self, parent=None):
@@ -132,17 +325,14 @@ class OnlineLyricsPanel(QWidget):
         self._song: dict = {}
         self._matches: list[LyricsMatch] = []
         self._duration = 0.0
-        self._seeking = False
-        self._local_preview = None
+        self._comparison: OnlineLyricsComparisonPane | None = None
         self._setup_ui()
-        self._setup_player()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
-
         heading_row = QHBoxLayout()
-        heading = QLabel("在线歌词匹配与双轨核对")
+        heading = QLabel("在线歌词搜索与应用")
         heading.setStyleSheet("font-weight:bold;font-size:14px;padding:4px")
         heading_row.addWidget(heading)
         heading_row.addStretch()
@@ -166,131 +356,99 @@ class OnlineLyricsPanel(QWidget):
         metadata_row.addWidget(QLabel("专辑"))
         metadata_row.addWidget(self.album_input)
         form.addRow("搜索信息:", metadata_row)
-        self.candidate_selector = QComboBox()
-        self.candidate_selector.setEnabled(False)
-        self.candidate_selector.currentIndexChanged.connect(self._on_candidate_selected)
-        form.addRow("在线候选:", self.candidate_selector)
         layout.addLayout(form)
 
-        self.current_file_label = QLabel("请从下拉框选择一个素材")
+        self.current_file_label = QLabel("请先选择歌曲")
         self.current_file_label.setWordWrap(True)
         self.current_file_label.setStyleSheet("font-size:11px;color:#666")
         layout.addWidget(self.current_file_label)
 
+        self.results_table = QTableWidget(0, 5)
+        self.results_table.setHorizontalHeaderLabels(
+            ["匹配", "歌名", "歌手", "时长", "同步"]
+        )
+        self.results_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.results_table.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self.results_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.results_table.currentCellChanged.connect(self._on_result_selected)
+        header = self.results_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(self.results_table, 1)
+
         self.comparison_label = QLabel(
-            "主窗口左侧显示本软件歌词，当前右侧显示在线候选歌词"
+            "选择搜索结果后，歌词会显示在左侧对照区的右半栏。"
         )
         self.comparison_label.setWordWrap(True)
         self.comparison_label.setStyleSheet("font-size:11px;color:#666")
         layout.addWidget(self.comparison_label)
 
-        online_group = QGroupBox("在线匹配歌词（右侧，双击修改）")
-        online_layout = QVBoxLayout(online_group)
-        self.online_editor = LyricsCompareEditor()
-        self.online_editor.setReadOnly(True)
-        self.online_editor.setPlaceholderText("搜索并选择在线候选后显示歌词")
-        self.online_editor.edit_requested.connect(self._begin_editing)
-        online_layout.addWidget(self.online_editor)
-        layout.addWidget(online_group, 3)
-
-        action_grid = QGridLayout()
-        self.use_local_button = QPushButton("采用左侧本地歌词")
+        action_group = QGroupBox("识别、应用与校准")
+        action_grid = QGridLayout(action_group)
+        self.transcribe_button = QPushButton("本地暂无歌词：立即识别本地歌词")
+        self.transcribe_button.clicked.connect(
+            lambda: self._request_action("transcribe_local")
+        )
+        action_grid.addWidget(self.transcribe_button, 0, 0, 1, 2)
+        self.use_local_button = QPushButton("直接应用左侧本地歌词")
         self.use_local_button.clicked.connect(lambda: self._request_action("use_local"))
-        action_grid.addWidget(self.use_local_button, 0, 0)
-        self.use_online_button = QPushButton("采用右侧在线歌词")
-        self.use_online_button.clicked.connect(lambda: self._request_action("use_online"))
-        action_grid.addWidget(self.use_online_button, 0, 1)
-        self.merge_local_button = QPushButton("合并：左时间轴 + 右文字")
+        action_grid.addWidget(self.use_local_button, 1, 0)
+        self.use_online_button = QPushButton("直接应用右侧在线歌词")
+        self.use_online_button.clicked.connect(
+            lambda: self._request_action("use_online")
+        )
+        action_grid.addWidget(self.use_online_button, 1, 1)
+        self.merge_local_button = QPushButton("左时间轴 + 右文字")
         self.merge_local_button.clicked.connect(
             lambda: self._request_action("merge_local_timeline")
         )
-        action_grid.addWidget(self.merge_local_button, 1, 0)
-        self.merge_online_button = QPushButton("合并：右时间轴 + 左文字")
+        action_grid.addWidget(self.merge_local_button, 2, 0)
+        self.merge_online_button = QPushButton("右时间轴 + 左文字")
         self.merge_online_button.clicked.connect(
             lambda: self._request_action("merge_online_timeline")
         )
-        action_grid.addWidget(self.merge_online_button, 1, 1)
-        self.calibrate_button = QPushButton("AI 核对并校准左侧文字")
-        self.calibrate_button.clicked.connect(lambda: self._request_action("calibrate"))
-        action_grid.addWidget(self.calibrate_button, 2, 0, 1, 2)
-        layout.addLayout(action_grid)
+        action_grid.addWidget(self.merge_online_button, 2, 1)
+        self.calibrate_button = QPushButton("AI 匹配核对并校准")
+        self.calibrate_button.clicked.connect(
+            lambda: self._request_action("calibrate")
+        )
+        action_grid.addWidget(self.calibrate_button, 3, 0, 1, 2)
+        layout.addWidget(action_group)
 
-        player_group = QGroupBox("播放器（播放本地素材，同步滚动两侧歌词）")
-        player_group.setMinimumHeight(82)
-        player_layout = QHBoxLayout(player_group)
-        self.play_button = QPushButton("播放")
-        self.play_button.setEnabled(False)
-        self.play_button.clicked.connect(self._toggle_playback)
-        player_layout.addWidget(self.play_button)
-        self.position_slider = QSlider(Qt.Orientation.Horizontal)
-        self.position_slider.setRange(0, 0)
-        self.position_slider.sliderPressed.connect(self._on_seek_started)
-        self.position_slider.sliderReleased.connect(self._on_seek_finished)
-        self.position_slider.sliderMoved.connect(self._preview_seek_position)
-        player_layout.addWidget(self.position_slider, 1)
-        self.time_label = QLabel("00:00 / 00:00")
-        player_layout.addWidget(self.time_label)
-        layout.addWidget(player_group)
-
-        self.status_label = QLabel("LRCLIB 只提供歌词；播放器使用当前本地素材。")
+        self.status_label = QLabel("LRCLIB 只提供歌词，不提供歌曲音频。")
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("font-size:11px;color:#666")
         layout.addWidget(self.status_label)
         self._refresh_action_state()
 
-    def _setup_player(self):
-        self.audio_output = QAudioOutput(self)
-        self.audio_output.setVolume(0.8)
-        self.player = QMediaPlayer(self)
-        self.player.setAudioOutput(self.audio_output)
-        self.player.positionChanged.connect(self._on_position_changed)
-        self.player.durationChanged.connect(self._on_duration_changed)
-        self.player.playbackStateChanged.connect(self._on_playback_state_changed)
-        self.player.errorOccurred.connect(
-            lambda _error, message: self.status_label.setText(
-                f"播放器错误：{message or '无法播放当前素材'}"
-            )
-        )
-
-    def bind_local_preview(self, preview_panel):
-        """Use the main window's left lyrics preview as the local comparison side."""
-        if self._local_preview is preview_panel:
+    def bind_comparison_pane(self, comparison: OnlineLyricsComparisonPane):
+        if self._comparison is comparison:
             return
-        self._local_preview = preview_panel
-        preview_panel.editing_started.connect(self._on_local_editing_started)
-        preview_panel.text.textChanged.connect(self._on_local_text_changed)
-        preview_panel.lyrics_saved.connect(self._on_local_lyrics_saved)
+        self._comparison = comparison
+        comparison.content_changed.connect(self._on_comparison_content_changed)
         if self._song:
-            preview_panel.show_song(self._song)
+            comparison.show_song(self._song)
         self._refresh_action_state()
+
+    def _on_comparison_content_changed(self):
+        self._refresh_action_state()
+        if self._selected_match() is not None:
+            self.refresh_local_comparison()
 
     def _local_content(self) -> str:
-        if self._local_preview is not None:
-            return self._local_preview.text.toPlainText()
-        lrc_path = Path(self._song.get("lrc_path", ""))
-        try:
-            return lrc_path.read_text(encoding="utf-8") if lrc_path.is_file() else ""
-        except (OSError, UnicodeError):
-            return ""
+        return self._comparison.local_content() if self._comparison is not None else ""
 
-    def _on_local_editing_started(self):
-        self.player.pause()
-        self.status_label.setText(
-            "已暂停并进入左侧本地歌词编辑；采用或合并时使用当前内容。"
-        )
-
-    def _on_local_text_changed(self):
-        self._refresh_action_state()
-        if self._selected_match() is not None:
-            self.refresh_local_comparison()
-
-    def _on_local_lyrics_saved(self, _lrc_path: str):
-        self._refresh_action_state()
-        if self._selected_match() is not None:
-            self.refresh_local_comparison()
+    def _online_content(self) -> str:
+        return self._comparison.online_content() if self._comparison is not None else ""
 
     def set_songs(self, songs: list[dict]):
-        """Populate the song drop-down without discarding the current selection."""
         current_path = self._song.get("path", "")
         self._songs = [dict(song) for song in songs if song.get("path")]
         self.song_selector.blockSignals(True)
@@ -312,11 +470,11 @@ class OnlineLyricsPanel(QWidget):
     def show_song(self, song: dict, *, sync_selector: bool = True):
         if not song or not song.get("path"):
             return
-        self.player.stop()
         self._song = dict(song)
         path = Path(song["path"])
-        self._song["lrc_path"] = str(path.with_suffix(".lrc"))
-        self._song["has_lrc"] = path.with_suffix(".lrc").is_file()
+        lrc_path = path.with_suffix(".lrc")
+        self._song["lrc_path"] = str(lrc_path)
+        self._song["has_lrc"] = lrc_path.is_file()
         self._matches = []
         if sync_selector:
             index = next(
@@ -339,38 +497,27 @@ class OnlineLyricsPanel(QWidget):
         self._duration = metadata.duration
         duration_text = self._format_duration(metadata.duration) if metadata.duration else "未知"
         self.current_file_label.setText(f"{path.name} · {duration_text}")
-        self.reload_local_lyrics()
-        self.candidate_selector.blockSignals(True)
-        self.candidate_selector.clear()
-        self.candidate_selector.blockSignals(False)
-        self.candidate_selector.setEnabled(False)
-        self.online_editor.clear()
-        self.online_editor.setReadOnly(True)
-        self.comparison_label.setText("搜索后从在线候选下拉框选择一份歌词进行核对")
+        self.results_table.setRowCount(0)
+        if self._comparison is not None:
+            self._comparison.show_song(self._song)
+        self.comparison_label.setText(
+            "搜索并选择结果后，歌词会显示在左侧对照区的右半栏。"
+        )
         self.status_label.setText("已选择本地素材，可以搜索公开歌词库。")
-        if path.is_file():
-            self.player.setSource(QUrl.fromLocalFile(str(path.resolve())))
-            self.play_button.setEnabled(True)
-        else:
-            self.player.setSource(QUrl())
-            self.play_button.setEnabled(False)
         self._refresh_action_state()
 
     def reload_local_lyrics(self):
-        if self._local_preview is not None:
-            self._local_preview.show_song(self._song)
+        path = Path(self._song.get("path", ""))
+        self._song["lrc_path"] = str(path.with_suffix(".lrc"))
+        self._song["has_lrc"] = path.with_suffix(".lrc").is_file()
+        if self._comparison is not None:
+            self._comparison.reload_local_lyrics()
         self._refresh_action_state()
 
     @staticmethod
     def _format_duration(duration: float) -> str:
         minutes, seconds = divmod(int(round(duration)), 60)
         return f"{minutes}:{seconds:02d}"
-
-    @staticmethod
-    def _format_milliseconds(milliseconds: int) -> str:
-        seconds = max(0, milliseconds // 1000)
-        minutes, seconds = divmod(seconds, 60)
-        return f"{minutes:02d}:{seconds:02d}"
 
     def _start_search(self):
         track_name = self.track_input.text().strip()
@@ -393,22 +540,25 @@ class OnlineLyricsPanel(QWidget):
     def _show_results(self, matches: list):
         self.search_button.setEnabled(True)
         self._matches = list(matches)
-        self.candidate_selector.blockSignals(True)
-        self.candidate_selector.clear()
-        for match in self._matches:
-            timeline = "同步" if match.has_synced_lyrics else "纯文本"
-            self.candidate_selector.addItem(
-                f"{match.score:.0f}% · {match.track_name} · "
-                f"{match.artist_name or '未知歌手'} · {timeline}"
-            )
-        self.candidate_selector.blockSignals(False)
-        self.candidate_selector.setEnabled(bool(self._matches))
+        self.results_table.setRowCount(len(self._matches))
+        for row, match in enumerate(self._matches):
+            values = [
+                f"{match.score:.0f}%",
+                match.track_name,
+                match.artist_name,
+                self._format_duration(match.duration),
+                "有" if match.has_synced_lyrics else "纯文本",
+            ]
+            for column, value in enumerate(values):
+                self.results_table.setItem(row, column, QTableWidgetItem(value))
         if self._matches:
-            self.candidate_selector.setCurrentIndex(0)
-            self._on_candidate_selected(0)
-            self.status_label.setText(f"找到 {len(self._matches)} 条结果，可展开候选框切换。")
+            self.results_table.setCurrentCell(0, 0)
+            self.status_label.setText(
+                f"找到 {len(self._matches)} 条结果；选择后可直接应用或校准。"
+            )
         else:
-            self.online_editor.clear()
+            if self._comparison is not None:
+                self._comparison.set_online_content("")
             self.status_label.setText("没有找到匹配结果，请调整歌名或歌手。")
         self._refresh_action_state()
 
@@ -417,17 +567,20 @@ class OnlineLyricsPanel(QWidget):
         self.status_label.setText(f"搜索失败：{message}")
 
     def _selected_match(self) -> LyricsMatch | None:
-        index = self.candidate_selector.currentIndex()
-        return self._matches[index] if 0 <= index < len(self._matches) else None
+        row = self.results_table.currentRow()
+        return self._matches[row] if 0 <= row < len(self._matches) else None
 
-    def _on_candidate_selected(self, index: int):
-        if not 0 <= index < len(self._matches):
-            self.online_editor.clear()
+    def _on_result_selected(self, *_args):
+        match = self._selected_match()
+        if match is None:
+            if self._comparison is not None:
+                self._comparison.set_online_content("")
             self._refresh_action_state()
             return
-        match = self._matches[index]
-        self.online_editor.setPlainText(match.synced_lyrics or match.plain_lyrics)
-        self.online_editor.setReadOnly(True)
+        if self._comparison is not None:
+            self._comparison.set_online_content(
+                match.synced_lyrics or match.plain_lyrics
+            )
         self.refresh_local_comparison()
         self._refresh_action_state()
 
@@ -436,45 +589,46 @@ class OnlineLyricsPanel(QWidget):
         if match is None:
             return
         local_content = self._local_content()
-        online_content = self.online_editor.toPlainText()
+        online_content = self._online_content()
         if not timed_text_entries(local_content):
             self.comparison_label.setText(
-                "左侧暂无同步 LRC；可采用右侧同步歌词，或先完成本地识别。"
+                "本地暂无同步 LRC；可先点击识别，或直接应用在线同步歌词。"
             )
             return
         comparison = compare_lyrics(local_content, online_content)
         self.comparison_label.setText(
             f"文字相似度 {comparison['similarity'] * 100:.1f}% · "
-            f"左 {comparison['local_lines']} 行 / 右 {comparison['reference_lines']} 行 · "
-            "播放时两侧按各自时间轴同步高亮"
-        )
-
-    def _begin_editing(self, editor: LyricsCompareEditor):
-        self.player.pause()
-        editor.setReadOnly(False)
-        editor.setFocus()
-        self.status_label.setText(
-            "已暂停并进入右侧在线歌词编辑；采用或合并时使用当前内容。"
+            f"本地 {comparison['local_lines']} 行 / 在线 {comparison['reference_lines']} 行"
         )
 
     def _refresh_action_state(self):
         local_content = self._local_content()
-        online_content = self.online_editor.toPlainText() if hasattr(self, "online_editor") else ""
+        online_content = self._online_content()
         has_local_timeline = bool(timed_text_entries(local_content))
         has_online_timeline = bool(timed_text_entries(online_content))
         has_online_text = bool(online_content.strip())
+        has_song = bool(self._song.get("path"))
+        self.transcribe_button.setVisible(not has_local_timeline)
+        self.transcribe_button.setEnabled(has_song and not has_local_timeline)
         self.use_local_button.setEnabled(has_local_timeline)
         self.use_online_button.setEnabled(has_online_timeline)
         self.merge_local_button.setEnabled(has_local_timeline and has_online_text)
-        self.merge_online_button.setEnabled(has_online_timeline and bool(local_content.strip()))
+        self.merge_online_button.setEnabled(
+            has_online_timeline and bool(local_content.strip())
+        )
         self.calibrate_button.setEnabled(has_local_timeline and has_online_text)
 
     def _request_action(self, action: str):
-        match = self._selected_match()
         media_path = self._song.get("path")
-        if match is None or not media_path:
+        if not media_path:
             return
-        online_content = self.online_editor.toPlainText()
+        if action == "transcribe_local":
+            self.action_requested.emit(str(media_path), None, action)
+            return
+        match = self._selected_match()
+        if match is None:
+            return
+        online_content = self._online_content()
         if timed_text_entries(online_content):
             edited_match = replace(match, synced_lyrics=online_content)
         else:
@@ -485,55 +639,3 @@ class OnlineLyricsPanel(QWidget):
             online_content=online_content,
         )
         self.action_requested.emit(str(media_path), payload, action)
-
-    def _toggle_playback(self):
-        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
-            self.player.pause()
-        else:
-            if self._local_preview is not None:
-                self._local_preview.text.setReadOnly(True)
-            self.online_editor.setReadOnly(True)
-            self.player.play()
-
-    def _on_playback_state_changed(self, state):
-        self.play_button.setText(
-            "暂停" if state == QMediaPlayer.PlaybackState.PlayingState else "播放"
-        )
-
-    def _on_duration_changed(self, duration: int):
-        self.position_slider.setRange(0, max(0, duration))
-        self.time_label.setText(
-            f"{self._format_milliseconds(self.player.position())} / "
-            f"{self._format_milliseconds(duration)}"
-        )
-
-    def _on_position_changed(self, position: int):
-        if not self._seeking:
-            self.position_slider.blockSignals(True)
-            self.position_slider.setValue(position)
-            self.position_slider.blockSignals(False)
-        self.time_label.setText(
-            f"{self._format_milliseconds(position)} / "
-            f"{self._format_milliseconds(self.player.duration())}"
-        )
-        seconds = position / 1000.0
-        if self._local_preview is not None:
-            self._local_preview.text.highlight_at(seconds)
-        self.online_editor.highlight_at(seconds)
-
-    def _on_seek_started(self):
-        self._seeking = True
-
-    def _on_seek_finished(self):
-        self._seeking = False
-        self.player.setPosition(self.position_slider.value())
-
-    def _preview_seek_position(self, position: int):
-        self.time_label.setText(
-            f"{self._format_milliseconds(position)} / "
-            f"{self._format_milliseconds(self.player.duration())}"
-        )
-        seconds = position / 1000.0
-        if self._local_preview is not None:
-            self._local_preview.text.highlight_at(seconds)
-        self.online_editor.highlight_at(seconds)

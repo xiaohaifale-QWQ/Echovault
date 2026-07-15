@@ -25,8 +25,9 @@ def test_main_window_has_five_right_tabs_and_no_scattered_batch_buttons(monkeypa
     assert not hasattr(window.detail_panel, "btn_batch_translate")
 
     window.right_tabs.setCurrentWidget(window.online_lyrics_panel)
-    assert window.left_stack.currentWidget() is window.lyrics_preview_panel
-    assert window.lyrics_preview_panel.title_label.text() == "本软件识别歌词（左侧）"
+    assert window.left_stack.currentWidget() is window.online_comparison_panel
+    assert "本地识别歌词" in window.online_comparison_panel.local_editor.parent().title()
+    assert "在线匹配歌词" in window.online_comparison_panel.online_editor.parent().title()
 
     window.right_tabs.setCurrentWidget(window.detail_panel)
     assert window.left_stack.currentWidget() is window.song_list_panel

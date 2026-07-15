@@ -4,9 +4,9 @@
 
 ### Fixed
 
-- Online Matching now switches the main window's left material list to the local lyric
-  preview and uses the full right workspace for online lyrics, instead of nesting two
-  cramped comparison editors inside the right tab.
+- Online Matching now uses a dedicated left workspace containing local and online lyrics
+  side by side with the player below; the right tab is reserved for search results and
+  recognition, apply, merge, and calibration controls.
 - Clean CI/base installations now include the Requests dependency required while loading
   the Xunfei provider, while the optional Torch runtime is imported only when a local
   Whisper model is actually loaded; official checkout/setup actions now use Node 24.
