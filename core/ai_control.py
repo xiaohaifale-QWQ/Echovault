@@ -18,12 +18,14 @@ _DIRECTIVE = re.compile(r"\[\[ECHOVAULT_CLI:\s*(.+?)\s*\]\]", re.DOTALL)
 _UNSAFE_CHARS = frozenset(";&|><`$")
 _READ_ONLY = {
     ("list",), ("info",), ("lyrics", "show"), ("lyrics", "search"),
+    ("lyrics", "online-search"),
     ("config", "show"), ("config", "path"), ("model", "list"),
     ("model", "info"), ("gpu", "scan"), ("gpu", "status"),
     ("library", "list"), ("video", "timeline"), ("cache", "path"), ("doctor",),
 }
 _MUTATING = {
-    ("transcribe",), ("lyrics", "translate"), ("config", "set"), ("model", "download"),
+    ("transcribe",), ("lyrics", "translate"), ("lyrics", "online-apply"),
+    ("lyrics", "calibrate"), ("config", "set"), ("model", "download"),
     ("library", "add"), ("library", "remove"), ("library", "select-all"),
     ("video", "calibrate"), ("video", "aggregate"), ("cache", "clear"),
     ("rename",), ("mark",),

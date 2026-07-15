@@ -36,6 +36,7 @@ from ui.detail_panel import DetailPanel
 from ui.settings_dialog import SettingsDialog
 from ui.key_manager_dialog import KeyManagerDialog
 from ui.ai_chat_panel import AIChatPanel, CLICommandWorker
+from ui.online_lyrics_panel import OnlineLyricsPanel, LyricsCalibrationWorker
 from core.ai_control import validate_cli_command
 from ui.sync_panel import SyncPanel
 
@@ -98,7 +99,10 @@ class MainWindow(QMainWindow):
         
         self.library_panel = LibraryPanel()
         self.right_tabs.addTab(self.library_panel, "素材库")
-        
+
+        self.online_lyrics_panel = OnlineLyricsPanel()
+        self.right_tabs.addTab(self.online_lyrics_panel, "在线匹配")
+
         self.sync_panel = SyncPanel()
         self.right_tabs.addTab(self.sync_panel, "同步")
         
@@ -159,7 +163,7 @@ class MainWindow(QMainWindow):
         
         sync_goto_action = QAction("打开同步面板(&S)", self)
         sync_goto_action.setShortcut("Ctrl+D")
-        sync_goto_action.triggered.connect(lambda: self.right_tabs.setCurrentIndex(2))
+        sync_goto_action.triggered.connect(lambda: self.right_tabs.setCurrentIndex(3))
         sync_menu.addAction(sync_goto_action)
         
         # 设置菜单
@@ -276,6 +280,7 @@ class MainWindow(QMainWindow):
         # 歌曲列表 → 详情面板
         self.song_list_panel.song_selected.connect(self.detail_panel.show_song)
         self.song_list_panel.song_selected.connect(self.lyrics_preview_panel.show_song)
+        self.song_list_panel.song_selected.connect(self.online_lyrics_panel.show_song)
         self.lyrics_preview_panel.lyrics_saved.connect(self._on_preview_lyrics_saved)
         self.ai_chat_panel.command_requested.connect(self._on_ai_command_requested)
         
@@ -284,6 +289,7 @@ class MainWindow(QMainWindow):
         self.detail_panel.edit_lyrics_clicked.connect(self._on_edit_lyrics)
         self.detail_panel.translate_requested.connect(self._on_translate_lyrics)
         self.detail_panel.batch_translate_requested.connect(self._on_batch_translate_lyrics)
+        self.online_lyrics_panel.action_requested.connect(self._on_online_lyrics_action)
         
         # 刷新计数
         self.song_list_panel.model_updated.connect(self._refresh_statusbar)
@@ -376,15 +382,99 @@ class MainWindow(QMainWindow):
         """Show the selected audio or video material's same-name LRC on the left."""
         path = Path(material_path)
         lrc_path = path.with_suffix(".lrc")
-        self.lyrics_preview_panel.show_song(
-            {
-                "name": path.name,
-                "path": str(path),
-                "lrc_path": str(lrc_path),
-                "has_lrc": lrc_path.is_file(),
-            }
-        )
+        song = {
+            "name": path.name,
+            "path": str(path),
+            "lrc_path": str(lrc_path),
+            "has_lrc": lrc_path.is_file(),
+        }
+        self.lyrics_preview_panel.show_song(song)
+        self.online_lyrics_panel.show_song(song)
         self.left_stack.setCurrentWidget(self.lyrics_preview_panel)
+
+    def _on_online_lyrics_action(self, media_path: str, match, action: str):
+        lrc_path = Path(media_path).with_suffix(".lrc")
+        if action == "apply":
+            reply = QMessageBox.question(
+                self,
+                "下载同步歌词",
+                f"将把 LRCLIB 的同步歌词写入：\n{lrc_path}\n\n"
+                "已有 LRC 会先备份；音频文件不会修改。是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            from core.online_lyrics import apply_synced_lyrics
+
+            try:
+                output, backup = apply_synced_lyrics(lrc_path, match)
+            except (OSError, RuntimeError) as exc:
+                QMessageBox.warning(self, "下载同步歌词", str(exc))
+                return
+            self._refresh_after_online_lyrics_write(media_path, str(output))
+            backup_message = f"\n备份：{backup}" if backup else ""
+            QMessageBox.information(
+                self, "下载同步歌词", f"同步歌词已写入：{output}{backup_message}"
+            )
+            return
+
+        if not lrc_path.is_file():
+            QMessageBox.information(self, "AI 校准", "请先识别或下载一份本地 LRC。")
+            return
+        from core.ai_assistant import settings_from_config
+
+        ai_settings = settings_from_config(self.config)
+        if ai_settings.requires_api_key and not ai_settings.api_key:
+            QMessageBox.information(self, "AI 校准", "请先配置当前在线 AI 的 API Key。")
+            return
+        if not ai_settings.base_url.strip() or not ai_settings.model.strip():
+            QMessageBox.information(self, "AI 校准", "请先配置 AI 接口地址和模型名称。")
+            return
+        reply = QMessageBox.question(
+            self,
+            "AI 核对并校准",
+            "AI 将参考所选公开歌词修正本地歌词文字。\n"
+            "本地时间戳和音频保持不变，原 LRC 会先备份。是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.online_lyrics_panel.status_label.setText("AI 正在核对并校准歌词…")
+        self.online_calibration_worker = LyricsCalibrationWorker(
+            str(lrc_path), match, ai_settings, self
+        )
+        self.online_calibration_worker.completed.connect(
+            lambda output, backup: self._on_online_calibration_finished(
+                media_path, output, backup
+            )
+        )
+        self.online_calibration_worker.failed.connect(self._on_online_calibration_failed)
+        self.online_calibration_worker.start()
+
+    def _on_online_calibration_finished(
+        self, media_path: str, output_path: str, backup_path: str
+    ):
+        self._refresh_after_online_lyrics_write(media_path, output_path)
+        QMessageBox.information(
+            self,
+            "AI 校准完成",
+            f"已保留本地时间轴并更新歌词文字。\n备份：{backup_path}",
+        )
+
+    def _on_online_calibration_failed(self, message: str):
+        self.online_lyrics_panel.status_label.setText(f"AI 校准失败：{message}")
+        QMessageBox.warning(self, "AI 校准失败", message)
+
+    def _refresh_after_online_lyrics_write(self, media_path: str, lrc_path: str):
+        self.song_list_panel.update_song_status(media_path, True)
+        song = dict(self.online_lyrics_panel._song)
+        song.update({"has_lrc": True, "lrc_path": lrc_path})
+        self.detail_panel.show_song(song)
+        self.lyrics_preview_panel.show_song(song)
+        self.online_lyrics_panel._song = song
+        self.online_lyrics_panel.refresh_local_comparison()
+        self.online_lyrics_panel.status_label.setText("本地歌词已更新，音频文件未修改。")
+        self._refresh_statusbar()
 
     def _on_preview_lyrics_saved(self, lrc_path: str):
         """Refresh completion state after an inline material-library lyric edit."""

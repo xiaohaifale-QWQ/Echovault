@@ -32,7 +32,7 @@ def translation_output_path(lrc_path: str | Path, target_language: str) -> Path:
     return source.with_suffix(f".{target_language}.lrc")
 
 
-def _timed_text_positions(content: str) -> tuple[list[str], list[int], list[str]]:
+def timed_text_positions(content: str) -> tuple[list[str], list[int], list[str]]:
     raw_lines = content.splitlines()
     positions: list[int] = []
     texts: list[str] = []
@@ -183,7 +183,7 @@ def translate_lrc_file(
     if source_language == target_language:
         raise RuntimeError("源语言和目标语言不能相同。")
     content = source.read_text(encoding="utf-8")
-    raw_lines, positions, texts = _timed_text_positions(content)
+    raw_lines, positions, texts = timed_text_positions(content)
     if not texts:
         raise RuntimeError(f"LRC 中没有可翻译的时间轴歌词：{source}")
     if translator is not None:

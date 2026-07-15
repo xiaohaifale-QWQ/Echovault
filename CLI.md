@@ -227,6 +227,31 @@ python main.py lyrics translate <LRC文件|音频文件|目录> \
 
 输出为 `<歌名>.<目标语言>.lrc`，不覆盖原 LRC，原时间戳前缀保持不变。目录模式递归处理 LRC；AI/MCP 调用时属于需要确认的写操作。完整说明见 `docs/歌词翻译使用指南.md`。
 
+#### 3.4.4 `lyrics online-search` — 搜索公开歌词库
+
+```bash
+python main.py lyrics online-search <歌名> \
+  [--artist 歌手] [--album 专辑] [--duration 秒] [--json]
+```
+
+使用 LRCLIB 搜索并按歌名、歌手、时长及同步歌词可用性排序。输出记录 ID 与元数据，不输出完整歌词；这是 AI/MCP 白名单中的只读操作。
+
+#### 3.4.5 `lyrics online-apply` — 下载同步歌词
+
+```bash
+python main.py lyrics online-apply <音频|视频|LRC文件> --id <LRCLIB记录ID> [--json]
+```
+
+把指定记录的同步歌词写到同名 LRC。已有 LRC 会先写入递增的 `.bak` 备份；媒体文件不变。这是需要确认的 AI/MCP 写操作。
+
+#### 3.4.6 `lyrics calibrate` — AI 核对并校准文字
+
+```bash
+python main.py lyrics calibrate <音频|视频|LRC文件> --id <LRCLIB记录ID> [--json]
+```
+
+使用指定在线记录作为参考，以设置中当前选中的 AI 接口修正现有 LRC 文字。严格保留本地时间戳前缀和行数；返回格式不合法时不写入。这是需要确认的 AI/MCP 写操作。完整说明见 `docs/在线歌词匹配与AI校准指南.md`。
+
 ---
 
 ### 3.5 `config` — 配置管理

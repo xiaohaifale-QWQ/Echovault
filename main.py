@@ -339,6 +339,71 @@ def cmd_lyrics(args):
         if summary["failed"]:
             raise SystemExit(1)
 
+    elif args.lyrics_action == "online-search":
+        from core.online_lyrics import search_lrclib
+
+        try:
+            matches = search_lrclib(
+                args.track_name,
+                artist_name=args.artist or "",
+                album_name=args.album or "",
+                duration=args.duration or 0.0,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            _out({"status": "failed", "error": str(exc)}, args)
+            raise SystemExit(1) from exc
+        data = [
+            {
+                "id": match.record_id,
+                "score": round(match.score, 1),
+                "track_name": match.track_name,
+                "artist_name": match.artist_name,
+                "album_name": match.album_name,
+                "duration": match.duration,
+                "instrumental": match.instrumental,
+                "has_synced_lyrics": match.has_synced_lyrics,
+            }
+            for match in matches
+        ]
+        _out(data, args)
+
+    elif args.lyrics_action in {"online-apply", "calibrate"}:
+        from core.online_lyrics import (
+            apply_synced_lyrics,
+            calibrate_lrc_with_reference,
+            get_lrclib_record,
+        )
+
+        target = Path(args.file)
+        lrc_path = target if target.suffix.lower() == ".lrc" else target.with_suffix(".lrc")
+        try:
+            match = get_lrclib_record(args.record_id)
+            if args.lyrics_action == "online-apply":
+                output, backup = apply_synced_lyrics(lrc_path, match)
+            else:
+                from core.ai_assistant import settings_from_config
+
+                config = config_manager.load()
+                output, backup = calibrate_lrc_with_reference(
+                    lrc_path,
+                    match.synced_lyrics or match.plain_lyrics,
+                    ai_settings=settings_from_config(config),
+                    track_name=match.track_name,
+                    artist_name=match.artist_name,
+                )
+        except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
+            _out({"status": "failed", "error": str(exc)}, args)
+            raise SystemExit(1) from exc
+        _out(
+            {
+                "status": "ok",
+                "output": str(output),
+                "backup": str(backup) if backup else None,
+                "audio_modified": False,
+            },
+            args,
+        )
+
 
 # ============================================================
 # config
@@ -776,6 +841,23 @@ def main():
     x.add_argument("--engine", choices=["ai", "local"])
     x.add_argument("--source", dest="source_language", choices=["zh", "en", "ja", "ko"])
     x.add_argument("--target-language", choices=["zh", "en", "ja", "ko"])
+    x.add_argument("--json", dest="json_output", action="store_true")
+    x.set_defaults(func=cmd_lyrics)
+    x = s2.add_parser("online-search", help="Search public LRCLIB records")
+    x.add_argument("track_name")
+    x.add_argument("--artist")
+    x.add_argument("--album")
+    x.add_argument("--duration", type=float)
+    x.add_argument("--json", dest="json_output", action="store_true")
+    x.set_defaults(func=cmd_lyrics)
+    x = s2.add_parser("online-apply", help="Apply synced lyrics from LRCLIB")
+    x.add_argument("file")
+    x.add_argument("--id", dest="record_id", required=True, type=int)
+    x.add_argument("--json", dest="json_output", action="store_true")
+    x.set_defaults(func=cmd_lyrics)
+    x = s2.add_parser("calibrate", help="AI-calibrate local lyrics with LRCLIB")
+    x.add_argument("file")
+    x.add_argument("--id", dest="record_id", required=True, type=int)
     x.add_argument("--json", dest="json_output", action="store_true")
     x.set_defaults(func=cmd_lyrics)
 

@@ -24,6 +24,9 @@ def test_ai_cli_mutation_requires_confirmation_and_shell_is_rejected():
         validate_cli_command("lyrics translate song.lrc --engine local").needs_confirmation
         is True
     )
+    assert validate_cli_command("lyrics online-search Song").needs_confirmation is False
+    assert validate_cli_command("lyrics online-apply song.mp3 --id 1").needs_confirmation is True
+    assert validate_cli_command("lyrics calibrate song.mp3 --id 1").needs_confirmation is True
     with pytest.raises(ValueError, match="shell"):
         validate_cli_command("config show; whoami")
 

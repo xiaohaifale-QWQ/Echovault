@@ -15,6 +15,11 @@
 
 ### Added
 
+- A fourth right-side Online Matching tab backed by LRCLIB, with metadata-assisted search,
+  ranked candidates, online preview, local/reference similarity, and synchronized-LRC download.
+- AI lyric calibration against a public reference while preserving every local timestamp
+  prefix and media file, with atomic writes, incremental backups, CLI/MCP commands, and a
+  detailed matching and recovery guide.
 - Timestamp-preserving single/batch LRC translation from the Details preview, using the
   selected AI endpoint or downloadable Argos offline language packages; translated LRCs
   use language suffixes and never overwrite the source.
