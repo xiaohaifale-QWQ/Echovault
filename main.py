@@ -291,6 +291,54 @@ def cmd_lyrics(args):
                     m, s = divmod(ln["ts"], 60)
                     print(f"  [{int(m):02d}:{s:05.2f}] {ln['text']}")
 
+    elif args.lyrics_action == "translate":
+        from core.ai_assistant import settings_from_config
+        from core.lyrics_translation import translate_lrc_file
+
+        config = config_manager.load()
+        engine = args.engine or config.translation_engine
+        source_language = args.source_language or config.translation_source_language
+        target_language = args.target_language or config.translation_target_language
+        target = Path(args.target)
+        if target.is_dir():
+            files = [
+                path
+                for path in target.rglob("*.lrc")
+                if not any(
+                    path.name.endswith(f".{language}.lrc")
+                    for language in ("zh", "en", "ja", "ko")
+                )
+            ]
+        else:
+            lrc_path = target if target.suffix.lower() == ".lrc" else target.with_suffix(".lrc")
+            files = [lrc_path]
+        ai_settings = settings_from_config(config) if engine == "ai" else None
+        results = []
+        for lrc_path in files:
+            try:
+                output = translate_lrc_file(
+                    lrc_path,
+                    engine=engine,
+                    source_language=source_language,
+                    target_language=target_language,
+                    ai_settings=ai_settings,
+                )
+                results.append(
+                    {"file": str(lrc_path), "status": "ok", "output": str(output)}
+                )
+            except Exception as exc:
+                results.append(
+                    {"file": str(lrc_path), "status": "failed", "error": str(exc)}
+                )
+        summary = {
+            "total": len(files),
+            "ok": sum(item["status"] == "ok" for item in results),
+            "failed": sum(item["status"] == "failed" for item in results),
+        }
+        _out({"summary": summary, "results": results}, args)
+        if summary["failed"]:
+            raise SystemExit(1)
+
 
 # ============================================================
 # config
@@ -314,6 +362,11 @@ def cmd_config(args):
                 "local_base_url": c.local_ai_base_url,
                 "local_model": c.local_ai_model_name,
                 "voice_input_shortcut": c.voice_input_shortcut,
+            },
+            "translation": {
+                "engine": c.translation_engine,
+                "source_language": c.translation_source_language,
+                "target_language": c.translation_target_language,
             },
             "asr": {
                 "provider": c.asr.provider, "local_model": c.asr.local_model,
@@ -718,6 +771,13 @@ def main():
     x.add_argument("file"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_lyrics)
     x = s2.add_parser("search", help="Search lyrics")
     x.add_argument("keyword"); x.add_argument("--folder", "-f"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_lyrics)
+    x = s2.add_parser("translate", help="Translate one LRC file or a folder")
+    x.add_argument("target")
+    x.add_argument("--engine", choices=["ai", "local"])
+    x.add_argument("--source", dest="source_language", choices=["zh", "en", "ja", "ko"])
+    x.add_argument("--target-language", choices=["zh", "en", "ja", "ko"])
+    x.add_argument("--json", dest="json_output", action="store_true")
+    x.set_defaults(func=cmd_lyrics)
 
     # config
     sp = sub.add_parser("config", help="Configuration")

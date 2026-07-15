@@ -20,6 +20,10 @@ def test_ai_cli_directive_is_extracted_and_read_only_is_allowed():
 
 def test_ai_cli_mutation_requires_confirmation_and_shell_is_rejected():
     assert validate_cli_command("cache clear").needs_confirmation is True
+    assert (
+        validate_cli_command("lyrics translate song.lrc --engine local").needs_confirmation
+        is True
+    )
     with pytest.raises(ValueError, match="shell"):
         validate_cli_command("config show; whoami")
 

@@ -23,7 +23,7 @@ _READ_ONLY = {
     ("library", "list"), ("video", "timeline"), ("cache", "path"), ("doctor",),
 }
 _MUTATING = {
-    ("transcribe",), ("config", "set"), ("model", "download"),
+    ("transcribe",), ("lyrics", "translate"), ("config", "set"), ("model", "download"),
     ("library", "add"), ("library", "remove"), ("library", "select-all"),
     ("video", "calibrate"), ("video", "aggregate"), ("cache", "clear"),
     ("rename",), ("mark",),

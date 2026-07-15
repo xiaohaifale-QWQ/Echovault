@@ -20,6 +20,9 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     manager.config.local_ai_base_url = "http://127.0.0.1:1234/v1"
     manager.config.local_ai_model_name = "local-model"
     manager.config.local_ai_api_key = "local-ai-secret"
+    manager.config.translation_engine = "local"
+    manager.config.translation_source_language = "ja"
+    manager.config.translation_target_language = "zh"
     manager.config.voice_input_shortcut = "Ctrl+Alt+V"
     manager.config.music_dirs = ["D:/Music"]
     manager.config.video_dirs = ["D:/Video"]
@@ -43,6 +46,9 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     assert loaded.local_ai_base_url == "http://127.0.0.1:1234/v1"
     assert loaded.local_ai_model_name == "local-model"
     assert loaded.local_ai_api_key == "local-ai-secret"
+    assert loaded.translation_engine == "local"
+    assert loaded.translation_source_language == "ja"
+    assert loaded.translation_target_language == "zh"
     assert loaded.voice_input_shortcut == "Ctrl+Alt+V"
     assert loaded.music_dirs == ["D:/Music"]
     assert loaded.video_dirs == ["D:/Video"]
@@ -99,6 +105,9 @@ def test_update_config_value_validates_provider_and_booleans():
     update_config_value(config, "local_ai_base_url", "http://127.0.0.1:1234/v1/")
     update_config_value(config, "local_ai_model_name", "qwen")
     update_config_value(config, "local_ai_api_key", "optional-key")
+    update_config_value(config, "translation_engine", "local")
+    update_config_value(config, "translation_source_language", "en")
+    update_config_value(config, "translation_target_language", "zh")
     update_config_value(config, "xunfei_app_id", "app-id")
     update_config_value(config, "xunfei_api_key", "api-key")
     update_config_value(config, "xunfei_api_secret", "api-secret")
@@ -112,6 +121,9 @@ def test_update_config_value_validates_provider_and_booleans():
     assert config.local_ai_base_url == "http://127.0.0.1:1234/v1"
     assert config.local_ai_model_name == "qwen"
     assert config.local_ai_api_key == "optional-key"
+    assert config.translation_engine == "local"
+    assert config.translation_source_language == "en"
+    assert config.translation_target_language == "zh"
     assert config.has_xunfei_credentials is True
     assert config.voice_input_shortcut == "Ctrl+Alt+V"
 

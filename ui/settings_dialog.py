@@ -224,6 +224,26 @@ class _DownloadWorker(QThread):
             self.finished.emit(False, f"下载失败: {exc}")
 
 
+class _TranslationInstallWorker(QThread):
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, source_language: str, target_language: str):
+        super().__init__()
+        self.source_language = source_language
+        self.target_language = target_language
+
+    def run(self):
+        try:
+            from core.lyrics_translation import install_local_translation_package
+
+            message = install_local_translation_package(
+                self.source_language, self.target_language
+            )
+            self.finished.emit(True, message)
+        except Exception as exc:
+            self.finished.emit(False, str(exc))
+
+
 class SettingsDialog(QDialog):
     restart_requested = pyqtSignal()  # GPU 安装完成后请求重启
     
@@ -384,6 +404,41 @@ class SettingsDialog(QDialog):
         self.lrc_input.setPlaceholderText("留空 = 与音频文件同目录"); dr.addWidget(self.lrc_input)
         bb = QPushButton("浏览"); bb.clicked.connect(lambda: self._browse(self.lrc_input)); dr.addWidget(bb)
         lf.addRow("LRC 目录:", dr); lyrics_layout.addWidget(lg)
+
+        translation_group = QGroupBox("歌词翻译")
+        translation_form = QFormLayout(translation_group)
+        self.translation_engine_combo = QComboBox()
+        self.translation_engine_combo.addItem("AI 接口（在线或本地模型）", "ai")
+        self.translation_engine_combo.addItem("本地离线翻译库（Argos）", "local")
+        translation_form.addRow("默认引擎:", self.translation_engine_combo)
+        language_items = [("中文", "zh"), ("英语", "en"), ("日语", "ja"), ("韩语", "ko")]
+        self.translation_source_combo = QComboBox()
+        self.translation_target_combo = QComboBox()
+        for label, code in language_items:
+            self.translation_source_combo.addItem(label, code)
+            self.translation_target_combo.addItem(label, code)
+        self.translation_source_combo.currentIndexChanged.connect(
+            self._refresh_translation_package_status
+        )
+        self.translation_target_combo.currentIndexChanged.connect(
+            self._refresh_translation_package_status
+        )
+        translation_form.addRow("源语言:", self.translation_source_combo)
+        translation_form.addRow("目标语言:", self.translation_target_combo)
+        self.translation_package_status = QLabel("")
+        self.translation_package_status.setWordWrap(True)
+        self.translation_package_status.setStyleSheet("font-size:11px;color:#666")
+        translation_form.addRow("本地库:", self.translation_package_status)
+        self.translation_download_button = QPushButton("下载所选本地翻译库")
+        self.translation_download_button.clicked.connect(self._on_download_translation_package)
+        translation_form.addRow("", self.translation_download_button)
+        translation_hint = QLabel(
+            "本地库下载后可完全离线翻译；AI 翻译使用“本地部署 AI”页选中的接口。"
+        )
+        translation_hint.setWordWrap(True)
+        translation_hint.setStyleSheet("font-size:11px;color:#666")
+        translation_form.addRow("", translation_hint)
+        lyrics_layout.addWidget(translation_group)
         lyrics_layout.addStretch()
 
         shortcut_group = QGroupBox("快捷键")
@@ -484,6 +539,14 @@ class SettingsDialog(QDialog):
         self.local_ai_base_url_input.setText(c.local_ai_base_url)
         self.local_ai_model_input.setText(c.local_ai_model_name)
         self.local_ai_key_input.setText(c.local_ai_api_key)
+        translation_engine_index = self.translation_engine_combo.findData(c.translation_engine)
+        self.translation_engine_combo.setCurrentIndex(max(0, translation_engine_index))
+        source_index = self.translation_source_combo.findData(c.translation_source_language)
+        target_index = self.translation_target_combo.findData(c.translation_target_language)
+        self.translation_source_combo.setCurrentIndex(max(0, source_index))
+        self.translation_target_combo.setCurrentIndex(max(0, target_index))
+        if self.section == "lyrics":
+            self._refresh_translation_package_status()
         # 仅打开语音识别分类时扫描显卡，避免其他设置页启动无关后台任务。
         if self.section == "recognition":
             self._on_scan_gpu()
@@ -493,6 +556,40 @@ class SettingsDialog(QDialog):
         endpoint = self.local_ai_preset.itemData(index)
         if endpoint and endpoint != "custom":
             self.local_ai_base_url_input.setText(endpoint)
+
+    def _refresh_translation_package_status(self, _index: int = -1):
+        source = self.translation_source_combo.currentData()
+        target = self.translation_target_combo.currentData()
+        if source == target:
+            self.translation_package_status.setText("源语言和目标语言不能相同")
+            self.translation_download_button.setEnabled(False)
+            return
+        from core.lyrics_translation import local_translation_available
+
+        installed = local_translation_available(source, target)
+        self.translation_package_status.setText(
+            f"{source} → {target}：{'已安装 ✓' if installed else '未安装'}"
+        )
+        self.translation_download_button.setEnabled(not installed)
+
+    def _on_download_translation_package(self):
+        source = self.translation_source_combo.currentData()
+        target = self.translation_target_combo.currentData()
+        if source == target:
+            return
+        self.translation_download_button.setEnabled(False)
+        self.translation_package_status.setText(f"正在下载并安装 {source} → {target}…")
+        self._translation_installer = _TranslationInstallWorker(source, target)
+        self._translation_installer.finished.connect(self._on_translation_package_installed)
+        self._translation_installer.start()
+
+    def _on_translation_package_installed(self, success: bool, message: str):
+        if success:
+            self._refresh_translation_package_status()
+            return
+        self.translation_package_status.setText(message)
+        self.translation_download_button.setEnabled(True)
+        QMessageBox.warning(self, "本地翻译库", message)
 
     def _on_prov(self, idx):
         is_local = self.provider_combo.itemData(idx) == "local"
@@ -765,5 +862,8 @@ class SettingsDialog(QDialog):
         c.local_ai_base_url = self.local_ai_base_url_input.text().strip().rstrip("/")
         c.local_ai_model_name = self.local_ai_model_input.text().strip()
         c.local_ai_api_key = self.local_ai_key_input.text().strip()
+        c.translation_engine = self.translation_engine_combo.currentData()
+        c.translation_source_language = self.translation_source_combo.currentData()
+        c.translation_target_language = self.translation_target_combo.currentData()
         config_manager.config = c; config_manager.save()
         self.accept()

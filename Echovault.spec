@@ -28,9 +28,13 @@ hidden_imports = [
     "PyQt6.QtMultimedia",
     "torch",
     "zeroconf",
-] + collect_submodules("groq") + collect_submodules("whisper") + collect_submodules("tiktoken_ext")
+] + collect_submodules("argostranslate") + collect_submodules("groq") + collect_submodules("whisper") + collect_submodules("tiktoken_ext")
 
-datas = collect_data_files("certifi") + collect_data_files("whisper")
+datas = (
+    collect_data_files("argostranslate")
+    + collect_data_files("certifi")
+    + collect_data_files("whisper")
+)
 binaries = [(ffmpeg_path, "."), (ffprobe_path, ".")]
 
 a = Analysis(

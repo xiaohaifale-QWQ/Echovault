@@ -23,7 +23,7 @@
 | 本地模型 | `tiny`、`base`、`small`、`medium` 模型从项目 Release 下载，支持续传、SHA-256 校验、分片合并和临时文件清理。 |
 | GPU | 自动诊断显卡与运行时；可安装并启用匹配的外置 GPU 推理运行时，无法使用时安全回退 CPU。 |
 | 视频时间 | 读取视频时间元数据；左、右时间可精确编辑到秒；使用小时偏移快速校准并导出视频文字时间轴。 |
-| LRC | 生成、繁转简、编辑、时间戳调整、歌词预览与同名 LRC 自动刷新。 |
+| LRC | 生成、繁转简、编辑、时间戳调整、歌词预览，以及 AI/Argos 本地翻译和批量译文。 |
 | 密钥管理 | 顶栏集中管理 Groq、讯飞和 DeepSeek Key；Key 仅保存在当前 Windows 用户的本机配置中。 |
 | AI 助手 | 可展开的最左侧聊天栏，可切换 DeepSeek 或本地 OpenAI 兼容模型，并在每次对话中加载内置使用手册与系统提示词。 |
 | 同步 | LocalSend 接收端、文件夹差异比较、单向/双向/镜像同步与冲突确认。 |
@@ -102,6 +102,8 @@ Groq 连接失败时会区分 Key 无效、调用额度不足和 `api.groq.com:4
 
 完整请求格式、配置字段与故障排查见 [AI 接口与本地模型接入指南](docs/AI接口与本地模型接入指南.md)。
 
+详情页还可使用当前 AI 接口在线翻译，或在“设置 → 歌词输出”下载 Argos 语言包后完全离线翻译；译文使用独立语言后缀，不覆盖原 LRC。参见 [歌词翻译使用指南](docs/歌词翻译使用指南.md)。
+
 ### 5. 视频时间校准与汇总
 
 视频模式中选择参考视频后：
@@ -150,6 +152,9 @@ python main.py video timeline E:\\video
 
 # 内置 AI 助手（使用设置中选中的在线或本地接口）
 python main.py ai chat "这个软件如何离线识别？"
+
+# 翻译单份或整个目录的 LRC，原时间戳不变
+python main.py lyrics translate E:\music --engine local --source en --target-language zh --json
 ```
 
 完整参数参见 [CLI.md](CLI.md)。
@@ -169,6 +174,7 @@ Echovault/
 ├── Echovault.spec           # PyInstaller 发布目录配置
 ├── build.ps1                # Windows 构建脚本
 ├── requirements-cloud.txt   # Groq 在线模式依赖
+├── requirements-translation.txt # Argos 本地离线翻译依赖
 └── requirements-local.txt   # 本地 Whisper 依赖
 ```
 

@@ -7,6 +7,7 @@ def test_mcp_capabilities_default_to_read_only():
     assert capabilities["writes_enabled"] is False
     assert "config show" in capabilities["read_only_commands"]
     assert "config set" in capabilities["mutating_commands"]
+    assert "lyrics translate" in capabilities["mutating_commands"]
 
 
 def test_mcp_rejects_shell_and_requires_two_step_write_authorization():

@@ -8,9 +8,18 @@ $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $ProjectRoot
 
 if ($InstallDependencies) {
-    & $Python -m pip install -r requirements-cloud.txt -r requirements-local.txt -r requirements-dev.txt
+    & $Python -m pip install -r requirements-cloud.txt -r requirements-local.txt -r requirements-translation.txt -r requirements-dev.txt
     if ($LASTEXITCODE -ne 0) {
         throw "Dependency installation failed with exit code $LASTEXITCODE"
+    }
+}
+
+$TranslationDependenciesAvailable = & $Python -c "import argostranslate; print('yes')" 2>$null
+if ($LASTEXITCODE -ne 0 -or $TranslationDependenciesAvailable -ne "yes") {
+    Write-Host "Installing offline-translation dependencies..."
+    & $Python -m pip install -r requirements-translation.txt
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to install the Argos Translate dependency required by offline translation."
     }
 }
 

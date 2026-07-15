@@ -93,7 +93,7 @@ class MainWindow(QMainWindow):
         # 右侧：选项卡
         self.right_tabs = QTabWidget()
         
-        self.detail_panel = DetailPanel()
+        self.detail_panel = DetailPanel(self.config)
         self.right_tabs.addTab(self.detail_panel, "详情")
         
         self.library_panel = LibraryPanel()
@@ -282,6 +282,8 @@ class MainWindow(QMainWindow):
         # 详情面板 → 请求识别
         self.detail_panel.transcribe_clicked.connect(self._on_transcribe_single)
         self.detail_panel.edit_lyrics_clicked.connect(self._on_edit_lyrics)
+        self.detail_panel.translate_requested.connect(self._on_translate_lyrics)
+        self.detail_panel.batch_translate_requested.connect(self._on_batch_translate_lyrics)
         
         # 刷新计数
         self.song_list_panel.model_updated.connect(self._refresh_statusbar)
@@ -462,6 +464,89 @@ class MainWindow(QMainWindow):
     def _on_transcribe_single(self, file_path: str):
         """识别单首歌"""
         self._run_transcription([file_path])
+
+    def _on_translate_lyrics(
+        self, lrc_path: str, engine: str, source_language: str, target_language: str
+    ):
+        self._run_translation([lrc_path], engine, source_language, target_language)
+
+    def _on_batch_translate_lyrics(
+        self, engine: str, source_language: str, target_language: str
+    ):
+        lrc_paths = [
+            str(Path(song["path"]).with_suffix(".lrc"))
+            for song in self.song_list_panel.get_all_songs()
+            if song.get("has_lrc")
+        ]
+        if not lrc_paths:
+            QMessageBox.information(self, "批量翻译", "当前列表没有可翻译的 LRC 歌词。")
+            return
+        reply = QMessageBox.question(
+            self,
+            "批量翻译",
+            f"将翻译当前列表中的 {len(lrc_paths)} 份歌词，并生成独立译文文件。\n"
+            "原 LRC 不会被覆盖，是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._run_translation(lrc_paths, engine, source_language, target_language)
+
+    def _run_translation(
+        self,
+        lrc_paths: list[str],
+        engine: str,
+        source_language: str,
+        target_language: str,
+    ):
+        if source_language == target_language:
+            QMessageBox.information(self, "歌词翻译", "源语言和目标语言不能相同。")
+            return
+        self.config.translation_engine = engine
+        self.config.translation_source_language = source_language
+        self.config.translation_target_language = target_language
+        config_manager.save()
+        from ui.translation_worker import TranslationWorker
+
+        self.translation_worker = TranslationWorker(
+            lrc_paths,
+            engine=engine,
+            source_language=source_language,
+            target_language=target_language,
+            config=self.config,
+            parent=self,
+        )
+        self.translation_worker.progress.connect(
+            lambda current, total, name: self.status_label.setText(
+                f"翻译中 {current}/{total}：{name}"
+            )
+        )
+        self.translation_worker.finished.connect(self._on_translation_finished)
+        self.translation_worker.start()
+
+    def _on_translation_finished(self, results: dict):
+        successes = [
+            (source, result["output"])
+            for source, result in results.items()
+            if result.get("success")
+        ]
+        failures = [
+            str(result.get("error", "未知错误"))
+            for result in results.values()
+            if not result.get("success")
+        ]
+        for source_path, translated_path in successes:
+            self.detail_panel.translation_completed(source_path, translated_path)
+        self.status_label.setText(
+            f"翻译完成：成功 {len(successes)}，失败 {len(failures)}"
+        )
+        if failures:
+            unique_errors = list(dict.fromkeys(failures))
+            QMessageBox.warning(
+                self,
+                "歌词翻译",
+                f"成功 {len(successes)} 份，失败 {len(failures)} 份。\n\n"
+                + "\n".join(unique_errors[:3]),
+            )
     
     def _on_transcribe_selected(self):
         """识别选中的歌曲"""
@@ -663,6 +748,7 @@ class MainWindow(QMainWindow):
             # 设置已保存，重建 router
             self.router = get_router(self.config)
             self._configure_voice_input_shortcut()
+            self.detail_panel.reload_translation_settings()
             self._refresh_statusbar()
 
     def _on_key_manager(self):

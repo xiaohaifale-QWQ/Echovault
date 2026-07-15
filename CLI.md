@@ -218,6 +218,15 @@ python main.py lyrics search <keyword> [--folder DIR] [--json]
 python main.py lyrics search "理想" --folder "E:/music/"
 ```
 
+#### 3.4.3 `lyrics translate` — 单份/批量翻译歌词
+
+```bash
+python main.py lyrics translate <LRC文件|音频文件|目录> \
+  [--engine ai|local] [--source en] [--target-language zh] [--json]
+```
+
+输出为 `<歌名>.<目标语言>.lrc`，不覆盖原 LRC，原时间戳前缀保持不变。目录模式递归处理 LRC；AI/MCP 调用时属于需要确认的写操作。完整说明见 `docs/歌词翻译使用指南.md`。
+
 ---
 
 ### 3.5 `config` — 配置管理
@@ -250,6 +259,9 @@ python main.py config set <key> <value>
 | `local_ai_base_url` | URL | 本地 AI 的 OpenAI 兼容接口根地址 |
 | `local_ai_model_name` | 模型 ID | 本地服务已加载的模型 |
 | `local_ai_api_key` | 可选 API Key | 本地兼容服务的 Bearer Key |
+| `translation_engine` | `ai` / `local` | 默认歌词翻译引擎 |
+| `translation_source_language` | `zh` / `en` / `ja` / `ko` | 默认源语言 |
+| `translation_target_language` | `zh` / `en` / `ja` / `ko` | 默认目标语言 |
 | `output_lrc_dir` | 路径 或 `none` | LRC 输出目录 |
 | `music_dirs` | 文件夹路径 | 默认音乐目录 |
 

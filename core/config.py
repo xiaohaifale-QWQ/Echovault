@@ -9,8 +9,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-CONFIG_SCHEMA_VERSION = 4
+CONFIG_SCHEMA_VERSION = 5
 SUPPORTED_AI_PROVIDERS = {"online", "local"}
+SUPPORTED_TRANSLATION_ENGINES = {"ai", "local"}
 SUPPORTED_PROVIDERS = {"groq", "local", "xunfei"}
 SUPPORTED_LOCAL_MODELS = {"tiny", "base", "small", "medium", "large"}
 SUPPORTED_LANGUAGES = {"zh", "en", "ja", "ko"}
@@ -60,6 +61,9 @@ class AppConfig:
     local_ai_base_url: str = "http://127.0.0.1:11434/v1"
     local_ai_model_name: str = ""
     local_ai_api_key: str = ""
+    translation_engine: str = "ai"
+    translation_source_language: str = "en"
+    translation_target_language: str = "zh"
     voice_input_shortcut: str = "Ctrl+Shift+Space"
 
     def __post_init__(self):
@@ -148,6 +152,9 @@ class ConfigManager:
             "local_ai_base_url": c.local_ai_base_url,
             "local_ai_model_name": c.local_ai_model_name,
             "local_ai_api_key": c.local_ai_api_key,
+            "translation_engine": c.translation_engine,
+            "translation_source_language": c.translation_source_language,
+            "translation_target_language": c.translation_target_language,
             "voice_input_shortcut": c.voice_input_shortcut,
             "asr": {
                 "provider": c.asr.provider,
@@ -199,6 +206,18 @@ class ConfigManager:
         )
         c.local_ai_api_key = os.environ.get("ECHOVAULT_LOCAL_AI_API_KEY") or data.get(
             "local_ai_api_key", ""
+        )
+        translation_engine = data.get("translation_engine", "ai")
+        c.translation_engine = (
+            translation_engine if translation_engine in SUPPORTED_TRANSLATION_ENGINES else "ai"
+        )
+        source_language = data.get("translation_source_language", "en")
+        target_language = data.get("translation_target_language", "zh")
+        c.translation_source_language = (
+            source_language if source_language in SUPPORTED_LANGUAGES else "en"
+        )
+        c.translation_target_language = (
+            target_language if target_language in SUPPORTED_LANGUAGES else "zh"
         )
         shortcut = data.get("voice_input_shortcut", "Ctrl+Shift+Space")
         c.voice_input_shortcut = shortcut if isinstance(shortcut, str) else "Ctrl+Shift+Space"
@@ -270,6 +289,14 @@ def update_config_value(config: AppConfig, key: str, value: str) -> None:
         config.local_ai_model_name = value
     elif key == "local_ai_api_key":
         config.local_ai_api_key = value
+    elif key == "translation_engine":
+        if value not in SUPPORTED_TRANSLATION_ENGINES:
+            raise ValueError(f"不支持的翻译引擎: {value}")
+        config.translation_engine = value
+    elif key in {"translation_source_language", "translation_target_language"}:
+        if value not in SUPPORTED_LANGUAGES:
+            raise ValueError(f"不支持的翻译语言: {value}")
+        setattr(config, key, value)
     elif key == "voice_input_shortcut":
         config.voice_input_shortcut = value
     else:

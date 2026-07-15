@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Offline translation runtime. Language-pair .argosmodel packages are downloaded
+# on demand from Settings instead of being bundled in every installation.
+argostranslate>=1.9.6,<2

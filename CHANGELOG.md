@@ -15,6 +15,11 @@
 
 ### Added
 
+- Timestamp-preserving single/batch LRC translation from the Details preview, using the
+  selected AI endpoint or downloadable Argos offline language packages; translated LRCs
+  use language suffixes and never overwrite the source.
+- `lyrics translate` CLI/MCP write command and a detailed translation guide covering
+  privacy, local model download, output naming, batch behavior, and recovery.
 - A fifth Settings entry for local AI, with online/local switching, Ollama and LM Studio
   presets, an optional local bearer token, and a shared OpenAI-compatible chat interface.
 - Detailed online/local AI request schema, configuration, environment variable, security,
