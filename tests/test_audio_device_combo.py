@@ -40,4 +40,4 @@ def test_audio_device_combo_avoids_virtual_default_for_real_speaker(monkeypatch)
     monkeypatch.setattr(AudioDeviceCombo, "_device_id", lambda device: device.id())
 
     assert AudioDeviceCombo._preferred_index(outputs, b"", b"virtual") == 1
-    assert AudioDeviceCombo._preferred_index(outputs, b"virtual", b"virtual") == 0
+    assert AudioDeviceCombo._preferred_index(outputs, b"virtual", b"virtual") == 1

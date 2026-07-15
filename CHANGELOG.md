@@ -8,6 +8,8 @@
   process, so an installed RTX/CUDA runtime is no longer hidden by the desktop bundle's CPU
   Torch. Progress identifies the actual GPU, and CPU/GPU processes remain isolated.
 - Starting playback in Online Matching now pauses Vocal Separation playback and vice versa.
+- A previously saved virtual ASL/streaming device no longer overrides an available physical
+  speaker or headset after Windows changes its default output.
 - Local lyric playback and the two-stem preview now expose the actual Windows output device,
   remember an explicit choice, avoid known virtual defaults when a physical speaker is available,
   rebind and unmute it immediately before playback, refresh after hot-plug, and report decoder

@@ -32,9 +32,20 @@ class AudioDeviceCombo(QComboBox):
         saved_id: bytes,
         default_id: bytes,
     ) -> int:
-        for index, device in enumerate(outputs):
-            if saved_id and cls._device_id(device) == saved_id:
-                return index
+        saved_index = next(
+            (
+                index
+                for index, device in enumerate(outputs)
+                if saved_id and cls._device_id(device) == saved_id
+            ),
+            -1,
+        )
+        if saved_index >= 0:
+            saved_description = outputs[saved_index].description().lower()
+            if not any(
+                marker in saved_description for marker in cls._VIRTUAL_OUTPUT_MARKERS
+            ):
+                return saved_index
 
         default_index = next(
             (
@@ -57,6 +68,8 @@ class AudioDeviceCombo(QComboBox):
             )
             if is_speaker and not is_virtual:
                 return index
+        if saved_index >= 0:
+            return saved_index
         return default_index if default_index >= 0 else (0 if outputs else -1)
 
     def refresh_devices(self):
