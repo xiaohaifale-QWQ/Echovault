@@ -21,10 +21,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 CLI_OUTPUT_PATH_ENV = "ECHOVAULT_CLI_OUTPUT_PATH"
 
-def _configure_utf8_stream(stream):
+def _configure_utf8_stream(stream, *, capture_cli_output=False):
     """Return a writable UTF-8 stream, including in windowed executables."""
     if stream is None:
-        output_path = os.environ.get(CLI_OUTPUT_PATH_ENV, "").strip()
+        output_path = (
+            os.environ.get(CLI_OUTPUT_PATH_ENV, "").strip()
+            if capture_cli_output
+            else ""
+        )
         if output_path:
             return open(output_path, "a", encoding="utf-8", newline="\n")
         return open(os.devnull, "w", encoding="utf-8")
@@ -38,9 +42,10 @@ def _configure_utf8_stream(stream):
 
 
 # Force UTF-8 console output while remaining compatible with PyInstaller's
-# windowed mode, where sys.stdout and sys.stderr are both None. Whisper/tqdm still
-# writes progress output in GUI mode, so a writable null stream is required.
-sys.stdout = _configure_utf8_stream(sys.stdout)
+# windowed mode, where sys.stdout and sys.stderr are both None. CLI structured output
+# is captured from stdout only; keeping dependency logs on stderr out of that file is
+# required so packaged JSON remains machine-readable.
+sys.stdout = _configure_utf8_stream(sys.stdout, capture_cli_output=True)
 sys.stderr = _configure_utf8_stream(sys.stderr)
 
 from core.config import config_manager, AppConfig, update_config_value

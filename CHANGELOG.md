@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Packaged offline translation now keeps Argos diagnostic logging out of the structured
+  CLI capture file, so AI/MCP callers always receive parseable JSON.
 - Xunfei Speed Transcription now uses the documented `zh_cn` language modes, accepts
   JSON-string task results, rejects unsupported languages before upload, and explains
   service-license error 11200 with the required console action.

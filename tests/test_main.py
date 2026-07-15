@@ -34,10 +34,23 @@ def test_configure_utf8_stream_captures_windowed_cli_output(tmp_path, monkeypatc
     output_path = tmp_path / "cli-output.log"
     monkeypatch.setenv(CLI_OUTPUT_PATH_ENV, str(output_path))
 
-    stream = _configure_utf8_stream(None)
+    stream = _configure_utf8_stream(None, capture_cli_output=True)
     try:
         stream.write("诊断结果")
     finally:
         stream.close()
 
     assert output_path.read_text(encoding="utf-8") == "诊断结果"
+
+
+def test_configure_utf8_stream_keeps_stderr_out_of_cli_capture(tmp_path, monkeypatch):
+    output_path = tmp_path / "cli-output.log"
+    monkeypatch.setenv(CLI_OUTPUT_PATH_ENV, str(output_path))
+
+    stream = _configure_utf8_stream(None, capture_cli_output=False)
+    try:
+        stream.write("dependency diagnostic")
+    finally:
+        stream.close()
+
+    assert not output_path.exists()
