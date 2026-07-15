@@ -52,6 +52,8 @@ def test_online_panel_selects_songs_and_compares_two_editable_timelines(
     assert "online two" in comparison.online_editor.toPlainText()
     assert comparison.local_editor.highlight_at(13.0) == 1
     assert comparison.online_editor.highlight_at(13.0) == 0
+    assert not hasattr(comparison, "audio_device_combo")
+    assert comparison.media_devices is not None
 
     comparison._begin_editing(comparison.local_editor)
     assert comparison.local_editor.isReadOnly() is False

@@ -17,7 +17,8 @@ def test_vocal_separation_panel_has_settings_above_mixer(tmp_path):
     assert panel.selected_song_label.text() == song.name
     assert panel.accompaniment_waveform is not None
     assert panel.vocal_waveform is not None
-    assert panel.audio_device_combo.count() >= 1
+    assert not hasattr(panel, "audio_device_combo")
+    assert panel.media_devices is not None
     assert not panel.play_button.isEnabled()
     assert not panel.save_mix_button.isEnabled()
     assert "保存调音结果" in panel.save_mix_button.text()

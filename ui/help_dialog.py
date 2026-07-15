@@ -81,7 +81,7 @@ HELP_SECTIONS = (
           <li>点击“开始处理”，结果保存为 <code>_vocals.wav</code> 和
           <code>_accompaniment.wav</code>，原素材不变。</li>
           <li>红色波形线可直接拖动；支持暂停、1x–10x 倍速和本地倒放试听。</li>
-          <li>从播放器选择正确的 Windows 输出设备；同时输出两轨时可调音并导出新的无损 WAV。</li>
+          <li>播放器始终跟随 Windows 当前系统默认输出；同时输出两轨时可调音并导出新的无损 WAV。</li>
         </ol>
         <p>“设置 → 语音识别”启用 Demucs 后，本地 Whisper 会先识别临时人声音轨，
         结束后自动清理；该流程完全在本机执行。</p>

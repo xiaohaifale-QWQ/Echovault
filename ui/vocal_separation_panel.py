@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QPointF, Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
-from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PyQt6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -39,7 +39,7 @@ from core.vocal_separation import (
     separation_available,
     separation_model_installed,
 )
-from ui.audio_device_combo import AudioDeviceCombo
+from ui.system_audio import apply_system_default_audio
 
 
 class SeparationWorker(QThread):
@@ -277,6 +277,9 @@ class VocalSeparationPanel(QWidget):
         self.vocal_player.errorOccurred.connect(
             lambda _error, message: self._player_error("人声", message)
         )
+        self.media_devices = QMediaDevices(self)
+        self.media_devices.audioOutputsChanged.connect(self._apply_system_audio_output)
+        self._apply_system_audio_output()
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
@@ -378,10 +381,6 @@ class VocalSeparationPanel(QWidget):
         self.play_button.setEnabled(False)
         self.play_button.clicked.connect(self._toggle_playback)
         playback_row.addWidget(self.play_button)
-        playback_row.addWidget(QLabel("输出:"))
-        self.audio_device_combo = AudioDeviceCombo()
-        self.audio_device_combo.device_changed.connect(self._apply_audio_device)
-        playback_row.addWidget(self.audio_device_combo)
         self.seek_slider = QSlider(Qt.Orientation.Horizontal)
         self.seek_slider.setRange(0, 1000)
         self.seek_slider.setEnabled(False)
@@ -582,7 +581,7 @@ class VocalSeparationPanel(QWidget):
         self.save_mix_button.setToolTip(
             "" if has_accompaniment and has_vocals else "保存调音结果需要同时输出人声和伴奏"
         )
-        self._apply_audio_device()
+        self._apply_system_audio_output()
         self._volume_changed()
 
     def _toggle_playback(self):
@@ -594,15 +593,11 @@ class VocalSeparationPanel(QWidget):
             self.accompaniment_player.pause()
             self.vocal_player.pause()
         else:
-            if not self.audio_device_combo.apply_to(
-                self.accompaniment_audio, self.vocal_audio
-            ):
+            if not self._apply_system_audio_output():
                 self.processing_status.setText(
                     "未检测到音频输出设备，请检查 Windows 声音设置。"
                 )
                 return
-            self.accompaniment_audio.setMuted(False)
-            self.vocal_audio.setMuted(False)
             self._volume_changed()
             master = (
                 self.accompaniment_player
@@ -623,7 +618,7 @@ class VocalSeparationPanel(QWidget):
                 )
             )
             self.processing_status.setText(
-                f"正在通过“{self.audio_device_combo.currentText()}”播放{track_count}条音轨。"
+                f"正在通过 Windows 系统默认输出播放{track_count}条音轨。"
             )
             self.playback_started.emit()
 
@@ -744,13 +739,15 @@ class VocalSeparationPanel(QWidget):
         self._cleanup_reverse_preview()
         super().closeEvent(event)
 
-    def _apply_audio_device(self, _device=None):
-        if not hasattr(self, "audio_device_combo"):
-            return
-        self.audio_device_combo.apply_to(
+    def _apply_system_audio_output(self):
+        if not hasattr(self, "accompaniment_audio"):
+            return False
+        available = apply_system_default_audio(
             self.accompaniment_audio, self.vocal_audio
         )
-        self._volume_changed()
+        if hasattr(self, "accompaniment_volume"):
+            self._volume_changed()
+        return available
 
     def _player_error(self, track: str, message: str):
         self.processing_status.setText(

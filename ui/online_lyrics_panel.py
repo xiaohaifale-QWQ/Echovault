@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor, QTextFormat
-from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PyQt6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -37,7 +37,7 @@ from core.online_lyrics import (
     simplify_lyrics_content,
     timed_text_entries,
 )
-from ui.audio_device_combo import AudioDeviceCombo
+from ui.system_audio import apply_system_default_audio
 
 
 @dataclass(frozen=True)
@@ -189,10 +189,6 @@ class OnlineLyricsComparisonPane(QWidget):
         self.play_button.setEnabled(False)
         self.play_button.clicked.connect(self._toggle_playback)
         player_layout.addWidget(self.play_button)
-        player_layout.addWidget(QLabel("输出:"))
-        self.audio_device_combo = AudioDeviceCombo()
-        self.audio_device_combo.device_changed.connect(self._apply_audio_device)
-        player_layout.addWidget(self.audio_device_combo)
         self.position_slider = QSlider(Qt.Orientation.Horizontal)
         self.position_slider.setRange(0, 0)
         self.position_slider.sliderPressed.connect(self._on_seek_started)
@@ -221,12 +217,16 @@ class OnlineLyricsComparisonPane(QWidget):
                 f"播放器错误：{message or '无法播放当前素材'}"
             )
         )
-        self._apply_audio_device()
+        self.media_devices = QMediaDevices(self)
+        self.media_devices.audioOutputsChanged.connect(self._apply_system_audio_output)
+        self._apply_system_audio_output()
 
-    def _apply_audio_device(self, _device=None):
+    def _apply_system_audio_output(self):
         if hasattr(self, "audio_output"):
-            self.audio_device_combo.apply_to(self.audio_output)
+            available = apply_system_default_audio(self.audio_output)
             self.audio_output.setVolume(0.8)
+            return available
+        return False
 
     def show_song(self, song: dict):
         if not song or not song.get("path"):
@@ -286,14 +286,11 @@ class OnlineLyricsComparisonPane(QWidget):
         else:
             self.local_editor.setReadOnly(True)
             self.online_editor.setReadOnly(True)
-            if not self.audio_device_combo.apply_to(self.audio_output):
+            if not self._apply_system_audio_output():
                 self.status_label.setText("未检测到音频输出设备，请检查 Windows 声音设置。")
                 return
-            self.audio_output.setMuted(False)
             self.audio_output.setVolume(0.8)
-            self.status_label.setText(
-                f"正在通过“{self.audio_device_combo.currentText()}”播放本地素材。"
-            )
+            self.status_label.setText("正在通过 Windows 系统默认输出播放本地素材。")
             self.player.play()
             self.playback_started.emit()
 
