@@ -49,8 +49,10 @@ class BatchOnlineLyricsWorker(QThread):
         total = len(self.songs)
         for index, song in enumerate(self.songs, start=1):
             media_path = Path(song["path"])
+            self.progress.emit(index, total, media_path.name, "正在读取歌曲信息…")
             try:
                 metadata = media_search_metadata(media_path)
+                self.progress.emit(index, total, media_path.name, "正在搜索 LRCLIB…")
                 matches = search_lrclib(
                     metadata.track_name,
                     artist_name=metadata.artist_name,
@@ -91,7 +93,7 @@ class BatchOnlineLyricsWorker(QThread):
                 result = {
                     "path": str(media_path),
                     "status": "failed",
-                    "message": str(exc),
+                    "message": f"失败：{exc}",
                 }
             results.append(result)
             self.progress.emit(index, total, media_path.name, result["message"])
@@ -188,6 +190,8 @@ class BatchOperationsPanel(QWidget):
         self.log.setReadOnly(True)
         self.log.setPlaceholderText("批量任务进度与结果会显示在这里。")
         layout.addWidget(self.log, 1)
+        self._active_task = ""
+        self._last_log_entry = ""
 
     @staticmethod
     def _select_data(combo: QComboBox, value: str):
@@ -222,24 +226,65 @@ class BatchOperationsPanel(QWidget):
             f"当前素材：{total} 个 · 待识别 {pending} 个 · 可翻译 {translatable} 个"
         )
 
-    def begin_online_task(self, total: int):
-        self.batch_online_button.setEnabled(False)
-        self.progress.setRange(0, max(total, 1))
+    def begin_task(self, task: str, title: str, total: int):
+        """Start a shared live log for recognition, translation, or matching."""
+
+        self._active_task = task
+        self._last_log_entry = ""
+        for button in (
+            self.batch_transcribe_button,
+            self.batch_translate_button,
+            self.batch_online_button,
+        ):
+            button.setEnabled(False)
+        self.progress.setRange(0, max(total, 1) * 100)
         self.progress.setValue(0)
+        self.progress.setFormat(f"{title} %p%")
         self.progress.setVisible(True)
         self.log.clear()
+        self.log.append(f"开始{title}：共 {total} 个素材。")
+
+    def show_task_progress(
+        self,
+        current: int,
+        total: int,
+        filename: str,
+        message: str,
+        item_percent: int = 0,
+    ):
+        self.progress.setRange(0, max(total, 1) * 100)
+        percent = max(0, min(100, item_percent))
+        self.progress.setValue(max(0, current - 1) * 100 + percent)
+        entry = f"[{current}/{total}] {filename}：{message}"
+        if entry != self._last_log_entry:
+            self.log.append(entry)
+            self._last_log_entry = entry
+        scrollbar = self.log.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def finish_task(self, summary: str):
+        for button in (
+            self.batch_transcribe_button,
+            self.batch_translate_button,
+            self.batch_online_button,
+        ):
+            button.setEnabled(True)
+        self.progress.setValue(self.progress.maximum())
+        self.log.append(f"\n{summary}")
+        self._active_task = ""
+
+    def begin_online_task(self, total: int):
+        self.begin_task("online", "批量在线匹配", total)
 
     def show_online_progress(
         self, current: int, total: int, filename: str, message: str
     ):
-        self.progress.setRange(0, max(total, 1))
-        self.progress.setValue(current)
-        self.log.append(f"[{current}/{total}] {filename}：{message}")
+        item_percent = 100 if message.startswith(("已写入", "匹配", "没有", "失败")) else 25
+        self.show_task_progress(current, total, filename, message, item_percent)
 
     def finish_online_task(self, results: list[dict]):
-        self.batch_online_button.setEnabled(True)
         matched = sum(
             1 for item in results if item["status"] in {"matched", "applied"}
         )
         failed = sum(1 for item in results if item["status"] == "failed")
-        self.log.append(f"\n完成：匹配 {matched} 个，失败 {failed} 个。")
+        self.finish_task(f"完成：匹配 {matched} 个，失败 {failed} 个。")

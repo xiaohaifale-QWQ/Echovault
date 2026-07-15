@@ -801,8 +801,28 @@ class MainWindow(QMainWindow):
                 f"翻译中 {current}/{total}：{name}"
             )
         )
+        self._translation_is_batch = len(lrc_paths) > 1
+        if self._translation_is_batch:
+            self.batch_operations_panel.begin_task(
+                "translation", "批量翻译", len(lrc_paths)
+            )
+        self.translation_worker.stage.connect(self._on_translation_stage)
         self.translation_worker.finished.connect(self._on_translation_finished)
         self.translation_worker.start()
+
+    def _on_translation_stage(
+        self,
+        current: int,
+        total: int,
+        filename: str,
+        message: str,
+        item_percent: int,
+    ):
+        self.status_label.setText(f"翻译中 {current}/{total}：{message}")
+        if getattr(self, "_translation_is_batch", False):
+            self.batch_operations_panel.show_task_progress(
+                current, total, filename, message, item_percent
+            )
 
     def _on_translation_finished(self, results: dict):
         successes = [
@@ -820,6 +840,11 @@ class MainWindow(QMainWindow):
         self.status_label.setText(
             f"翻译完成：成功 {len(successes)}，失败 {len(failures)}"
         )
+        if getattr(self, "_translation_is_batch", False):
+            self.batch_operations_panel.finish_task(
+                f"批量翻译完成：成功 {len(successes)} 个，失败 {len(failures)} 个。"
+            )
+            self._translation_is_batch = False
         if failures:
             unique_errors = list(dict.fromkeys(failures))
             QMessageBox.warning(
@@ -902,6 +927,10 @@ class MainWindow(QMainWindow):
         self.total_trans_progress.setValue(0)
         self._transcription_total = len(files)
         self._batch_completed = 0
+        if len(files) > 1:
+            self.batch_operations_panel.begin_task(
+                "recognition", "批量识别", len(files)
+            )
         self.status_label.setText(f"识别中... 0/{len(files)}")
         if provider_name == "local":
             self._start_resource_monitor()
@@ -925,6 +954,10 @@ class MainWindow(QMainWindow):
         chunk_total: int,
     ):
         self.status_label.setText(message)
+        if total > 1:
+            self.batch_operations_panel.show_task_progress(
+                current, total, filename, message, song_percent
+            )
 
     def _on_stage_progress(self, msg: str):
         self.status_label.setText(msg)
@@ -940,6 +973,20 @@ class MainWindow(QMainWindow):
         if self._transcription_total > 1:
             self.total_trans_progress.setValue(self._batch_completed)
         self.song_list_panel.update_song_status(file_path, success)
+        if self._transcription_total > 1:
+            result = getattr(self.worker, "_results", {}).get(file_path, {})
+            message = (
+                f"已写入 {Path(lrc_path).name}"
+                if success
+                else f"失败：{result.get('error') or '未知错误'}"
+            )
+            self.batch_operations_panel.show_task_progress(
+                self._batch_completed,
+                self._transcription_total,
+                Path(file_path).name,
+                message,
+                100,
+            )
         # 识别成功后立即刷新右侧详情面板
         if success:
             songs = self.song_list_panel.get_all_songs()
@@ -981,6 +1028,10 @@ class MainWindow(QMainWindow):
         success = sum(1 for v in results.values() if v["success"])
         failed = len(results) - success
         self.status_label.setText(f"识别完成: 成功 {success}, 失败 {failed}")
+        if self._transcription_total > 1:
+            self.batch_operations_panel.finish_task(
+                f"批量识别完成：成功 {success} 个，失败 {failed} 个。"
+            )
         self._refresh_statusbar()
 
         if failed > 0:
