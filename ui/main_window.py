@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         self.right_tabs.addTab(self.library_panel, "素材库")
 
         self.online_lyrics_panel = OnlineLyricsPanel()
+        self.online_lyrics_panel.bind_local_preview(self.lyrics_preview_panel)
         self.right_tabs.addTab(self.online_lyrics_panel, "在线匹配")
 
         self.batch_operations_panel = BatchOperationsPanel(self.config)
@@ -536,8 +537,16 @@ class MainWindow(QMainWindow):
         self._refresh_statusbar()
 
     def _on_right_tab_changed(self, index: int):
+        current_panel = self.right_tabs.widget(index)
+        show_lyrics = current_panel in {
+            self.library_panel,
+            self.online_lyrics_panel,
+        }
+        self.lyrics_preview_panel.set_online_comparison_mode(
+            current_panel is self.online_lyrics_panel
+        )
         self.left_stack.setCurrentWidget(
-            self.lyrics_preview_panel if self.right_tabs.widget(index) is self.library_panel else self.song_list_panel
+            self.lyrics_preview_panel if show_lyrics else self.song_list_panel
         )
 
     def _on_material_directories_changed(self, mode: str, directories: list[str]):

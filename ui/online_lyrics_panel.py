@@ -17,7 +17,6 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSlider,
-    QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -134,6 +133,7 @@ class OnlineLyricsPanel(QWidget):
         self._matches: list[LyricsMatch] = []
         self._duration = 0.0
         self._seeking = False
+        self._local_preview = None
         self._setup_ui()
         self._setup_player()
 
@@ -177,31 +177,21 @@ class OnlineLyricsPanel(QWidget):
         self.current_file_label.setStyleSheet("font-size:11px;color:#666")
         layout.addWidget(self.current_file_label)
 
-        self.comparison_label = QLabel("左侧显示本软件歌词，右侧显示在线候选歌词")
+        self.comparison_label = QLabel(
+            "主窗口左侧显示本软件歌词，当前右侧显示在线候选歌词"
+        )
         self.comparison_label.setWordWrap(True)
         self.comparison_label.setStyleSheet("font-size:11px;color:#666")
         layout.addWidget(self.comparison_label)
 
-        comparison_splitter = QSplitter(Qt.Orientation.Horizontal)
-        local_group = QGroupBox("左：本软件识别歌词（双击修改）")
-        local_layout = QVBoxLayout(local_group)
-        self.local_editor = LyricsCompareEditor()
-        self.local_editor.setReadOnly(True)
-        self.local_editor.setPlaceholderText("尚无本地识别歌词")
-        self.local_editor.edit_requested.connect(self._begin_editing)
-        local_layout.addWidget(self.local_editor)
-        comparison_splitter.addWidget(local_group)
-
-        online_group = QGroupBox("右：在线匹配歌词（双击修改）")
+        online_group = QGroupBox("在线匹配歌词（右侧，双击修改）")
         online_layout = QVBoxLayout(online_group)
         self.online_editor = LyricsCompareEditor()
         self.online_editor.setReadOnly(True)
         self.online_editor.setPlaceholderText("搜索并选择在线候选后显示歌词")
         self.online_editor.edit_requested.connect(self._begin_editing)
         online_layout.addWidget(self.online_editor)
-        comparison_splitter.addWidget(online_group)
-        comparison_splitter.setSizes([1, 1])
-        layout.addWidget(comparison_splitter, 3)
+        layout.addWidget(online_group, 3)
 
         action_grid = QGridLayout()
         self.use_local_button = QPushButton("采用左侧本地歌词")
@@ -262,6 +252,43 @@ class OnlineLyricsPanel(QWidget):
             )
         )
 
+    def bind_local_preview(self, preview_panel):
+        """Use the main window's left lyrics preview as the local comparison side."""
+        if self._local_preview is preview_panel:
+            return
+        self._local_preview = preview_panel
+        preview_panel.editing_started.connect(self._on_local_editing_started)
+        preview_panel.text.textChanged.connect(self._on_local_text_changed)
+        preview_panel.lyrics_saved.connect(self._on_local_lyrics_saved)
+        if self._song:
+            preview_panel.show_song(self._song)
+        self._refresh_action_state()
+
+    def _local_content(self) -> str:
+        if self._local_preview is not None:
+            return self._local_preview.text.toPlainText()
+        lrc_path = Path(self._song.get("lrc_path", ""))
+        try:
+            return lrc_path.read_text(encoding="utf-8") if lrc_path.is_file() else ""
+        except (OSError, UnicodeError):
+            return ""
+
+    def _on_local_editing_started(self):
+        self.player.pause()
+        self.status_label.setText(
+            "已暂停并进入左侧本地歌词编辑；采用或合并时使用当前内容。"
+        )
+
+    def _on_local_text_changed(self):
+        self._refresh_action_state()
+        if self._selected_match() is not None:
+            self.refresh_local_comparison()
+
+    def _on_local_lyrics_saved(self, _lrc_path: str):
+        self._refresh_action_state()
+        if self._selected_match() is not None:
+            self.refresh_local_comparison()
+
     def set_songs(self, songs: list[dict]):
         """Populate the song drop-down without discarding the current selection."""
         current_path = self._song.get("path", "")
@@ -290,6 +317,7 @@ class OnlineLyricsPanel(QWidget):
         path = Path(song["path"])
         self._song["lrc_path"] = str(path.with_suffix(".lrc"))
         self._song["has_lrc"] = path.with_suffix(".lrc").is_file()
+        self._matches = []
         if sync_selector:
             index = next(
                 (
@@ -312,7 +340,6 @@ class OnlineLyricsPanel(QWidget):
         duration_text = self._format_duration(metadata.duration) if metadata.duration else "未知"
         self.current_file_label.setText(f"{path.name} · {duration_text}")
         self.reload_local_lyrics()
-        self._matches = []
         self.candidate_selector.blockSignals(True)
         self.candidate_selector.clear()
         self.candidate_selector.blockSignals(False)
@@ -330,14 +357,8 @@ class OnlineLyricsPanel(QWidget):
         self._refresh_action_state()
 
     def reload_local_lyrics(self):
-        lrc_path = Path(self._song.get("lrc_path", ""))
-        try:
-            content = lrc_path.read_text(encoding="utf-8") if lrc_path.is_file() else ""
-        except (OSError, UnicodeError) as exc:
-            content = ""
-            self.status_label.setText(f"无法读取本地歌词：{exc}")
-        self.local_editor.setPlainText(content)
-        self.local_editor.setReadOnly(True)
+        if self._local_preview is not None:
+            self._local_preview.show_song(self._song)
         self._refresh_action_state()
 
     @staticmethod
@@ -414,7 +435,7 @@ class OnlineLyricsPanel(QWidget):
         match = self._selected_match()
         if match is None:
             return
-        local_content = self.local_editor.toPlainText()
+        local_content = self._local_content()
         online_content = self.online_editor.toPlainText()
         if not timed_text_entries(local_content):
             self.comparison_label.setText(
@@ -432,11 +453,12 @@ class OnlineLyricsPanel(QWidget):
         self.player.pause()
         editor.setReadOnly(False)
         editor.setFocus()
-        side = "左侧本地" if editor is self.local_editor else "右侧在线"
-        self.status_label.setText(f"已暂停并进入{side}编辑；采用或合并时会使用当前内容。")
+        self.status_label.setText(
+            "已暂停并进入右侧在线歌词编辑；采用或合并时使用当前内容。"
+        )
 
     def _refresh_action_state(self):
-        local_content = self.local_editor.toPlainText() if hasattr(self, "local_editor") else ""
+        local_content = self._local_content()
         online_content = self.online_editor.toPlainText() if hasattr(self, "online_editor") else ""
         has_local_timeline = bool(timed_text_entries(local_content))
         has_online_timeline = bool(timed_text_entries(online_content))
@@ -459,7 +481,7 @@ class OnlineLyricsPanel(QWidget):
             edited_match = replace(match, synced_lyrics="", plain_lyrics=online_content)
         payload = OnlineLyricsAction(
             match=edited_match,
-            local_content=self.local_editor.toPlainText(),
+            local_content=self._local_content(),
             online_content=online_content,
         )
         self.action_requested.emit(str(media_path), payload, action)
@@ -468,7 +490,8 @@ class OnlineLyricsPanel(QWidget):
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
         else:
-            self.local_editor.setReadOnly(True)
+            if self._local_preview is not None:
+                self._local_preview.text.setReadOnly(True)
             self.online_editor.setReadOnly(True)
             self.player.play()
 
@@ -494,7 +517,8 @@ class OnlineLyricsPanel(QWidget):
             f"{self._format_milliseconds(self.player.duration())}"
         )
         seconds = position / 1000.0
-        self.local_editor.highlight_at(seconds)
+        if self._local_preview is not None:
+            self._local_preview.text.highlight_at(seconds)
         self.online_editor.highlight_at(seconds)
 
     def _on_seek_started(self):
@@ -510,5 +534,6 @@ class OnlineLyricsPanel(QWidget):
             f"{self._format_milliseconds(self.player.duration())}"
         )
         seconds = position / 1000.0
-        self.local_editor.highlight_at(seconds)
+        if self._local_preview is not None:
+            self._local_preview.text.highlight_at(seconds)
         self.online_editor.highlight_at(seconds)

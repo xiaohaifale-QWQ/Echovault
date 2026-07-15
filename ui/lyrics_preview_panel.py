@@ -3,7 +3,10 @@
 from pathlib import Path
 
 from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor, QTextFormat
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextEdit, QVBoxLayout, QWidget
+
+from core.online_lyrics import active_lrc_line_index
 
 
 class LyricsTextEdit(QTextEdit):
@@ -15,18 +18,41 @@ class LyricsTextEdit(QTextEdit):
         self.edit_requested.emit()
         super().mouseDoubleClickEvent(event)
 
+    def highlight_at(self, position_seconds: float) -> int:
+        line_index = active_lrc_line_index(self.toPlainText(), position_seconds)
+        if line_index < 0:
+            self.setExtraSelections([])
+            return -1
+        block = self.document().findBlockByNumber(line_index)
+        if not block.isValid():
+            self.setExtraSelections([])
+            return -1
+        selection = QTextEdit.ExtraSelection()
+        selection.cursor = QTextCursor(block)
+        style = QTextCharFormat()
+        style.setBackground(QColor("#fff3a0"))
+        style.setFontWeight(QFont.Weight.Bold.value)
+        style.setProperty(QTextFormat.Property.FullWidthSelection, True)
+        selection.format = style
+        self.setExtraSelections([selection])
+        if self.isReadOnly():
+            self.setTextCursor(selection.cursor)
+            self.ensureCursorVisible()
+        return line_index
+
 
 class LyricsPreviewPanel(QWidget):
     lyrics_saved = pyqtSignal(str)
+    editing_started = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         header = QHBoxLayout()
-        title = QLabel("歌词预览")
-        title.setStyleSheet("font-weight:bold;font-size:13px;padding:4px")
-        header.addWidget(title)
+        self.title_label = QLabel("歌词预览")
+        self.title_label.setStyleSheet("font-weight:bold;font-size:13px;padding:4px")
+        header.addWidget(self.title_label)
         header.addStretch()
         self.save_button = QPushButton("保存")
         self.save_button.setToolTip("双击歌词区域后，保存对 LRC 文件的修改")
@@ -75,6 +101,12 @@ class LyricsPreviewPanel(QWidget):
         self.text.setFocus()
         self.save_button.setEnabled(True)
         self.song_label.setText(f"{self._lrc_path.stem}（编辑中）")
+        self.editing_started.emit()
+
+    def set_online_comparison_mode(self, enabled: bool):
+        self.title_label.setText(
+            "本软件识别歌词（左侧）" if enabled else "歌词预览"
+        )
 
     def _save(self):
         if not self._lrc_path or self.text.isReadOnly():

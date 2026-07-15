@@ -24,6 +24,13 @@ def test_main_window_has_five_right_tabs_and_no_scattered_batch_buttons(monkeypa
     assert not hasattr(window.song_list_panel, "btn_batch")
     assert not hasattr(window.detail_panel, "btn_batch_translate")
 
+    window.right_tabs.setCurrentWidget(window.online_lyrics_panel)
+    assert window.left_stack.currentWidget() is window.lyrics_preview_panel
+    assert window.lyrics_preview_panel.title_label.text() == "本软件识别歌词（左侧）"
+
+    window.right_tabs.setCurrentWidget(window.detail_panel)
+    assert window.left_stack.currentWidget() is window.song_list_panel
+
 
 def test_main_window_applies_cross_merge_with_backup(monkeypatch, tmp_path):
     ensure_app()

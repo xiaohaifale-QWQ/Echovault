@@ -2,6 +2,7 @@ from pathlib import Path
 
 from core.online_lyrics import LyricsMatch, MediaSearchMetadata
 from tests.qt_test_app import ensure_app, keep_widget
+from ui.lyrics_preview_panel import LyricsPreviewPanel
 from ui.online_lyrics_panel import OnlineLyricsPanel
 
 
@@ -33,6 +34,8 @@ def test_online_panel_selects_songs_and_compares_two_editable_timelines(
         "[00:01.00]local one\n[00:13.00]local two\n", encoding="utf-8"
     )
     panel = keep_widget(OnlineLyricsPanel())
+    local_preview = keep_widget(LyricsPreviewPanel())
+    panel.bind_local_preview(local_preview)
     panel.set_songs(
         [
             {"name": "First.mp3", "path": str(tmp_path / "First.mp3")},
@@ -46,13 +49,13 @@ def test_online_panel_selects_songs_and_compares_two_editable_timelines(
     assert panel.song_selector.count() == 2
     assert panel.track_input.text() == "Selected Song"
     assert panel.candidate_selector.count() == 1
-    assert "local two" in panel.local_editor.toPlainText()
+    assert "local two" in local_preview.text.toPlainText()
     assert "online two" in panel.online_editor.toPlainText()
-    assert panel.local_editor.highlight_at(13.0) == 1
+    assert local_preview.text.highlight_at(13.0) == 1
     assert panel.online_editor.highlight_at(13.0) == 0
 
-    panel._begin_editing(panel.local_editor)
-    assert panel.local_editor.isReadOnly() is False
+    local_preview._start_editing()
+    assert local_preview.text.isReadOnly() is False
 
 
 def test_online_panel_emits_explicit_cross_merge_choice(monkeypatch, tmp_path):
@@ -66,6 +69,8 @@ def test_online_panel_emits_explicit_cross_merge_choice(monkeypatch, tmp_path):
         "[00:01.00]local\n", encoding="utf-8"
     )
     panel = keep_widget(OnlineLyricsPanel())
+    local_preview = keep_widget(LyricsPreviewPanel())
+    panel.bind_local_preview(local_preview)
     panel.show_song({"name": media_path.name, "path": str(media_path)})
     panel._show_results([_match()])
     captured = []
@@ -79,4 +84,3 @@ def test_online_panel_emits_explicit_cross_merge_choice(monkeypatch, tmp_path):
     assert captured[0][2] == "merge_local_timeline"
     assert "[00:01.00]local" in captured[0][1].local_content
     assert "[00:15.00]online two" in captured[0][1].online_content
-
