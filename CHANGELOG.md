@@ -7,6 +7,8 @@
 - Batch recognition, translation, and online matching now stream the current file, active
   stage, per-item result, overall progress, and final success/failure counts into the Batch
   workspace instead of showing most work only in the status bar after completion.
+- Packaged Demucs processing now loads only the locally verified model repository instead of
+  contacting Hugging Face again during separation; packaged diagnostics also retain pydub.
 - Online Matching now uses a dedicated left workspace containing local and online lyrics
   side by side with the player below; the right tab is reserved for search results and
   recognition, apply, merge, and calibration controls.

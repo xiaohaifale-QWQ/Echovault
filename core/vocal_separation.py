@@ -82,6 +82,22 @@ SEPARATION_MODELS = {
     ),
 }
 
+MODEL_BAGS = {
+    "htdemucs": "models: ['955717e8']\n",
+    "htdemucs_ft": (
+        "models: ['f7e0c4bc', 'd12395a8', '92cfc3b6', '04573f0d']\n"
+        "weights:\n"
+        "  - [1.0, 0.0, 0.0, 0.0]\n"
+        "  - [0.0, 1.0, 0.0, 0.0]\n"
+        "  - [0.0, 0.0, 1.0, 0.0]\n"
+        "  - [0.0, 0.0, 0.0, 1.0]\n"
+    ),
+    "mdx_extra_q": (
+        "models: ['83fc094f', '464b36d7', '14fc6a69', '7fd6ef75']\n"
+        "segment: 44\n"
+    ),
+}
+
 ProgressCallback = Callable[[int, str], None]
 CancelCallback = Callable[[], bool]
 
@@ -132,6 +148,22 @@ def separation_model_installed(model: str) -> bool:
         _hash_matches(cache_dir / _checkpoint_name(item), _expected_hash_prefix(item))
         for item in spec.files
     )
+
+
+def _ensure_model_bag(cache_dir: Path, model: str) -> Path:
+    """Create Demucs' small local bag manifest beside verified checkpoints."""
+
+    content = MODEL_BAGS.get(model)
+    if content is None:
+        raise SeparationError(f"缺少人声分离模型清单：{model}")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / f"{model}.yaml"
+    if path.is_file() and path.read_text(encoding="utf-8") == content:
+        return path
+    temporary = path.with_suffix(".yaml.tmp")
+    temporary.write_text(content, encoding="utf-8", newline="\n")
+    os.replace(temporary, path)
+    return path
 
 
 def download_separation_model(
@@ -212,6 +244,7 @@ def download_separation_model(
         os.replace(partial, destination)
         progress(start_percent + span, f"{filename} 下载完成")
 
+    _ensure_model_bag(cache_dir, model)
     progress(100, f"{spec.name} 已安装")
     return cache_dir
 
@@ -274,8 +307,11 @@ def separate_vocals(
 
     try:
         progress(2, "正在加载人声分离模型…")
+        local_repo = model_cache_dir()
+        _ensure_model_bag(local_repo, model)
         separator = Separator(
             model=model,
+            repo=local_repo,
             device=device,
             shifts=1,
             overlap=0.25,

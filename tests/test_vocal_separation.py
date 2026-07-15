@@ -34,6 +34,7 @@ def test_download_separation_model_verifies_and_caches(monkeypatch, tmp_path):
         "test", "Test", "Test model", "fast", "good", "1 KB", (f"x/model-{digest[:8]}.th",)
     )
     monkeypatch.setitem(vocal_separation.SEPARATION_MODELS, "test", spec)
+    monkeypatch.setitem(vocal_separation.MODEL_BAGS, "test", "models: ['model']\n")
     monkeypatch.setattr(vocal_separation, "model_cache_dir", lambda: tmp_path)
     events = []
 
@@ -45,6 +46,7 @@ def test_download_separation_model_verifies_and_caches(monkeypatch, tmp_path):
 
     assert result == tmp_path
     assert (tmp_path / f"model-{digest[:8]}.th").read_bytes() == payload
+    assert (tmp_path / "test.yaml").is_file()
     assert vocal_separation.separation_model_installed("test")
     assert events[-1][0] == 100
 
@@ -54,6 +56,7 @@ def test_download_separation_model_rejects_bad_hash(monkeypatch, tmp_path):
         "test", "Test", "", "", "", "", ("x/model-deadbeef.th",)
     )
     monkeypatch.setitem(vocal_separation.SEPARATION_MODELS, "test", spec)
+    monkeypatch.setitem(vocal_separation.MODEL_BAGS, "test", "models: ['model']\n")
     monkeypatch.setattr(vocal_separation, "model_cache_dir", lambda: tmp_path)
 
     with pytest.raises(vocal_separation.SeparationError, match="校验失败"):

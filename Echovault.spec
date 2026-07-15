@@ -4,7 +4,7 @@
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 
 project_root = Path(SPECPATH)
@@ -24,18 +24,24 @@ if not ffprobe_path or not Path(ffprobe_path).is_file():
 hidden_imports = [
     "groq",
     "opencc",
+    "pydub",
     "psutil",
     "PyQt6.QtMultimedia",
     "torch",
+    "torchaudio",
     "zeroconf",
-] + collect_submodules("argostranslate") + collect_submodules("groq") + collect_submodules("whisper") + collect_submodules("tiktoken_ext")
+] + collect_submodules("argostranslate") + collect_submodules("demucs") + collect_submodules("groq") + collect_submodules("torchaudio") + collect_submodules("whisper") + collect_submodules("tiktoken_ext")
 
 datas = (
     collect_data_files("argostranslate")
     + collect_data_files("certifi")
+    + collect_data_files("demucs")
     + collect_data_files("whisper")
 )
-binaries = [(ffmpeg_path, "."), (ffprobe_path, ".")]
+binaries = (
+    [(ffmpeg_path, "."), (ffprobe_path, ".")]
+    + collect_dynamic_libs("torchaudio")
+)
 
 a = Analysis(
     [str(project_root / "main.py")],
@@ -47,11 +53,9 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        "demucs",
         "matplotlib",
         "pandas",
         "PIL",
-        "torchaudio",
         "torchvision",
     ],
     noarchive=False,
