@@ -8,6 +8,7 @@ from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QGroupBox,
     QHBoxLayout,
@@ -25,11 +26,14 @@ from PyQt6.QtWidgets import (
 from core.config import config_manager
 from core.model_download import DownloadCancelled, download_model
 from core.runtime_detection import detect_hardware, select_runtime
+from core.separation_runtime import (
+    active_separation_gpu_runtime,
+    separation_gpu_available,
+)
 from core.vocal_separation import (
     SEPARATION_MODELS,
     SeparationCancelled,
     download_separation_model,
-    recommended_device,
     separation_model_installed,
 )
 
@@ -149,6 +153,20 @@ class ModelLibraryDialog(QDialog):
             "输出内容在“人声分离”页选择。",
             "separation",
         )
+        separation_model_row = QHBoxLayout()
+        separation_model_row.addWidget(QLabel("默认分离模型:"))
+        self.separation_model_combo = QComboBox()
+        for spec in SEPARATION_MODELS.values():
+            self.separation_model_combo.addItem(spec.name, spec.key)
+        model_index = self.separation_model_combo.findData(
+            getattr(self.config.asr, "vocal_separation_model", "htdemucs")
+        )
+        self.separation_model_combo.setCurrentIndex(max(0, model_index))
+        self.separation_model_combo.currentIndexChanged.connect(
+            self._save_default_separation_model
+        )
+        separation_model_row.addWidget(self.separation_model_combo, 1)
+        self.separation_card.layout().insertLayout(2, separation_model_row)
         separation_runtime_row = QHBoxLayout()
         separation_runtime_row.addWidget(QLabel("GPU 推理:"))
         self.separation_gpu_check = QCheckBox("优先使用 NVIDIA CUDA")
@@ -158,7 +176,7 @@ class ModelLibraryDialog(QDialog):
         self.separation_gpu_check.toggled.connect(self._save_separation_gpu_preference)
         separation_runtime_row.addWidget(self.separation_gpu_check)
         separation_runtime_row.addWidget(self.separation_runtime_label, 1)
-        self.separation_card.layout().insertLayout(2, separation_runtime_row)
+        self.separation_card.layout().insertLayout(3, separation_runtime_row)
         layout.addWidget(self.separation_card)
 
         self.progress = QProgressBar()
@@ -278,10 +296,14 @@ class ModelLibraryDialog(QDialog):
         except Exception as exc:
             self.asr_runtime_label.setText(f"硬件检测失败：{exc}")
 
-        cuda_ready = recommended_device() == "cuda"
+        cuda_ready = separation_gpu_available()
         self.separation_gpu_check.blockSignals(True)
         if cuda_ready:
-            self.separation_runtime_label.setText("Demucs CUDA 已就绪。")
+            runtime = active_separation_gpu_runtime()
+            runtime_name = runtime.runtime_id if runtime else "内置 CUDA"
+            self.separation_runtime_label.setText(
+                f"Demucs GPU 已就绪：{runtime_name}（隔离进程调用）"
+            )
             self.separation_gpu_check.setEnabled(True)
         else:
             self.separation_runtime_label.setText(
@@ -294,6 +316,11 @@ class ModelLibraryDialog(QDialog):
 
     def _save_separation_gpu_preference(self, enabled: bool):
         self.config.asr.vocal_separation_use_gpu = bool(enabled)
+        config_manager.config = self.config
+        config_manager.save()
+
+    def _save_default_separation_model(self, _index: int = -1):
+        self.config.asr.vocal_separation_model = self.separation_model_combo.currentData()
         config_manager.config = self.config
         config_manager.save()
 

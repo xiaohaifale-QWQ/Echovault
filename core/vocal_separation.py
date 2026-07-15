@@ -106,7 +106,6 @@ def separation_available() -> bool:
     try:
         import demucs.api  # noqa: F401
         import torch  # noqa: F401
-        import torchaudio  # noqa: F401
     except (ImportError, OSError):
         return False
     return True
@@ -250,6 +249,10 @@ def download_separation_model(
 
 
 def recommended_device() -> str:
+    from .separation_runtime import separation_gpu_available
+
+    if separation_gpu_available():
+        return "cuda"
     try:
         import torch
 
@@ -405,3 +408,43 @@ def mix_stems(
     finally:
         temp_path.unlink(missing_ok=True)
     return output_path
+
+
+def reverse_audio(
+    source_path: str | os.PathLike[str], output_path: str | os.PathLike[str]
+) -> Path:
+    """Render one WAV in reverse order for the interactive preview."""
+
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        raise SeparationError("未找到 ffmpeg，无法生成倒放试听")
+    source = Path(source_path)
+    output = Path(output_path)
+    if not source.is_file():
+        raise SeparationError(f"倒放源音轨不存在：{source}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(f".{output.stem}.reversing{output.suffix}")
+    try:
+        subprocess.run(
+            [
+                ffmpeg,
+                "-y",
+                "-i",
+                str(source),
+                "-af",
+                "areverse",
+                "-c:a",
+                "pcm_s24le",
+                str(temporary),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            **hidden_window_kwargs(),
+        )
+        os.replace(temporary, output)
+    except subprocess.CalledProcessError as exc:
+        raise SeparationError(f"生成倒放试听失败：{exc.stderr[-500:]}") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+    return output

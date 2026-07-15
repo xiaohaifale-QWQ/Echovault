@@ -329,7 +329,7 @@ def transcribe_and_save_lrc(
     separation_temp_dir = None
 
     if use_vocal_separation:
-        from .vocal_separation import separate_vocals
+        from .separation_process import run_separation_process
 
         separation_temp_dir = tempfile.mkdtemp(prefix="echovault_asr_vocals_")
 
@@ -344,7 +344,7 @@ def transcribe_and_save_lrc(
                 )
 
         try:
-            result = separate_vocals(
+            result = run_separation_process(
                 audio_path,
                 separation_temp_dir,
                 model=separation_model,

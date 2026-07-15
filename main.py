@@ -636,6 +636,60 @@ def cmd_gpu(args):
         _out(result, args)
 
 
+def cmd_separation_worker(args):
+    """Internal isolated Demucs entry point used by the desktop UI."""
+
+    from core.separation_process import write_separation_event
+
+    try:
+        if args.device == "cuda":
+            from core.separation_runtime import prepare_separation_cuda
+
+            runtime = prepare_separation_cuda()
+            write_separation_event(
+                args.events_file,
+                {
+                    "type": "progress",
+                    "percent": 1,
+                    "message": f"GPU 已就绪：{runtime['gpu_name']}",
+                },
+            )
+        from core.vocal_separation import separate_vocals
+
+        result = separate_vocals(
+            args.input,
+            args.output_dir,
+            model=args.model,
+            device=args.device,
+            output_content=args.output_content,
+            progress=lambda percent, message: write_separation_event(
+                args.events_file,
+                {
+                    "type": "progress",
+                    "percent": percent,
+                    "message": message,
+                },
+            ),
+        )
+        write_separation_event(
+            args.events_file,
+            {
+                "type": "result",
+                "vocals_path": str(result.vocals_path) if result.vocals_path else None,
+                "accompaniment_path": (
+                    str(result.accompaniment_path)
+                    if result.accompaniment_path
+                    else None
+                ),
+                "sample_rate": result.sample_rate,
+            },
+        )
+    except Exception as exc:
+        write_separation_event(
+            args.events_file, {"type": "error", "message": str(exc)}
+        )
+        raise SystemExit(1) from exc
+
 # ============================================================
 # sync
 # ============================================================
@@ -945,6 +999,20 @@ def main():
     sp = sub.add_parser("doctor", help="Check runtime environment")
     sp.add_argument("--json", dest="json_output", action="store_true")
     sp.set_defaults(func=cmd_doctor)
+
+    # Internal child process used for isolated CPU/CUDA Demucs execution.
+    sp = sub.add_parser("_separate-worker", help=argparse.SUPPRESS)
+    sp.add_argument("--input", required=True)
+    sp.add_argument("--output-dir", required=True)
+    sp.add_argument("--model", required=True)
+    sp.add_argument("--device", choices=["cpu", "cuda"], required=True)
+    sp.add_argument(
+        "--output-content",
+        choices=["both", "vocals", "accompaniment"],
+        required=True,
+    )
+    sp.add_argument("--events-file", required=True)
+    sp.set_defaults(func=cmd_separation_worker)
 
     args = p.parse_args()
     if args.command is None:

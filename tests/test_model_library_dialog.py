@@ -16,12 +16,16 @@ def test_model_library_contains_asr_and_separation_models(monkeypatch):
         "ui.model_library_dialog.detect_hardware",
         lambda: HardwareReport("win_amd64", 19045, ()),
     )
-    monkeypatch.setattr("ui.model_library_dialog.recommended_device", lambda: "cpu")
+    monkeypatch.setattr(
+        "ui.model_library_dialog.separation_gpu_available", lambda: False
+    )
     dialog = keep_widget(ModelLibraryDialog(config=AppConfig()))
 
     assert dialog.asr_card.objectName() == "asrModelCard"
     assert dialog.separation_card.objectName() == "separationModelCard"
     assert dialog.asr_table.rowCount() == 4
     assert dialog.separation_table.rowCount() == len(SEPARATION_MODELS)
+    assert dialog.separation_model_combo.count() == len(SEPARATION_MODELS)
+    assert dialog.separation_model_combo.currentData() == "htdemucs"
     assert not dialog.separation_gpu_check.isEnabled()
     assert "CPU 运行时" in dialog.separation_runtime_label.text()

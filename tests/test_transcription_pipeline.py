@@ -54,7 +54,7 @@ def test_pipeline_recognizes_separated_vocals_when_enabled(tmp_path, monkeypatch
         kwargs["progress"](50, "正在分离…")
         return SeparationResult(vocals, accompaniment, 44100)
 
-    monkeypatch.setattr("core.vocal_separation.separate_vocals", fake_separate)
+    monkeypatch.setattr("core.separation_process.run_separation_process", fake_separate)
     monkeypatch.setattr(
         "core.audio_utils.split_audio", lambda input_path, **_kwargs: [input_path]
     )
