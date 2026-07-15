@@ -20,6 +20,10 @@
 
 ### Added
 
+- A selectable-song Online Matching workspace with side-by-side editable local/online lyrics,
+  four explicit keep/replace/cross-merge choices, and normalized timeline-to-text alignment.
+- A local-media player beneath the comparison view that seeks, pauses, and independently
+  highlights/bold-scrolls both lyric timelines at the current playback position.
 - A fifth right-side Batch workspace consolidating batch recognition, batch translation,
   and thresholded LRCLIB matching, with optional backup-first application and a progress log.
 - An F1 Help dialog with offline quick guides for local AI deployment, OpenAI-compatible

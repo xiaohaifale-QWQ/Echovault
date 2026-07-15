@@ -15,11 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from core.ai_assistant import AISettings, complete
+from core.lrc_parser import parse_timestamp
 from core.lyrics_translation import timed_text_positions
 
 LRCLIB_API_BASE = "https://lrclib.net/api"
 LRCLIB_USER_AGENT = "Echovault/0.3.0 (https://github.com/xiaohaifale-QWQ/Echovault)"
 _TIMESTAMP_PREFIX = re.compile(r"^(?:\[\d{1,3}:\d{2}(?:\.\d{2,3})?\])+\s*")
+_TIMESTAMP_TAG = re.compile(r"\[\d{1,3}:\d{2}(?:\.\d{2,3})?\]")
 _METADATA_LINE = re.compile(r"^\[[A-Za-z]+:.*\]$")
 
 
@@ -46,6 +48,14 @@ class MediaSearchMetadata:
     artist_name: str = ""
     album_name: str = ""
     duration: float = 0.0
+
+
+@dataclass(frozen=True)
+class TimedTextEntry:
+    line_index: int
+    prefix: str
+    timestamp: float
+    text: str
 
 
 def _record_from_payload(payload: Any) -> LyricsMatch | None:
@@ -233,6 +243,96 @@ def compare_lyrics(local_content: str, reference_lyrics: str) -> dict[str, float
     }
 
 
+def timed_text_entries(content: str) -> list[TimedTextEntry]:
+    """Parse timed lyric lines while retaining exact prefixes and source line indexes."""
+    entries = []
+    for line_index, raw_line in enumerate(content.splitlines()):
+        prefix_match = _TIMESTAMP_PREFIX.match(raw_line)
+        if prefix_match is None:
+            continue
+        tags = _TIMESTAMP_TAG.findall(prefix_match.group(0))
+        text = raw_line[prefix_match.end() :].strip()
+        if not tags or not text:
+            continue
+        entries.append(
+            TimedTextEntry(
+                line_index=line_index,
+                prefix=prefix_match.group(0),
+                timestamp=parse_timestamp(tags[0]),
+                text=text,
+            )
+        )
+    return entries
+
+
+def active_lrc_line_index(content: str, position_seconds: float) -> int:
+    """Return the source line active at a playback position, or -1 before line one."""
+    active_index = -1
+    active_timestamp = -1.0
+    for entry in timed_text_entries(content):
+        if entry.timestamp <= position_seconds and entry.timestamp >= active_timestamp:
+            active_index = entry.line_index
+            active_timestamp = entry.timestamp
+    return active_index
+
+
+def _proportional_text_index(index: int, target_count: int, source_count: int) -> int:
+    if source_count <= 1 or target_count <= 1:
+        return 0
+    return round(index * (source_count - 1) / (target_count - 1))
+
+
+def merge_lrc_timeline_text(timeline_content: str, text_content: str) -> str:
+    """Combine one side's exact LRC timeline with the other side's lyric text.
+
+    When both inputs are synchronized, their normalized playback positions are aligned.
+    Plain-text references fall back to stable proportional line mapping.
+    """
+    raw_lines = timeline_content.splitlines()
+    timeline_entries = timed_text_entries(timeline_content)
+    if not timeline_entries:
+        raise RuntimeError("所选时间轴一侧没有有效的同步歌词。")
+    source_timed = timed_text_entries(text_content)
+    if source_timed:
+        source_texts = [entry.text for entry in source_timed]
+    else:
+        source_texts = _reference_lines(text_content)
+    if not source_texts:
+        raise RuntimeError("所选文字一侧没有可合并的歌词。")
+
+    use_normalized_time = (
+        bool(source_timed)
+        and len(timeline_entries) > 1
+        and len(source_timed) > 1
+        and timeline_entries[-1].timestamp > timeline_entries[0].timestamp
+        and source_timed[-1].timestamp > source_timed[0].timestamp
+    )
+    if use_normalized_time:
+        target_start = timeline_entries[0].timestamp
+        target_span = timeline_entries[-1].timestamp - target_start
+        source_start = source_timed[0].timestamp
+        source_span = source_timed[-1].timestamp - source_start
+        source_positions = [
+            (entry.timestamp - source_start) / source_span for entry in source_timed
+        ]
+
+    for index, timeline_entry in enumerate(timeline_entries):
+        if use_normalized_time:
+            position = (timeline_entry.timestamp - target_start) / target_span
+            source_index = min(
+                range(len(source_positions)),
+                key=lambda item: abs(source_positions[item] - position),
+            )
+        else:
+            source_index = _proportional_text_index(
+                index, len(timeline_entries), len(source_texts)
+            )
+        raw_lines[timeline_entry.line_index] = (
+            timeline_entry.prefix + source_texts[source_index]
+        )
+    return "\n".join(raw_lines).rstrip("\r\n") + "\n"
+
+
 def _next_backup_path(path: Path) -> Path:
     base = path.with_suffix(path.suffix + ".bak")
     if not base.exists():
@@ -265,6 +365,24 @@ def _atomic_replace_with_backup(path: Path, content: str) -> Path | None:
     finally:
         temp_path.unlink(missing_ok=True)
     return backup_path
+
+
+def apply_lyrics_content(
+    lrc_path: str | Path, content: str
+) -> tuple[Path, Path | None]:
+    """Validate and atomically apply edited or merged synchronized lyrics."""
+    if not timed_text_entries(content):
+        raise RuntimeError("待写入歌词没有有效时间轴。")
+    path = Path(lrc_path)
+    backup = _atomic_replace_with_backup(path, content)
+    return path, backup
+
+
+def merge_and_apply_lyrics(
+    lrc_path: str | Path, timeline_content: str, text_content: str
+) -> tuple[Path, Path | None]:
+    merged = merge_lrc_timeline_text(timeline_content, text_content)
+    return apply_lyrics_content(lrc_path, merged)
 
 
 def apply_synced_lyrics(lrc_path: str | Path, match: LyricsMatch) -> tuple[Path, Path | None]:

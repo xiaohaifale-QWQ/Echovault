@@ -6,10 +6,13 @@ import pytest
 from core.ai_assistant import AISettings
 from core.online_lyrics import (
     LyricsMatch,
+    active_lrc_line_index,
+    apply_lyrics_content,
     apply_synced_lyrics,
     calibrate_lrc_with_reference,
     compare_lyrics,
     media_search_metadata,
+    merge_lrc_timeline_text,
     search_lrclib,
     select_best_synced_match,
 )
@@ -193,3 +196,38 @@ def test_select_best_synced_match_obeys_threshold_and_requires_timeline():
     assert (
         select_best_synced_match([_match(score=79.9)], minimum_score=80) is None
     )
+
+
+def test_active_line_uses_each_lyrics_own_timeline():
+    content = "[ar:Artist]\n[00:05.00]first\n[00:13.00]second\n[00:20.00]third"
+
+    assert active_lrc_line_index(content, 4.99) == -1
+    assert active_lrc_line_index(content, 13.0) == 2
+    assert active_lrc_line_index(content, 19.5) == 2
+
+
+def test_merge_can_cross_local_timeline_with_online_text_and_reverse():
+    local = "[ar:Local]\n[00:01.230]local one\n[00:04.50]local two\n"
+    online = "[ar:Online]\n[00:10.00]online one\n[00:30.000]online two\n"
+
+    local_timeline = merge_lrc_timeline_text(local, online)
+    online_timeline = merge_lrc_timeline_text(online, local)
+
+    assert local_timeline == (
+        "[ar:Local]\n[00:01.230]online one\n[00:04.50]online two\n"
+    )
+    assert online_timeline == (
+        "[ar:Online]\n[00:10.00]local one\n[00:30.000]local two\n"
+    )
+
+
+def test_apply_edited_lyrics_backs_up_before_replacing(tmp_path):
+    lrc = tmp_path / "song.lrc"
+    original = "[00:01.00]old\n"
+    lrc.write_text(original, encoding="utf-8")
+
+    output, backup = apply_lyrics_content(lrc, "[00:01.00]edited\n")
+
+    assert output == lrc
+    assert backup.read_text(encoding="utf-8") == original
+    assert lrc.read_text(encoding="utf-8") == "[00:01.00]edited\n"

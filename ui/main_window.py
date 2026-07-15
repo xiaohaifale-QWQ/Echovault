@@ -113,9 +113,9 @@ class MainWindow(QMainWindow):
         
         splitter.addWidget(self.right_tabs)
         
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([700, 400])
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
+        splitter.setSizes([520, 680])
         
         self._ai_panel_width = 340
         self._ai_mode_enabled = False
@@ -275,6 +275,8 @@ class MainWindow(QMainWindow):
             self.provider_label.setText("引擎: 讯飞（请补齐三项密钥）")
         else:
             self.provider_label.setText("引擎: 不可用 (请检查设置)")
+        if hasattr(self, "online_lyrics_panel"):
+            self.online_lyrics_panel.set_songs(songs)
         if hasattr(self, "batch_operations_panel"):
             self.batch_operations_panel.update_scope(songs)
     
@@ -411,32 +413,60 @@ class MainWindow(QMainWindow):
         self.online_lyrics_panel.show_song(song)
         self.left_stack.setCurrentWidget(self.lyrics_preview_panel)
 
-    def _on_online_lyrics_action(self, media_path: str, match, action: str):
+    def _on_online_lyrics_action(self, media_path: str, payload, action: str):
         lrc_path = Path(media_path).with_suffix(".lrc")
-        if action == "apply":
+        if action in {
+            "use_local",
+            "use_online",
+            "merge_local_timeline",
+            "merge_online_timeline",
+        }:
+            action_names = {
+                "use_local": "采用左侧本地歌词",
+                "use_online": "采用右侧在线歌词",
+                "merge_local_timeline": "合并：左时间轴 + 右文字",
+                "merge_online_timeline": "合并：右时间轴 + 左文字",
+            }
+            action_name = action_names[action]
             reply = QMessageBox.question(
                 self,
-                "下载同步歌词",
-                f"将把 LRCLIB 的同步歌词写入：\n{lrc_path}\n\n"
-                "已有 LRC 会先备份；音频文件不会修改。是否继续？",
+                action_name,
+                f"将把当前选择写入：\n{lrc_path}\n\n"
+                "已有 LRC 会先备份；媒体文件不会修改。是否继续？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
-            from core.online_lyrics import apply_synced_lyrics
+            from core.online_lyrics import apply_lyrics_content, merge_and_apply_lyrics
 
             try:
-                output, backup = apply_synced_lyrics(lrc_path, match)
+                if action == "use_local":
+                    output, backup = apply_lyrics_content(
+                        lrc_path, payload.local_content
+                    )
+                elif action == "use_online":
+                    output, backup = apply_lyrics_content(
+                        lrc_path, payload.online_content
+                    )
+                elif action == "merge_local_timeline":
+                    output, backup = merge_and_apply_lyrics(
+                        lrc_path, payload.local_content, payload.online_content
+                    )
+                else:
+                    output, backup = merge_and_apply_lyrics(
+                        lrc_path, payload.online_content, payload.local_content
+                    )
             except (OSError, RuntimeError) as exc:
-                QMessageBox.warning(self, "下载同步歌词", str(exc))
+                QMessageBox.warning(self, action_name, str(exc))
                 return
             self._refresh_after_online_lyrics_write(media_path, str(output))
             backup_message = f"\n备份：{backup}" if backup else ""
             QMessageBox.information(
-                self, "下载同步歌词", f"同步歌词已写入：{output}{backup_message}"
+                self, action_name, f"歌词已写入：{output}{backup_message}"
             )
             return
 
+        match = payload.match
         if not lrc_path.is_file():
             QMessageBox.information(self, "AI 校准", "请先识别或下载一份本地 LRC。")
             return
@@ -491,6 +521,7 @@ class MainWindow(QMainWindow):
         self.detail_panel.show_song(song)
         self.lyrics_preview_panel.show_song(song)
         self.online_lyrics_panel._song = song
+        self.online_lyrics_panel.reload_local_lyrics()
         self.online_lyrics_panel.refresh_local_comparison()
         self.online_lyrics_panel.status_label.setText("本地歌词已更新，音频文件未修改。")
         self._refresh_statusbar()

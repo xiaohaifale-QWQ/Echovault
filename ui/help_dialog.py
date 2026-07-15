@@ -72,8 +72,10 @@ HELP_SECTIONS = (
         "在线歌词",
         """
         <h2>在线匹配与校准</h2>
-        <p>在线匹配使用 LRCLIB 公开库，不需要 API Key。请选择本地歌曲和候选结果，
-        对照两边歌词后再决定采用本地、在线或合并结果。</p>
+        <p>在线匹配使用 LRCLIB 公开库，不需要 API Key。可从歌曲和在线候选下拉框选择，
+        左右对照本地/在线歌词，再采用一侧或交叉合并时间轴与文字。</p>
+        <p>底部播放器播放当前本地素材；播放位置会分别高亮并滚动两侧时间轴歌词。
+        双击任一侧会暂停并进入编辑，后续采用/合并使用修改后的内容。</p>
         <p>写入歌词只修改 LRC，不修改媒体音轨；已有文件会先生成递增备份。
         AI 校准会以在线文本作为参考，同时保留本地时间戳。</p>
         <p>详细文档：<code>docs/在线歌词匹配与AI校准指南.md</code></p>
@@ -111,4 +113,3 @@ class HelpDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-
