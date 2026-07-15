@@ -19,7 +19,18 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install ffmpeg
-        run: choco install ffmpeg -y --no-progress
+        shell: powershell
+        run: |
+          if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+            ffmpeg -version | Select-Object -First 1
+            exit 0
+          }
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            choco install ffmpeg -y --no-progress
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq 3) { exit $LASTEXITCODE }
+            Start-Sleep -Seconds (10 * $attempt)
+          }
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
@@ -39,7 +50,18 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install ffmpeg
-        run: choco install ffmpeg -y --no-progress
+        shell: powershell
+        run: |
+          if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+            ffmpeg -version | Select-Object -First 1
+            exit 0
+          }
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            choco install ffmpeg -y --no-progress
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq 3) { exit $LASTEXITCODE }
+            Start-Sleep -Seconds (10 * $attempt)
+          }
       - name: Install build dependencies
         run: python -m pip install -r requirements-cloud.txt -r requirements-local.txt -r requirements-translation.txt -r requirements-dev.txt
       - name: Build Windows application
