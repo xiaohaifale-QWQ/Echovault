@@ -53,6 +53,7 @@ from ui.online_lyrics_panel import (
 from ui.settings_dialog import SettingsDialog
 from ui.song_list_panel import SongListPanel
 from ui.sync_panel import SyncPanel
+from ui.vocal_separation_panel import VocalSeparationPanel
 
 
 class MainWindow(QMainWindow):
@@ -121,6 +122,9 @@ class MainWindow(QMainWindow):
         self.online_lyrics_panel = OnlineLyricsPanel()
         self.online_lyrics_panel.bind_comparison_pane(self.online_comparison_panel)
         self.right_tabs.addTab(self.online_lyrics_panel, "在线匹配")
+
+        self.vocal_separation_panel = VocalSeparationPanel()
+        self.right_tabs.addTab(self.vocal_separation_panel, "人声分离")
 
         self.batch_operations_panel = BatchOperationsPanel(self.config)
         self.right_tabs.addTab(self.batch_operations_panel, "批量处理")
@@ -312,6 +316,8 @@ class MainWindow(QMainWindow):
                 self.online_lyrics_panel.set_songs(songs)
         if hasattr(self, "batch_operations_panel"):
             self.batch_operations_panel.update_scope(songs)
+        if hasattr(self, "vocal_separation_panel"):
+            self.vocal_separation_panel.set_songs(songs)
 
     def _connect_signals(self):
         """连接信号"""
@@ -330,6 +336,9 @@ class MainWindow(QMainWindow):
         self.song_list_panel.song_selected.connect(self.detail_panel.show_song)
         self.song_list_panel.song_selected.connect(self.lyrics_preview_panel.show_song)
         self.song_list_panel.song_selected.connect(self.online_lyrics_panel.show_song)
+        self.song_list_panel.song_selected.connect(
+            lambda song: self.vocal_separation_panel.select_song(song.get("path", ""))
+        )
         self.lyrics_preview_panel.lyrics_saved.connect(self._on_preview_lyrics_saved)
         self.ai_chat_panel.command_requested.connect(self._on_ai_command_requested)
 
