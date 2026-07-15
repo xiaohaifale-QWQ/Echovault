@@ -13,11 +13,16 @@ $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.7z"
 
 Invoke-WebRequest -Uri $url -OutFile $archive
 $sevenZip = Get-Command 7z -ErrorAction SilentlyContinue
-if (-not $sevenZip) {
+$sevenZipPath = if ($sevenZip) {
+    $sevenZip.Source
+} else {
+    Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+}
+if (-not (Test-Path -LiteralPath $sevenZipPath)) {
     throw "7-Zip was not found on the Windows runner"
 }
 New-Item -ItemType Directory -Force -Path $destination | Out-Null
-& $sevenZip.Source x $archive "-o$destination" -y
+& $sevenZipPath x $archive "-o$destination" -y
 if ($LASTEXITCODE -ne 0) {
     throw "Unable to extract the FFmpeg archive (exit code $LASTEXITCODE)"
 }
