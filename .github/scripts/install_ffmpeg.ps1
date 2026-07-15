@@ -39,5 +39,12 @@ if (-not (Test-Path -LiteralPath $ffprobe)) {
 
 $binDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 $env:Path = "$binDirectory;$env:Path"
-ffmpeg -version | Select-Object -First 1
-ffprobe -version | Select-Object -First 1
+ffmpeg -version | Out-Host
+if ($LASTEXITCODE -ne 0) {
+    throw "Downloaded ffmpeg failed its version check"
+}
+ffprobe -version | Out-Host
+if ($LASTEXITCODE -ne 0) {
+    throw "Downloaded ffprobe failed its version check"
+}
+exit 0
