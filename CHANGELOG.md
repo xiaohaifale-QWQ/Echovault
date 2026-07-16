@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Vocal Separation enhancement controls now run real UVR DeNoise Lite and
+  UVR DeEcho-DeReverb processing on the separated vocal track. The model
+  library downloads and verifies both models, the worker streams every stage,
+  and accompaniment-only output automatically disables vocal enhancement.
 - Online Matching and Vocal Separation no longer expose per-page output selectors or persist a
   device choice; both players bind to the current Windows system default and follow default-device
   changes while the application is running.
@@ -43,6 +47,8 @@
 
 ### Added
 
+- The audio model card now includes downloadable denoise and de-reverb models
+  alongside Demucs, with installation state, progress, retry, and CPU/GPU reuse.
 - Vocal Separation now switches the main content into a three-column material/real-time-lyrics/
   processing layout. The middle column reads the same local LRC shown on the left side of Online
   Matching and follows the separation playhead.

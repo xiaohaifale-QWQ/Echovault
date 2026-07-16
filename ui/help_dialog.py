@@ -78,6 +78,8 @@ HELP_SECTIONS = (
         <ol>
           <li>第一次使用先打开顶栏“模型库”，从“音频分离模型”白色卡片下载
           HTDemucs（推荐）或其他模型，并查看 GPU 状态。</li>
+          <li>需要清理底噪或房间混响时，在同一张“音频分离与增强模型”卡片下载
+          UVR DeNoise Lite 或 UVR DeEcho-DeReverb，再勾选右侧增强选项；每个处理阶段都会实时显示。</li>
           <li>点击“开始处理”，结果保存为 <code>_vocals.wav</code> 和
           <code>_accompaniment.wav</code>，原素材不变。</li>
           <li>红色波形线可直接拖动；支持暂停、1x–10x 倍速和本地倒放试听。</li>
