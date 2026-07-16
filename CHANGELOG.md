@@ -4,6 +4,12 @@
 
 ### Changed
 
+- Added the new product header with brand, global material/function search, Batch
+  Tasks, Model Library, and Settings. The legacy menu bar remains available as
+  shortcuts internally but no longer occupies visible space.
+- Applied a unified warm-white, rounded visual system to buttons, inputs, tabs,
+  tables, cards, menus, progress bars, and scrollbars. Primary actions now use the
+  same blue hierarchy throughout the desktop application.
 - Replaced the seven equal right-side tabs with four task-oriented workspaces:
   Materials, Lyrics & Tags, Audio Editing, and Export & Transfer. Existing detailed
   behaviors remain available inside the relevant workspace instead of competing at

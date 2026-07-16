@@ -7,6 +7,7 @@ from core.online_lyrics import LyricsMatch
 from tests.qt_test_app import ensure_app, keep_widget
 from ui.main_window import MainWindow
 from ui.online_lyrics_panel import CoverApplyAction, OnlineLyricsAction
+from ui.theme import polish_widget_tree
 
 
 def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
@@ -40,6 +41,9 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     ]
     assert window.outer_splitter.widget(1) is window.ai_chat_panel
     assert window.ai_chat_panel.isHidden()
+    assert window.menuBar().isHidden()
+    assert window.global_search.placeholderText() == "搜索素材、歌词、标签或功能"
+    assert window.top_settings_button.text() == "⚙  设置"
     assert window.model_library_action.text() == "模型库"
     assert window.model_library_action in window.menuBar().actions()
     assert not hasattr(window.song_list_panel, "btn_batch")
@@ -55,6 +59,22 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     window.audio_tabs.setCurrentIndex(1)
     assert window.workspace_stack.currentWidget() is window.workspace_pages["audio"]
     assert window.vocal_lyrics_panel.title_label.text() == "实时歌词"
+
+    window.global_search.setText("音频降噪")
+    window._submit_global_search()
+    assert window.workspace_stack.currentWidget() is window.workspace_pages["audio"]
+    window.global_search.setText("批量")
+    window._submit_global_search()
+    assert window.workspace_stack.currentWidget() is window.workspace_pages["transfer"]
+    assert window.transfer_tabs.currentWidget() is window.batch_operations_panel
+
+    polish_widget_tree(window)
+    assert window.detail_panel.btn_transcribe.property("buttonRole") == "primary"
+    assert (
+        window.audio_editor_panel.tool_pages["trim"].run_button.property("buttonRole")
+        == "primary"
+    )
+    assert window.sync_panel.send_button.property("buttonRole") == "primary"
 
     monkeypatch.setattr(
         "core.ai_assistant.settings_from_config",

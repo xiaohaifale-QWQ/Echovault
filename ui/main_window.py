@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -63,6 +64,7 @@ from ui.online_lyrics_panel import (
 from ui.settings_dialog import SettingsDialog
 from ui.song_list_panel import SongListPanel
 from ui.sync_panel import SyncPanel
+from ui.theme import polish_widget_tree
 from ui.vocal_separation_panel import VocalSeparationPanel
 
 
@@ -99,6 +101,7 @@ class MainWindow(QMainWindow):
         report = build_environment_report(self.config)
         if not report["ffmpeg"]["available"]:
             self.status_label.setText("未检测到 ffmpeg，歌词识别暂不可用")
+        polish_widget_tree(self)
 
     def _setup_ui(self):
         """初始化 UI 布局"""
@@ -126,12 +129,17 @@ class MainWindow(QMainWindow):
         self.sync_panel = SyncPanel()
 
         shell = QWidget()
-        shell_layout = QHBoxLayout(shell)
+        shell_layout = QVBoxLayout(shell)
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
 
+        shell_layout.addWidget(self._build_top_header())
+        body = QWidget()
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(0)
         self.navigation = self._build_navigation()
-        shell_layout.addWidget(self.navigation)
+        body_layout.addWidget(self.navigation)
 
         workspace_container = QWidget()
         workspace_layout = QVBoxLayout(workspace_container)
@@ -163,13 +171,46 @@ class MainWindow(QMainWindow):
         for page in self.workspace_pages.values():
             self.workspace_stack.addWidget(page)
         workspace_layout.addWidget(self.workspace_stack, 1)
-        shell_layout.addWidget(workspace_container, 1)
+        body_layout.addWidget(workspace_container, 1)
+        shell_layout.addWidget(body, 1)
 
         self.setStyleSheet(
             """
             QFrame#workspaceNavigation {
                 background: #F7F9FC;
                 border-right: 1px solid #DDE3EA;
+            }
+            QFrame#topHeader {
+                background: #FFFFFF;
+                border-bottom: 1px solid #E2E7EE;
+            }
+            QLabel#topBrand {
+                color: #14213D;
+                font-size: 17px;
+                font-weight: 700;
+            }
+            QLineEdit#globalSearch {
+                background: #FFFFFF;
+                border: 1px solid #D5DDE7;
+                border-radius: 17px;
+                padding: 6px 14px;
+                color: #26354A;
+            }
+            QLineEdit#globalSearch:focus {
+                border-color: #78A9D8;
+            }
+            QPushButton#topActionButton {
+                background: #FFFFFF;
+                border: 1px solid #D5DDE7;
+                border-radius: 8px;
+                color: #26354A;
+                padding: 7px 14px;
+                font-weight: 600;
+            }
+            QPushButton#topActionButton:hover {
+                background: #F2F6FB;
+                border-color: #9CBBDD;
+                color: #1F6FBB;
             }
             QLabel#productName {
                 color: #14213D;
@@ -180,7 +221,7 @@ class MainWindow(QMainWindow):
             QPushButton#workspaceNavigationButton {
                 background: transparent;
                 border: 1px solid transparent;
-                border-radius: 7px;
+                border-radius: 9px;
                 color: #26354A;
                 font-size: 14px;
                 font-weight: 600;
@@ -207,12 +248,12 @@ class MainWindow(QMainWindow):
             QFrame#selectedMaterialCard {
                 background: #FFFFFF;
                 border: 1px solid #DDE3EA;
-                border-radius: 9px;
+                border-radius: 12px;
             }
             QPushButton#primaryAction {
                 background: #2F7DD1;
                 border: none;
-                border-radius: 6px;
+                border-radius: 8px;
                 color: white;
                 font-size: 13px;
                 font-weight: 700;
@@ -224,7 +265,7 @@ class MainWindow(QMainWindow):
             QPushButton#secondaryAction {
                 background: #FFFFFF;
                 border: 1px solid #CBD5E1;
-                border-radius: 6px;
+                border-radius: 8px;
                 color: #26354A;
                 padding: 8px 14px;
             }
@@ -249,16 +290,92 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.outer_splitter)
         self._switch_workspace("materials")
 
+    def _build_top_header(self):
+        header = QFrame()
+        header.setObjectName("topHeader")
+        header.setFixedHeight(64)
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(18, 10, 16, 10)
+        layout.setSpacing(12)
+
+        brand = QLabel("琳琅乐府 Echovault")
+        brand.setObjectName("topBrand")
+        brand.setMinimumWidth(190)
+        layout.addWidget(brand)
+
+        self.global_search = QLineEdit()
+        self.global_search.setObjectName("globalSearch")
+        self.global_search.setPlaceholderText("搜索素材、歌词、标签或功能")
+        self.global_search.setClearButtonEnabled(True)
+        self.global_search.setMaximumWidth(430)
+        self.global_search.textChanged.connect(
+            lambda text: self.song_list_panel.search_box.setText(text)
+        )
+        self.global_search.returnPressed.connect(self._submit_global_search)
+        layout.addWidget(self.global_search, 1)
+        layout.addStretch()
+
+        top_batch = QPushButton("▣  批量任务")
+        top_batch.setObjectName("topActionButton")
+        top_batch.clicked.connect(self._show_batch_workspace)
+        layout.addWidget(top_batch)
+        top_models = QPushButton("◇  模型库")
+        top_models.setObjectName("topActionButton")
+        top_models.clicked.connect(self._on_model_library)
+        layout.addWidget(top_models)
+        self.top_settings_button = QPushButton("⚙  设置")
+        self.top_settings_button.setObjectName("topActionButton")
+        self.top_settings_button.clicked.connect(self._show_top_settings_menu)
+        layout.addWidget(self.top_settings_button)
+        return header
+
+    def _submit_global_search(self):
+        query = self.global_search.text().strip().casefold()
+        if not query:
+            return
+        routes = (
+            (("歌词", "封面", "标签", "翻译"), "lyrics"),
+            (("音频", "剪辑", "裁剪", "降噪", "均衡", "人声", "混音"), "audio"),
+            (("传输", "手机", "回传", "导出", "批量"), "transfer"),
+            (("素材", "音乐", "视频", "文件"), "materials"),
+        )
+        for keywords, workspace in routes:
+            if any(keyword in query for keyword in keywords):
+                self._switch_workspace(workspace)
+                if workspace == "transfer" and "批量" in query:
+                    self.transfer_tabs.setCurrentWidget(self.batch_operations_panel)
+                return
+        self._switch_workspace("materials")
+
+    def _show_top_settings_menu(self):
+        menu = QMenu(self)
+        ai_action = menu.addAction("关闭 AI 助手" if self._ai_mode_enabled else "启动 AI 助手")
+        ai_action.triggered.connect(self._toggle_ai_mode)
+        menu.addAction("密钥管理", self._on_key_manager)
+        menu.addSeparator()
+        menu.addAction("语音识别设置", lambda: self._on_settings("recognition"))
+        menu.addAction("歌词输出设置", lambda: self._on_settings("lyrics"))
+        menu.addAction("快捷键设置", lambda: self._on_settings("shortcuts"))
+        menu.addAction("缓存设置", lambda: self._on_settings("cache"))
+        menu.addAction("本地部署 AI", lambda: self._on_settings("local_ai"))
+        menu.addSeparator()
+        menu.addAction("添加素材文件夹", self._on_open_folder)
+        menu.addAction("使用帮助", self._on_help_guide)
+        menu.addAction("关于", self._on_about)
+        menu.addSeparator()
+        menu.addAction("退出", self.close)
+        menu.exec(
+            self.top_settings_button.mapToGlobal(
+                self.top_settings_button.rect().bottomLeft()
+            )
+        )
+
     def _build_navigation(self):
         navigation = QFrame()
         navigation.setObjectName("workspaceNavigation")
         navigation.setFixedWidth(205)
         layout = QVBoxLayout(navigation)
         layout.setContentsMargins(10, 12, 10, 12)
-        product = QLabel("琳琅乐府\nEchovault")
-        product.setObjectName("productName")
-        layout.addWidget(product)
-
         self.navigation_group = QButtonGroup(self)
         self.navigation_group.setExclusive(True)
         self.navigation_buttons = {}
@@ -507,6 +624,7 @@ class MainWindow(QMainWindow):
         about_action = QAction("关于(&A)", self)
         about_action.triggered.connect(self._on_about)
         help_menu.addAction(about_action)
+        menubar.setVisible(False)
 
     def _setup_statusbar(self):
         """状态栏"""

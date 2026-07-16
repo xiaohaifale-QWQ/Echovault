@@ -87,14 +87,21 @@ class MaterialModeSwitch(QWidget):
         track = self.rect().adjusted(2, 4, -2, -4)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor("#B8BEC6"))
-        painter.drawRect(track)
+        painter.drawRoundedRect(track, 12, 12)
 
         half_width = track.width() // 2
         knob_width = max(32, half_width - 6)
         knob_x = track.x() + 3 + (track.width() - knob_width - 6) * self._knob_position
         painter.setBrush(QColor("#767E87"))
         painter.setPen(QColor("#626A73"))
-        painter.drawRect(int(knob_x), track.y() + 3, knob_width, track.height() - 6)
+        painter.drawRoundedRect(
+            int(knob_x),
+            track.y() + 3,
+            knob_width,
+            track.height() - 6,
+            9,
+            9,
+        )
 
         font = painter.font()
         font.setBold(True)

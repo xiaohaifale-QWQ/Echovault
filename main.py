@@ -878,6 +878,7 @@ def cmd_gui(args):
     import traceback
     from PyQt6.QtWidgets import QApplication, QMessageBox
     from ui.main_window import MainWindow
+    from ui.theme import apply_application_theme
 
     def _hook(exc_type, exc_value, exc_tb):
         tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
@@ -890,6 +891,7 @@ def cmd_gui(args):
     app.setApplicationName("Echovault")
     app.setOrganizationName("Echovault")
     app.setStyle("Fusion")
+    apply_application_theme(app)
     try:
         win = MainWindow()
         win.show()

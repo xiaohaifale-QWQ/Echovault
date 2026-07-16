@@ -564,12 +564,12 @@ class AudioEditorPanel(QWidget):
             QFrame#audioToolRail {
                 background:#F7F9FC;
                 border:1px solid #DDE3EA;
-                border-radius:8px;
+                border-radius:11px;
             }
             QPushButton#audioToolButton {
                 background:transparent;
                 border:1px solid transparent;
-                border-radius:5px;
+                border-radius:8px;
                 color:#334155;
                 padding:7px 10px;
                 text-align:left;
@@ -586,7 +586,7 @@ class AudioEditorPanel(QWidget):
             QFrame#audioPreviewArea, QFrame#audioParameterPanel {
                 background:#FFFFFF;
                 border:1px solid #DDE3EA;
-                border-radius:8px;
+                border-radius:11px;
             }
             """
         )
