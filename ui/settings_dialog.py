@@ -675,11 +675,17 @@ class SettingsDialog(QDialog):
         if self.config.has_xunfei_credentials:
             self.xunfei_key_status.setText("AppID、API Key、API Secret 已配置 ✓")
             self.xunfei_key_status.setStyleSheet("color:#248A4A;font-weight:600")
-            self.xunfei_notice.setText("将使用讯飞极速录音转写；音频会上传到讯飞云端识别。")
+            self.xunfei_notice.setText(
+                "将优先使用讯飞极速录音转写；未授权时自动改用流式语音听写。"
+                "音频会上传到讯飞云端识别。"
+            )
         else:
             self.xunfei_key_status.setText("请在密钥管理中补齐三项")
             self.xunfei_key_status.setStyleSheet("color:#B54708;font-weight:600")
-            self.xunfei_notice.setText("需要同一应用的 AppID、API Key、API Secret，并开通极速录音转写。")
+            self.xunfei_notice.setText(
+                "需要同一应用的 AppID、API Key、API Secret，并至少开通"
+                "“语音听写（流式版）”或“极速录音转写”。"
+            )
         self._on_prov(self.provider_combo.currentIndex())
 
     def _on_download(self):

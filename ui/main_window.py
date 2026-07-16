@@ -972,9 +972,9 @@ class MainWindow(QMainWindow):
                 msg = "Groq 云端引擎不可用。\n\n请确认已设置 Groq API Key。\n免费获取: https://console.groq.com/keys"
             elif provider_name == "xunfei":
                 msg = (
-                    "讯飞极速录音转写不可用。\n\n"
+                    "讯飞云端识别不可用。\n\n"
                     "请在“密钥管理”中填写同一讯飞应用的 AppID、API Key、API Secret，"
-                    "并确认已开通极速录音转写服务。"
+                    "并确认至少开通“语音听写（流式版）”或“极速录音转写”服务。"
                 )
             elif provider_name == "local":
                 msg = "本地 Whisper 引擎不可用。\n\n"

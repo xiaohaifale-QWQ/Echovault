@@ -25,6 +25,10 @@
 
 ### Changed
 
+- Xunfei recognition now falls back automatically from Speed Transcription to
+  Streaming Dictation when the configured AppID returns license errors 11200 or
+  11201. Streaming mode splits long audio into 50-second requests, runs up to four
+  requests concurrently, and restores timestamps when merging the results.
 - Online Matching now uses one result area for both lyrics and artwork. “Search
   Lyrics” displays the lyrics table, while “Search Cover” displays a cover grid.
   The redundant “Write Audio Tags” button was removed; clicking an online cover or
