@@ -36,10 +36,12 @@ from core.config import config_manager
 from core.environment import build_environment_report
 from core.metadata import write_cover_art
 from core.resource_monitor import format_resource_usage, sample_resource_usage
+from core.transfer_session import register_artifact
 from core.video_aggregation import write_video_transcript_timeline
 from core.video_library import scan_video_catalog, scan_videos
 from services.library_service import scan_audio
 from ui.ai_chat_panel import AIChatPanel, CLICommandWorker
+from ui.audio_editor_panel import AudioEditorPanel
 from ui.batch_operations_panel import BatchOnlineLyricsWorker, BatchOperationsPanel
 from ui.detail_panel import DetailPanel
 from ui.help_dialog import HelpDialog
@@ -137,6 +139,9 @@ class MainWindow(QMainWindow):
             self._on_model_library
         )
         self.right_tabs.addTab(self.vocal_separation_panel, "人声分离")
+
+        self.audio_editor_panel = AudioEditorPanel()
+        self.right_tabs.addTab(self.audio_editor_panel, "音频编辑")
 
         self.batch_operations_panel = BatchOperationsPanel(self.config)
         self.right_tabs.addTab(self.batch_operations_panel, "批量处理")
@@ -335,6 +340,8 @@ class MainWindow(QMainWindow):
             self.batch_operations_panel.update_scope(songs)
         if hasattr(self, "vocal_separation_panel"):
             self.vocal_separation_panel.set_songs(songs)
+        if hasattr(self, "audio_editor_panel"):
+            self.audio_editor_panel.set_songs(songs)
 
     def _connect_signals(self):
         """连接信号"""
@@ -354,6 +361,7 @@ class MainWindow(QMainWindow):
         self.song_list_panel.song_selected.connect(self.lyrics_preview_panel.show_song)
         self.song_list_panel.song_selected.connect(self.vocal_lyrics_panel.show_song)
         self.song_list_panel.song_selected.connect(self.online_lyrics_panel.show_song)
+        self.song_list_panel.song_selected.connect(self.audio_editor_panel.show_song)
         self.song_list_panel.song_selected.connect(
             lambda song: self.vocal_separation_panel.select_song(song.get("path", ""))
         )
@@ -372,6 +380,9 @@ class MainWindow(QMainWindow):
             self.online_comparison_panel.pause_playback
         )
         self.ai_chat_panel.command_requested.connect(self._on_ai_command_requested)
+        self.audio_editor_panel.output_created.connect(
+            self._on_audio_editor_output_created
+        )
 
         # 详情面板 → 请求识别
         self.detail_panel.transcribe_clicked.connect(self._on_transcribe_single)
@@ -486,7 +497,20 @@ class MainWindow(QMainWindow):
         self.lyrics_preview_panel.show_song(song)
         self.vocal_lyrics_panel.show_song(song)
         self.online_lyrics_panel.show_song(song)
+        self.audio_editor_panel.show_song(song)
         self.left_stack.setCurrentWidget(self.lyrics_preview_panel)
+
+    def _on_audio_editor_output_created(
+        self,
+        source_path: str,
+        output_path: str,
+        operation: str,
+    ):
+        if operation == "record":
+            register_artifact(source_path, output_path, "audio_edit_record")
+        self._online_catalog_dirty = True
+        self.sync_panel.refresh_transfer_results()
+        self.status_label.setText(f"音频编辑已生成：{Path(output_path).name}")
 
     def _on_online_lyrics_action(self, media_path: str, payload, action: str):
         if action == "transcribe_local":

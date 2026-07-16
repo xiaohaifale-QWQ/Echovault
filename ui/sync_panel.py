@@ -551,6 +551,13 @@ class SyncPanel(QWidget):
             config_manager.config = self.config
             config_manager.save()
 
+    def refresh_transfer_results(self):
+        """Reload phone sessions so newly registered processing outputs appear."""
+        session_id = (
+            self._current_session.session_id if self._current_session is not None else None
+        )
+        self._refresh_sessions(session_id)
+
     def _browse_receive_dir(self):
         directory = QFileDialog.getExistingDirectory(self, "选择手机文件接收目录")
         if directory:

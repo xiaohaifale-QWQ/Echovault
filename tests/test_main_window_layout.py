@@ -7,7 +7,7 @@ from ui.main_window import MainWindow
 from ui.online_lyrics_panel import CoverApplyAction, OnlineLyricsAction
 
 
-def test_main_window_has_six_right_tabs_and_no_scattered_batch_buttons(monkeypatch):
+def test_main_window_has_audio_editor_tab_and_no_scattered_batch_buttons(monkeypatch):
     ensure_app()
     monkeypatch.setattr("ui.main_window.config_manager.load", AppConfig)
     monkeypatch.setattr(
@@ -20,7 +20,15 @@ def test_main_window_has_six_right_tabs_and_no_scattered_batch_buttons(monkeypat
     assert [
         window.right_tabs.tabText(index)
         for index in range(window.right_tabs.count())
-    ] == ["详情", "素材库", "在线匹配", "人声分离", "批量处理", "手机传输"]
+    ] == [
+        "详情",
+        "素材库",
+        "在线匹配",
+        "人声分离",
+        "音频编辑",
+        "批量处理",
+        "手机传输",
+    ]
     assert window.model_library_action.text() == "模型库"
     assert window.model_library_action in window.menuBar().actions()
     assert not hasattr(window.song_list_panel, "btn_batch")

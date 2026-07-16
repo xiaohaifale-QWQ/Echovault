@@ -4,6 +4,14 @@
 
 ### Added
 
+- Added a right-side Audio Editor workspace with a tool-grid home screen and
+  expandable parameter pages for extraction, trim/edit, recording, concatenation,
+  mixing, fades, speed/pitch, FFT denoise, loudness normalization, splitting,
+  equalization, gain, common tags, conversion, channel/sample-rate changes, and
+  reverse audio. Processing uses the bundled FFmpeg and preserves the original.
+- Audio Editor pages can preview input/output files, open their output folder, and
+  automatically register phone-session results in Pending Return for review and
+  sending back to the source phone.
 - Online Matching now searches MusicBrainz and Cover Art Archive for album artwork,
   previews selectable candidates, accepts local JPEG/PNG covers, and embeds the chosen
   image into common audio tags. The song list displays embedded covers as thumbnails.
