@@ -8,6 +8,9 @@
   UVR DeEcho-DeReverb processing on the separated vocal track. The model
   library downloads and verifies both models, the worker streams every stage,
   and accompaniment-only output automatically disables vocal enhancement.
+- Packaged enhancement now includes SciPy's lazy FFT module and libsamplerate,
+  allowing the four-band DeEcho-DeReverb model to render in the Windows build;
+  swallowed upstream errors are also surfaced with their actual cause.
 - Online Matching and Vocal Separation no longer expose per-page output selectors or persist a
   device choice; both players bind to the current Windows system default and follow default-device
   changes while the application is running.

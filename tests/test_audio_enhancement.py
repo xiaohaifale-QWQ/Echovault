@@ -1,4 +1,5 @@
 import hashlib
+import logging
 from pathlib import Path
 
 from core import audio_enhancement
@@ -75,6 +76,7 @@ def test_enhance_audio_writes_requested_clean_stem(monkeypatch, tmp_path):
     class FakeSeparator:
         def __init__(self, **kwargs):
             self.output_dir = Path(kwargs["output_dir"])
+            self.logger = logging.getLogger("test-audio-enhancement")
 
         def load_model(self, filename):
             assert filename == "test.pth"
@@ -83,7 +85,8 @@ def test_enhance_audio_writes_requested_clean_stem(monkeypatch, tmp_path):
             assert custom_output_names == {"Clean": "source_test_clean"}
             rendered = self.output_dir / "source_test_clean.wav"
             rendered.write_bytes(b"clean")
-            return [str(rendered)]
+            # Some frozen audio-separator builds write the file but return an empty list.
+            return []
 
     monkeypatch.setattr("audio_separator.separator.Separator", FakeSeparator)
 

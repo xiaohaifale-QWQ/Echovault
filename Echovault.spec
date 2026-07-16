@@ -32,10 +32,11 @@ hidden_imports = [
     "pydub",
     "psutil",
     "PyQt6.QtMultimedia",
+    "scipy._external.array_api_compat.numpy.fft",
     "torch",
     "torchaudio",
     "zeroconf",
-] + collect_submodules("argostranslate") + collect_submodules("audio_separator") + collect_submodules("demucs") + collect_submodules("groq") + collect_submodules("torchaudio") + collect_submodules("whisper") + collect_submodules("tiktoken_ext")
+] + collect_submodules("argostranslate") + collect_submodules("audio_separator") + collect_submodules("demucs") + collect_submodules("groq") + collect_submodules("samplerate") + collect_submodules("torchaudio") + collect_submodules("whisper") + collect_submodules("tiktoken_ext")
 
 datas = (
     copy_metadata("audio-separator")
@@ -47,6 +48,7 @@ datas = (
 )
 binaries = (
     [(ffmpeg_path, "."), (ffprobe_path, ".")]
+    + collect_dynamic_libs("samplerate")
     + collect_dynamic_libs("torchaudio")
 )
 

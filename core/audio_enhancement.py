@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 import os
 import shutil
@@ -264,18 +265,34 @@ def enhance_audio(
             raise SeparationCancelled("音频增强已取消")
         progress(20, f"正在执行 {spec.name}…")
         output_name = f"{source.stem}_{model}_clean"
-        files = separator.separate(
-            str(source), custom_output_names={spec.target_stem: output_name}
-        )
+        diagnostic_stream = io.StringIO()
+        diagnostic_handler = logging.StreamHandler(diagnostic_stream)
+        diagnostic_handler.setLevel(logging.ERROR)
+        separator.logger.addHandler(diagnostic_handler)
+        try:
+            files = separator.separate(
+                str(source), custom_output_names={spec.target_stem: output_name}
+            )
+        finally:
+            separator.logger.removeHandler(diagnostic_handler)
         if cancelled():
             raise SeparationCancelled("音频增强已取消")
-        if not files:
-            raise SeparationError(f"{spec.name} 没有生成清洁音轨")
-        rendered = Path(files[0])
-        if not rendered.is_absolute():
-            rendered = temporary_dir / rendered
-        if not rendered.is_file():
-            raise SeparationError(f"{spec.name} 输出文件不存在：{rendered.name}")
+        candidates = []
+        for filename in files or ():
+            candidate = Path(filename)
+            candidates.append(
+                candidate if candidate.is_absolute() else temporary_dir / candidate
+            )
+        candidates.extend(sorted(temporary_dir.glob("*.wav")))
+        rendered = next((candidate for candidate in candidates if candidate.is_file()), None)
+        if rendered is None:
+            detail = " | ".join(
+                line.strip()
+                for line in diagnostic_stream.getvalue().splitlines()
+                if line.strip()
+            )
+            suffix = f"：{detail[-1200:]}" if detail else ""
+            raise SeparationError(f"{spec.name} 没有生成清洁音轨{suffix}")
         output.parent.mkdir(parents=True, exist_ok=True)
         staging = output.with_name(f".{output.stem}.{model}.tmp{output.suffix}")
         shutil.copyfile(rendered, staging)
