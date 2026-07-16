@@ -1,6 +1,6 @@
 [project]
 name = "echovault"
-version = "0.3.0.dev3"
+version = "0.4.0"
 description = "AI-assisted lyrics recognition and local-first music synchronization"
 readme = "README.md"
 requires-python = ">=3.10"

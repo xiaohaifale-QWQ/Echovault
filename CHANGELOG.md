@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-07-16
+
 ### Fixed
 
 - Vocal Separation enhancement controls now run real UVR DeNoise Lite and
