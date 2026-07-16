@@ -503,6 +503,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
+                self.online_lyrics_panel.reload_cover()
                 return
             try:
                 write_cover_art(
@@ -511,6 +512,7 @@ class MainWindow(QMainWindow):
                     payload.mime_type,
                 )
             except (OSError, ValueError, RuntimeError) as exc:
+                self.online_lyrics_panel.reload_cover()
                 QMessageBox.warning(self, "写入封面失败", str(exc))
                 return
             self.song_list_panel.invalidate_cover(media_path)

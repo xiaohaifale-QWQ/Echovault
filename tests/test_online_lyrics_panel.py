@@ -175,7 +175,7 @@ def test_online_panel_separates_music_and_video_sources():
     assert panel.song_selector.count() == 1
     assert panel.song_selector.itemText(0) == "[视频] Clip"
     panel.song_selector.setCurrentIndex(0)
-    assert not panel.apply_cover_button.isEnabled()
+    assert not panel.search_cover_button.isEnabled()
     assert not panel.local_cover_button.isEnabled()
 
 
@@ -201,14 +201,32 @@ def test_online_panel_supports_online_and_local_cover_actions(monkeypatch, tmp_p
         lambda path, payload, action: captured.append((path, payload, action))
     )
 
-    assert panel.search_cover_button.text() == "搜索在线封面"
-    assert panel.local_cover_button.text() == "选择本地封面"
-    assert panel.apply_cover_button.text() == "写入音频标签"
+    assert panel.search_button.text() == "搜索歌词"
+    assert panel.search_cover_button.text() == "搜索封面"
+    assert panel.local_cover_button.text() == "本地封面"
+    assert not hasattr(panel, "apply_cover_button")
 
-    assert panel._set_cover_preview(PNG, "image/png", "本地封面：cover.png")
-    panel._request_cover_apply()
+    panel._show_cover_results_mode()
+    assert panel.result_stack.currentWidget() is panel.cover_results_page
+    assert panel.comparison_label.isHidden()
+    assert panel.lyrics_action_group.isHidden()
+
+    panel._show_lyrics_results_mode()
+    assert panel.result_stack.currentWidget() is panel.lyrics_results_page
+    assert not panel.comparison_label.isHidden()
+    assert not panel.lyrics_action_group.isHidden()
+
+    cover_path = tmp_path / "cover.png"
+    cover_path.write_bytes(PNG)
+    monkeypatch.setattr(
+        "ui.online_lyrics_panel.QFileDialog.getOpenFileName",
+        lambda *_args, **_kwargs: (str(cover_path), "封面图片"),
+    )
+    panel._choose_local_cover()
 
     assert captured[0][0] == str(media_path)
     assert captured[0][2] == "apply_cover"
     assert isinstance(captured[0][1], CoverApplyAction)
     assert captured[0][1].image_data == PNG
+    assert panel.result_stack.currentWidget() is panel.cover_results_page
+    assert panel.cover_list.count() == 1

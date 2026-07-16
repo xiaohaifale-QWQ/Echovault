@@ -25,6 +25,10 @@
 
 ### Changed
 
+- Online Matching now uses one result area for both lyrics and artwork. “Search
+  Lyrics” displays the lyrics table, while “Search Cover” displays a cover grid.
+  The redundant “Write Audio Tags” button was removed; clicking an online cover or
+  choosing a local image opens the existing confirmation step directly.
 - The phone receiver now sends an explicit HTTP/1.1 success response before UI/session
   indexing callbacks, preventing LocalSend mobile clients from reporting a failed
   transfer after the file was already saved. Receive-directory controls are now
