@@ -22,6 +22,9 @@
 
 ### Changed
 
+- Simplified the phone-transfer result toolbar: the redundant result filter was removed,
+  only pending generated/modified differences are shown, and selection actions now sit
+  beside the Pending Return directory.
 - Successfully returned staging files are moved into the sent-transfer cache and
   disappear from the normal transfer list. Clearing application cache removes these
   archived return copies and voice recordings, but never pending files or formal outputs.

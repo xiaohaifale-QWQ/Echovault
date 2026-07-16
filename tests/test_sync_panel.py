@@ -33,9 +33,13 @@ def test_sync_panel_uses_phone_task_workflow_and_hides_advanced_sync(
     assert panel.receive_dir_input.text().endswith("Echovault接收")
     assert panel.folder_sync_panel.dir_a_input.text().endswith("music")
     assert panel.outbox_path_label.text().endswith("待回传")
+    assert panel.select_all_diffs_button.text() == "全选差异"
+    assert panel.clear_selection_button.text() == "清除选择"
+    assert not hasattr(panel, "filter_combo")
 
     panel._diffs = [
         ArtifactDiff("pending.lrc", "pending.lrc", "generated", 10),
+        ArtifactDiff("original.mp3", "original.mp3", "unchanged", 10),
         ArtifactDiff(
             "sent.lrc",
             "sent.lrc",
@@ -44,5 +48,4 @@ def test_sync_panel_uses_phone_task_workflow_and_hides_advanced_sync(
             returned=True,
         ),
     ]
-    panel.filter_combo.setCurrentIndex(panel.filter_combo.findData("generated"))
     assert [diff.relative_path for diff in panel._filtered_diffs()] == ["pending.lrc"]

@@ -457,34 +457,18 @@ class SyncPanel(QWidget):
         self.outbox_path_label.setStyleSheet("font-size:11px;color:#666")
         outbox_row.addWidget(QLabel("待回传目录："))
         outbox_row.addWidget(self.outbox_path_label, 1)
+        self.select_all_diffs_button = QPushButton("全选差异")
+        self.select_all_diffs_button.clicked.connect(self._select_all_diffs)
+        outbox_row.addWidget(self.select_all_diffs_button)
+        self.clear_selection_button = QPushButton("清除选择")
+        self.clear_selection_button.clicked.connect(self._clear_selection)
+        outbox_row.addWidget(self.clear_selection_button)
         open_outbox = QPushButton("打开待回传目录")
         open_outbox.clicked.connect(self._open_outbox)
         outbox_row.addWidget(open_outbox)
         task_layout.addLayout(outbox_row)
         self.task_status = QLabel("尚未收到手机文件")
         task_layout.addWidget(self.task_status)
-
-        filters = QHBoxLayout()
-        self.filter_combo = QComboBox()
-        for text, value in [
-            ("推荐回传", "recommended"),
-            ("全部", "all"),
-            ("新生成", "generated"),
-            ("已修改", "modified"),
-            ("原始文件", "unchanged"),
-        ]:
-            self.filter_combo.addItem(text, value)
-        self.filter_combo.currentIndexChanged.connect(self._populate_diff_table)
-        filters.addWidget(QLabel("显示："))
-        filters.addWidget(self.filter_combo)
-        select_recommended = QPushButton("全选推荐")
-        select_recommended.clicked.connect(self._select_recommended)
-        clear = QPushButton("清除选择")
-        clear.clicked.connect(self._clear_selection)
-        filters.addWidget(select_recommended)
-        filters.addWidget(clear)
-        filters.addStretch()
-        task_layout.addLayout(filters)
 
         self.diff_table = QTableWidget(0, 6)
         self.diff_table.setHorizontalHeaderLabels(
@@ -709,13 +693,11 @@ class SyncPanel(QWidget):
         self._populate_diff_table()
 
     def _filtered_diffs(self):
-        value = self.filter_combo.currentData()
-        pending = [diff for diff in self._diffs if not diff.returned]
-        if value == "all":
-            return pending
-        if value == "recommended":
-            return [diff for diff in pending if diff.recommended]
-        return [diff for diff in pending if diff.status == value]
+        return [
+            diff
+            for diff in self._diffs
+            if not diff.returned and diff.status in {"generated", "modified"}
+        ]
 
     def _populate_diff_table(self):
         diffs = self._filtered_diffs()
@@ -765,8 +747,8 @@ class SyncPanel(QWidget):
             self._selected_paths.discard(diff.path)
         self._update_selection_summary()
 
-    def _select_recommended(self):
-        self._selected_paths.update(diff.path for diff in self._diffs if diff.recommended)
+    def _select_all_diffs(self):
+        self._selected_paths.update(diff.path for diff in self._filtered_diffs())
         self._populate_diff_table()
 
     def _clear_selection(self):
