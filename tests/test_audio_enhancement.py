@@ -94,8 +94,11 @@ def test_enhance_audio_writes_requested_clean_stem(monkeypatch, tmp_path):
     separator_module.Separator = FakeSeparator
     package_module = types.ModuleType("audio_separator")
     package_module.separator = separator_module
+    torch_module = types.ModuleType("torch")
+    torch_module.device = lambda name: name
     monkeypatch.setitem(sys.modules, "audio_separator", package_module)
     monkeypatch.setitem(sys.modules, "audio_separator.separator", separator_module)
+    monkeypatch.setitem(sys.modules, "torch", torch_module)
 
     result = audio_enhancement.enhance_audio(
         source, output, model="test", progress=lambda *_args: None
