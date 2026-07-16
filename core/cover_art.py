@@ -13,7 +13,7 @@ from typing import Callable
 MUSICBRAINZ_API_BASE = "https://musicbrainz.org/ws/2"
 COVER_ART_API_BASE = "https://coverartarchive.org"
 COVER_USER_AGENT = (
-    "Echovault/0.4.0 (https://github.com/xiaohaifale-QWQ/Echovault)"
+    "Echovault/0.5.0 (https://github.com/xiaohaifale-QWQ/Echovault)"
 )
 MAX_COVER_BYTES = 20 * 1024 * 1024
 

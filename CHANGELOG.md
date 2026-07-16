@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-07-17
+
 ### Added
 
 - Added a right-side Audio Editor workspace with a tool-grid home screen and
