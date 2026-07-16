@@ -31,6 +31,12 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     manager.config.video_time_offsets = {"D:/Video": 120}
     manager.config.asr.vocal_separation_model = "htdemucs_ft"
     manager.config.asr.vocal_separation_use_gpu = True
+    manager.config.transfer.receive_dir = "D:/PhoneInbox"
+    manager.config.transfer.auto_start_receiver = True
+    manager.config.transfer.device_alias = "Echovault-Test"
+    manager.config.transfer.concurrent_uploads = 3
+    manager.config.transfer.strict_hash = False
+    manager.config.transfer.keep_session_days = 14
 
     manager.save()
     loaded = ConfigManager(path).load()
@@ -59,6 +65,12 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     assert loaded.video_time_offsets == {"D:/Video": 120}
     assert loaded.asr.vocal_separation_model == "htdemucs_ft"
     assert loaded.asr.vocal_separation_use_gpu is True
+    assert loaded.transfer.receive_dir == "D:/PhoneInbox"
+    assert loaded.transfer.auto_start_receiver is True
+    assert loaded.transfer.device_alias == "Echovault-Test"
+    assert loaded.transfer.concurrent_uploads == 3
+    assert loaded.transfer.strict_hash is False
+    assert loaded.transfer.keep_session_days == 14
 
     raw = json.loads(path.read_text(encoding="utf-8"))
     assert raw["schema_version"] == CONFIG_SCHEMA_VERSION

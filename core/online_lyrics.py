@@ -383,6 +383,9 @@ def apply_lyrics_content(
         raise RuntimeError("待写入歌词没有有效时间轴。")
     path = Path(lrc_path)
     backup = _atomic_replace_with_backup(path, content)
+    from core.transfer_session import register_artifact
+
+    register_artifact(path, path, "online_lyrics")
     return path, backup
 
 
@@ -403,6 +406,9 @@ def apply_synced_lyrics(lrc_path: str | Path, match: LyricsMatch) -> tuple[Path,
     backup = _atomic_replace_with_backup(
         path, simplify_lyrics_content(match.synced_lyrics)
     )
+    from core.transfer_session import register_artifact
+
+    register_artifact(path, path, "online_lyrics")
     return path, backup
 
 
@@ -486,4 +492,7 @@ def calibrate_lrc_with_reference(
     backup = _atomic_replace_with_backup(path, "\n".join(raw_lines))
     if backup is None:
         raise RuntimeError("校准要求本地 LRC 已存在。")
+    from core.transfer_session import register_artifact
+
+    register_artifact(path, path, "online_lyrics")
     return path, backup

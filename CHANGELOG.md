@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Added
+
+- Replaced the primary Sync tab with a phone-transfer workflow that receives each
+  LocalSend batch as a persistent task, records the original file baseline, scans
+  generated/modified processing outputs, supports selection and preview, discovers
+  nearby LocalSend devices, and streams selected results back to the phone.
+- Added LocalSend Protocol v2.1 sender support with certificate-fingerprint
+  verification, prepare/upload/cancel handling, progress, retryable failures, and
+  persistent return history.
+- Added transfer-session and artifact-diff services. Lyrics recognition, translation,
+  online lyrics, vocal separation, and video aggregation now register outputs produced
+  from received phone material, including outputs saved outside the receive directory.
+
+### Changed
+
+- Existing A/B bidirectional and mirror folder synchronization is preserved under a
+  collapsed Advanced Folder Sync section. The main workflow no longer presents a
+  misleading "phone folder path".
+- LocalSend receiving now uses per-transfer directories, concurrent HTTP handling,
+  expiring sessions, device discovery callbacks, and DER certificate fingerprints.
+
 ## 0.4.0 - 2026-07-16
 
 ### Fixed

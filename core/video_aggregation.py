@@ -55,6 +55,10 @@ def aggregate_videos_by_time(folder: str | Path, offset_seconds: int = 0) -> Vid
         str(video_path),
     ]
     if _run_ffmpeg(copy_command):
+        from core.transfer_session import register_artifact
+
+        register_artifact(root, video_path, "video_aggregation")
+        register_artifact(root, manifest_path, "video_aggregation")
         return VideoAggregateResult(output_dir, video_path, manifest_path, len(videos), False)
 
     if video_path.exists():
@@ -76,6 +80,10 @@ def aggregate_videos_by_time(folder: str | Path, offset_seconds: int = 0) -> Vid
     ]
     if not _run_ffmpeg(reencode_command):
         raise RuntimeError("视频汇总失败：视频编码不兼容，重新编码也未成功")
+    from core.transfer_session import register_artifact
+
+    register_artifact(root, video_path, "video_aggregation")
+    register_artifact(root, manifest_path, "video_aggregation")
     return VideoAggregateResult(output_dir, video_path, manifest_path, len(videos), True)
 
 
@@ -108,6 +116,9 @@ def write_video_transcript_timeline(
                     ]
                 )
                 row_count += 1
+    from core.transfer_session import register_artifact
+
+    register_artifact(root, output_path, "video_aggregation")
     return output_path, row_count
 
 

@@ -244,4 +244,7 @@ def translate_lrc_file(
         temp_path.replace(destination)
     finally:
         temp_path.unlink(missing_ok=True)
+    from core.transfer_session import register_artifact
+
+    register_artifact(source, destination, "translation")
     return destination

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-CONFIG_SCHEMA_VERSION = 6
+CONFIG_SCHEMA_VERSION = 7
 SUPPORTED_AI_PROVIDERS = {"online", "local"}
 SUPPORTED_TRANSLATION_ENGINES = {"ai", "local"}
 SUPPORTED_PROVIDERS = {"groq", "local", "xunfei"}
@@ -41,6 +41,18 @@ class SyncConfig:
 
 
 @dataclass
+class TransferConfig:
+    """手机 LocalSend 接收、任务和回传配置。"""
+
+    receive_dir: str = ""
+    auto_start_receiver: bool = False
+    device_alias: str = "Echovault"
+    concurrent_uploads: int = 2
+    strict_hash: bool = True
+    keep_session_days: int = 30
+
+
+@dataclass
 class AppConfig:
     """应用全局配置"""
     music_dirs: list[str] = field(default_factory=list)
@@ -51,6 +63,7 @@ class AppConfig:
     output_lrc_dir: Optional[str] = None   # None=与音频同目录
     asr: ASRConfig = field(default_factory=ASRConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
+    transfer: TransferConfig = field(default_factory=TransferConfig)
 
     # API Keys（建议通过环境变量设置，这里提供默认值）
     groq_api_key: str = ""
@@ -175,6 +188,14 @@ class ConfigManager:
                 "auto_sync_interval_minutes": c.sync.auto_sync_interval_minutes,
                 "remote_dir": c.sync.remote_dir,
             },
+            "transfer": {
+                "receive_dir": c.transfer.receive_dir,
+                "auto_start_receiver": c.transfer.auto_start_receiver,
+                "device_alias": c.transfer.device_alias,
+                "concurrent_uploads": c.transfer.concurrent_uploads,
+                "strict_hash": c.transfer.strict_hash,
+                "keep_session_days": c.transfer.keep_session_days,
+            },
         }
 
     def _deserialize(self, data: dict):
@@ -249,6 +270,19 @@ class ConfigManager:
         c.sync.conflict_resolution = sync_data.get("conflict_resolution", "manual")
         c.sync.auto_sync_interval_minutes = sync_data.get("auto_sync_interval_minutes", 0)
         c.sync.remote_dir = sync_data.get("remote_dir", "")
+        transfer_data = data.get("transfer", {})
+        c.transfer.receive_dir = str(transfer_data.get("receive_dir", ""))
+        c.transfer.auto_start_receiver = bool(
+            transfer_data.get("auto_start_receiver", False)
+        )
+        c.transfer.device_alias = str(transfer_data.get("device_alias", "Echovault"))
+        c.transfer.concurrent_uploads = max(
+            1, min(4, int(transfer_data.get("concurrent_uploads", 2)))
+        )
+        c.transfer.strict_hash = bool(transfer_data.get("strict_hash", True))
+        c.transfer.keep_session_days = max(
+            1, int(transfer_data.get("keep_session_days", 30))
+        )
 
 
 def update_config_value(config: AppConfig, key: str, value: str) -> None:

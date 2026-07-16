@@ -140,7 +140,7 @@ class MainWindow(QMainWindow):
         self.right_tabs.addTab(self.batch_operations_panel, "批量处理")
 
         self.sync_panel = SyncPanel()
-        self.right_tabs.addTab(self.sync_panel, "同步")
+        self.right_tabs.addTab(self.sync_panel, "手机传输")
 
         splitter.addWidget(self.right_tabs)
 
@@ -195,10 +195,10 @@ class MainWindow(QMainWindow):
         trans_selected_action.triggered.connect(self._on_transcribe_selected)
         trans_menu.addAction(trans_selected_action)
 
-        # 同步菜单
-        sync_menu = menubar.addMenu("同步(&Y)")
+        # 手机传输菜单
+        sync_menu = menubar.addMenu("传输(&Y)")
 
-        sync_goto_action = QAction("打开同步面板(&S)", self)
+        sync_goto_action = QAction("打开手机传输(&S)", self)
         sync_goto_action.setShortcut("Ctrl+D")
         sync_goto_action.triggered.connect(
             lambda: self.right_tabs.setCurrentWidget(self.sync_panel)

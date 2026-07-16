@@ -1,10 +1,10 @@
 """LocalSend HTTPS receiver + HTTP browse server"""
 
-import os, json, uuid, socket, struct, ssl, hashlib, logging, tempfile, threading, datetime
+import os, json, uuid, socket, struct, ssl, hashlib, logging, tempfile, threading, datetime, time
 import html, shutil, urllib.parse
 from pathlib import Path
 from typing import Optional, Callable
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 logger = logging.getLogger(__name__)
 MULTICAST_GROUP, MULTICAST_PORT, HTTP_PORT, BROWSE_PORT = "224.0.0.167", 53317, 53317, 8899
@@ -37,12 +37,17 @@ def _stream_to_file(source, destination: Path, length: int, on_chunk=None) -> in
 class LocalSendReceiver:
     def __init__(self, save_dir: str, alias: str = "MusicSync",
                  on_file_received: Optional[Callable] = None,
-                 on_progress: Optional[Callable] = None):
+                 on_progress: Optional[Callable] = None,
+                 on_device_discovered: Optional[Callable] = None,
+                 on_session_completed: Optional[Callable] = None):
         self.save_dir = Path(save_dir); self.alias = alias
         self.on_file_received = on_file_received; self.on_progress = on_progress
+        self.on_device_discovered = on_device_discovered
+        self.on_session_completed = on_session_completed
         self.fingerprint = ""; self._cert_file = None
         self._http_server = None; self._browse_server = None
         self._udp_socket = None; self._running = False; self._sessions = {}
+        self._session_lock = threading.Lock()
 
     @property
     def is_running(self): return self._running
@@ -77,14 +82,18 @@ class LocalSendReceiver:
         from cryptography.hazmat.primitives.asymmetric import rsa
         key = rsa.generate_private_key(65537, 2048)
         subj = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "MusicSync")])
+        now = datetime.datetime.now(datetime.timezone.utc)
         cert = x509.CertificateBuilder().subject_name(subj).issuer_name(subj).public_key(
             key.public_key()).serial_number(x509.random_serial_number()).not_valid_before(
-            datetime.datetime.utcnow()).not_valid_after(datetime.datetime.utcnow() +
+            now).not_valid_after(now +
             datetime.timedelta(days=3650)).sign(key, hashes.SHA256())
         cp, kp = cert.public_bytes(serialization.Encoding.PEM), key.private_bytes(
             serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
         tmp = tempfile.NamedTemporaryFile(suffix=".pem", delete=False); tmp.write(cp + kp); tmp.close()
-        self._cert_file = tmp.name; self.fingerprint = hashlib.sha256(cp).hexdigest()
+        self._cert_file = tmp.name
+        self.fingerprint = hashlib.sha256(
+            cert.public_bytes(serialization.Encoding.DER)
+        ).hexdigest()
         logger.info("HTTPS cert generated")
 
     def _start_https_server(self):
@@ -112,6 +121,9 @@ class LocalSendReceiver:
                 d = {}; 
                 try: d = s._read()
                 except: pass
+                d["ip"] = s.client_address[0]
+                if r.on_device_discovered:
+                    r.on_device_discovered(d)
                 logger.info(f"register: {d.get('alias','?')}")
                 s._json({"alias":r.alias,"version":PROTOCOL_VERSION,"deviceModel":"Windows",
                     "deviceType":DEVICE_TYPE,"fingerprint":r.fingerprint,"port":HTTP_PORT,
@@ -119,23 +131,40 @@ class LocalSendReceiver:
             def _prep(s):
                 try: d = s._read()
                 except: s._json({"message":"Invalid"},400); return
+                r._cleanup_expired_sessions()
                 fs, sid, tokens, skipped = d.get("files",{}), uuid.uuid4().hex[:12], {}, 0
                 sf = {}
+                stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+                workspace = r.save_dir / f"{stamp}-{sid[:6]}"
                 for fid, inf in fs.items():
                     nm, sz = inf.get("fileName","?"), inf.get("size",0)
-                    ex = r.save_dir / Path(nm).name
+                    ex = workspace / Path(nm).name
                     if ex.exists() and ex.stat().st_size == sz: skipped += 1; continue
                     tk = uuid.uuid4().hex[:16]; tokens[fid] = tk
                     sf[fid] = {"name":nm,"size":sz,"token":tk}
                 if skipped: logger.info(f"skip {skipped} dups")
                 if not sf: s.send_response(204); s.end_headers(); return
-                r._sessions[sid] = {"files":sf,"sender":d.get("info",{}).get("alias","?")}
+                workspace.mkdir(parents=True, exist_ok=True)
+                info = dict(d.get("info", {}))
+                info["ip"] = s.client_address[0]
+                if r.on_device_discovered:
+                    r.on_device_discovered(info)
+                with r._session_lock:
+                    r._sessions[sid] = {
+                        "files": sf,
+                        "sender": info,
+                        "workspace": str(workspace),
+                        "received": set(),
+                        "paths": [],
+                        "created_at": time.time(),
+                    }
                 logger.info(f"upload: {len(sf)} files, sid={sid}")
                 s._json({"sessionId":sid,"files":tokens})
             def _up(s):
                 import urllib.parse; q = dict(urllib.parse.parse_qsl(s.path.split("?")[1])) if "?" in s.path else {}
                 sid, fid, tok = q.get("sessionId",""), q.get("fileId",""), q.get("token","")
-                se = r._sessions.get(sid)
+                with r._session_lock:
+                    se = r._sessions.get(sid)
                 if not se: s._json({"message":"bad session"},403); return
                 fi = se["files"].get(fid)
                 if not fi or fi["token"] != tok: s._json({"message":"bad token"},403); return
@@ -146,7 +175,7 @@ class LocalSendReceiver:
                     s._json({"message":"insufficient storage"},507); return
                 total, keys = len(se["files"]), list(se["files"].keys())
                 idx = keys.index(fid)+1 if fid in keys else 0; fn = fi["name"]
-                safe = Path(fn).name; fp = r.save_dir / safe
+                safe = Path(fn).name; workspace = Path(se["workspace"]); fp = workspace / safe
                 if fp.exists():
                     st, su = fp.stem, fp.suffix; c = 1
                     while fp.exists(): fp = r.save_dir / f"{st} ({c}){su}"; c += 1
@@ -170,17 +199,32 @@ class LocalSendReceiver:
                     logger.error(f"upload failed: {exc}"); s._json({"message":"write failed"},500); return
                 logger.info(f"received: {safe} ({received}B)")
                 if r.on_file_received: r.on_file_received(str(fp))
+                completed = None
+                with r._session_lock:
+                    se["received"].add(fid); se["paths"].append(str(fp))
+                    if len(se["received"]) == len(se["files"]):
+                        completed = {
+                            "session_id": sid,
+                            "sender": se["sender"],
+                            "workspace": se["workspace"],
+                            "files": list(se["paths"]),
+                            "received_at": datetime.datetime.now().astimezone().isoformat(),
+                        }
+                        del r._sessions[sid]
+                if completed and r.on_session_completed:
+                    r.on_session_completed(completed)
                 s.send_response(200); s.end_headers()
             def _cancel(s):
                 import urllib.parse; q = dict(urllib.parse.parse_qsl(s.path.split("?")[1])) if "?" in s.path else {}
                 sid = q.get("sessionId","")
-                if sid in r._sessions: del r._sessions[sid]
+                with r._session_lock:
+                    if sid in r._sessions: del r._sessions[sid]
                 s.send_response(200); s.end_headers()
             def _info(s):
                 s._json({"alias":r.alias,"version":PROTOCOL_VERSION,"deviceModel":"Windows",
                     "deviceType":DEVICE_TYPE,"fingerprint":r.fingerprint,"port":HTTP_PORT,
                     "protocol":"https","download":True})
-        self._http_server = HTTPServer(("0.0.0.0", HTTP_PORT), H)
+        self._http_server = ThreadingHTTPServer(("0.0.0.0", HTTP_PORT), H)
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); ctx.load_cert_chain(self._cert_file)
         self._http_server.socket = ctx.wrap_socket(self._http_server.socket, server_side=True)
         threading.Thread(target=self._http_server.serve_forever, daemon=True).start()
@@ -226,7 +270,7 @@ li{{display:flex;align-items:center;padding:10px 0;border-bottom:1px solid #eee;
                 with open(fp, "rb") as source:
                     for chunk in iter(lambda: source.read(65536), b""):
                         s.wfile.write(chunk)
-        self._browse_server = HTTPServer(("0.0.0.0", BROWSE_PORT), B)
+        self._browse_server = ThreadingHTTPServer(("0.0.0.0", BROWSE_PORT), B)
         threading.Thread(target=self._browse_server.serve_forever, daemon=True).start()
         logger.info(f"Browse: http://{self._get_local_ip()}:{BROWSE_PORT}")
 
@@ -248,7 +292,17 @@ li{{display:flex;align-items:center;padding:10px 0;border-bottom:1px solid #eee;
         try: m = json.loads(data.decode())
         except: return
         if m.get("fingerprint") == self.fingerprint: return
+        m["ip"] = addr[0]
+        if self.on_device_discovered:
+            self.on_device_discovered(m)
         if m.get("announce") and m.get("port"): self._reply(addr[0], m)
+
+    def _cleanup_expired_sessions(self):
+        cutoff = time.time() - 3600
+        with self._session_lock:
+            for session_id, session in list(self._sessions.items()):
+                if session.get("created_at", 0) < cutoff:
+                    del self._sessions[session_id]
 
     def _reply(self, ip, msg):
         try:

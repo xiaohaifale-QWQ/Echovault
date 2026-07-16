@@ -348,6 +348,12 @@ def separate_vocals(
             )
             os.replace(temporary_accompaniment, accompaniment_path)
             saved_accompaniment = accompaniment_path
+        from core.transfer_session import register_artifact
+
+        if saved_vocals:
+            register_artifact(input_path, saved_vocals, "vocal_separation")
+        if saved_accompaniment:
+            register_artifact(input_path, saved_accompaniment, "vocal_separation")
         progress(100, "人声与伴奏分离完成")
         return SeparationResult(saved_vocals, saved_accompaniment, separator.samplerate)
     except SeparationCancelled:

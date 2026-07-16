@@ -437,6 +437,9 @@ def transcribe_and_save_lrc(
         if progress_callback:
             progress_callback(RecognitionProgress(96, "save", f"正在写入 LRC… {song_name}"))
         lrc_path = save_lrc(lrc, audio_path, output_dir=output_dir, overwrite=overwrite)
+        from core.transfer_session import register_artifact
+
+        register_artifact(audio_path, lrc_path, "transcription")
         if progress_callback:
             progress_callback(RecognitionProgress(100, "done", f"识别完成… {song_name}"))
 
