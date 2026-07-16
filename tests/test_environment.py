@@ -31,3 +31,22 @@ def test_local_provider_requires_model_file(monkeypatch, tmp_path):
     model.write_bytes(b"x" * 100_001)
     ready = build_environment_report(config, cache_root=tmp_path)
     assert ready["ready_for_transcription"] is True
+
+
+def test_xunfei_provider_requires_http_and_websocket_clients(monkeypatch, tmp_path):
+    config = AppConfig()
+    config.asr.provider = "xunfei"
+    config.xunfei_app_id = "app"
+    config.xunfei_api_key = "key"
+    config.xunfei_api_secret = "secret"
+    monkeypatch.setattr("core.environment.find_ffmpeg", lambda: "C:/ffmpeg.exe")
+    monkeypatch.setattr(
+        "core.environment._module_available",
+        lambda name: name != "websocket",
+    )
+
+    report = build_environment_report(config, cache_root=tmp_path)
+
+    assert report["ready_for_transcription"] is False
+    assert report["provider"]["requests_installed"] is True
+    assert report["provider"]["websocket_installed"] is False

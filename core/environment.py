@@ -12,6 +12,8 @@ BASE_PACKAGES = {
     "PyQt6": "PyQt6",
     "pydub": "pydub",
     "mutagen": "mutagen",
+    "requests": "requests",
+    "websocket-client": "websocket",
     "aiohttp": "aiohttp",
     "cryptography": "cryptography",
     "zeroconf": "zeroconf",
@@ -54,14 +56,22 @@ def build_environment_report(config, cache_root: str | Path | None = None) -> di
             provider_details["whisper_installed"] and provider_details["model_installed"]
         )
     elif provider == "xunfei":
+        requests_installed = _module_available("requests")
+        websocket_installed = _module_available("websocket")
         provider_details = {
             "name": "xunfei",
             "app_id_configured": bool(config.xunfei_app_id),
             "api_key_configured": bool(config.xunfei_api_key),
             "api_secret_configured": bool(config.xunfei_api_secret),
-            "implementation_ready": True,
+            "requests_installed": requests_installed,
+            "websocket_installed": websocket_installed,
+            "implementation_ready": requests_installed and websocket_installed,
         }
-        provider_ready = config.has_xunfei_credentials
+        provider_ready = (
+            config.has_xunfei_credentials
+            and requests_installed
+            and websocket_installed
+        )
     else:
         provider_details = {"name": provider, "supported": False}
         provider_ready = False
