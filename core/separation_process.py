@@ -21,6 +21,8 @@ def _worker_command(
     device: str,
     output_content: str,
     events_file: str,
+    denoise: bool = False,
+    dereverb: bool = False,
 ) -> list[str]:
     arguments = [
         "_separate-worker",
@@ -37,6 +39,10 @@ def _worker_command(
         "--events-file",
         events_file,
     ]
+    if denoise:
+        arguments.append("--denoise")
+    if dereverb:
+        arguments.append("--dereverb")
     if getattr(sys, "frozen", False):
         return [sys.executable, *arguments]
     return [sys.executable, str(Path(__file__).resolve().parents[1] / "main.py"), *arguments]
@@ -55,6 +61,8 @@ def run_separation_process(
     model: str,
     device: str,
     output_content: str,
+    denoise: bool = False,
+    dereverb: bool = False,
     progress=None,
     cancelled=None,
 ) -> SeparationResult:
@@ -71,6 +79,8 @@ def run_separation_process(
         device,
         output_content,
         events_file,
+        denoise,
+        dereverb,
     )
     environment = os.environ.copy()
     environment["HF_HUB_OFFLINE"] = "1"

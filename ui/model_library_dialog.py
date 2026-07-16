@@ -23,6 +23,11 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from core.audio_enhancement import (
+    ENHANCEMENT_MODELS,
+    download_enhancement_model,
+    enhancement_model_installed,
+)
 from core.config import config_manager
 from core.model_download import DownloadCancelled, download_model
 from core.runtime_detection import detect_hardware, select_runtime
@@ -83,8 +88,14 @@ class ModelInstallWorker(QThread):
                     progress=callback,
                     cancelled=self.isInterruptionRequested,
                 )
-            else:
+            elif self.category == "separation":
                 download_separation_model(
+                    self.model,
+                    progress=callback,
+                    cancelled=self.isInterruptionRequested,
+                )
+            else:
+                download_enhancement_model(
                     self.model,
                     progress=callback,
                     cancelled=self.isInterruptionRequested,
@@ -148,9 +159,9 @@ class ModelLibraryDialog(QDialog):
             self.separation_table,
             self.separation_runtime_label,
         ) = self._build_card(
-            "音频分离模型",
-            "Demucs 模型用于分离人声与伴奏；CPU/GPU 共用模型文件，"
-            "输出内容在“人声分离”页选择。",
+            "音频分离与增强模型",
+            "Demucs 用于分离人声与伴奏；UVR 增强模型用于对分离后的人声降噪、"
+            "去回声和混响。CPU/GPU 共用模型文件。",
             "separation",
         )
         separation_model_row = QHBoxLayout()
@@ -221,6 +232,8 @@ class ModelLibraryDialog(QDialog):
         table.setAlternatingRowColors(True)
         table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         table.setMinimumHeight(145)
+        if category == "separation":
+            table.setMinimumHeight(235)
         header = table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -233,7 +246,7 @@ class ModelLibraryDialog(QDialog):
     def _models(category: str) -> list[CatalogModel]:
         if category == "asr":
             return list(WHISPER_MODELS)
-        return [
+        separation_models = [
             CatalogModel(
                 "separation",
                 spec.key,
@@ -245,9 +258,24 @@ class ModelLibraryDialog(QDialog):
             )
             for spec in SEPARATION_MODELS.values()
         ]
+        enhancement_models = [
+            CatalogModel(
+                "enhancement",
+                spec.key,
+                spec.name,
+                spec.description,
+                spec.speed,
+                spec.quality,
+                spec.approximate_size,
+            )
+            for spec in ENHANCEMENT_MODELS.values()
+        ]
+        return separation_models + enhancement_models
 
     @staticmethod
     def _installed(model: CatalogModel) -> bool:
+        if model.category == "enhancement":
+            return enhancement_model_installed(model.key)
         if model.category == "separation":
             return separation_model_installed(model.key)
         return (Path.home() / ".cache" / "whisper" / f"{model.key}.pt").is_file()

@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.audio_enhancement import enhancement_model_installed
 from core.separation_process import run_separation_process
 from core.vocal_separation import (
     SeparationCancelled,
@@ -53,6 +54,8 @@ class SeparationWorker(QThread):
         model: str,
         device: str,
         output_content: str,
+        denoise: bool,
+        dereverb: bool,
         parent=None,
     ):
         super().__init__(parent)
@@ -61,6 +64,8 @@ class SeparationWorker(QThread):
         self.model = model
         self.device = device
         self.output_content = output_content
+        self.denoise = denoise
+        self.dereverb = dereverb
 
     def run(self):
         try:
@@ -70,6 +75,8 @@ class SeparationWorker(QThread):
                 model=self.model,
                 device=self.device,
                 output_content=self.output_content,
+                denoise=self.denoise,
+                dereverb=self.dereverb,
                 progress=lambda percent, message: self.progress.emit(percent, message),
                 cancelled=self.isInterruptionRequested,
             )
@@ -303,6 +310,9 @@ class VocalSeparationPanel(QWidget):
         self.output_type_combo.addItem("人声 + 伴奏（推荐）", "both")
         self.output_type_combo.addItem("仅人声", "vocals")
         self.output_type_combo.addItem("仅伴奏", "accompaniment")
+        self.output_type_combo.currentIndexChanged.connect(
+            self._update_enhancement_availability
+        )
         form.addRow("输出内容:", self.output_type_combo)
         self.format_combo = QComboBox()
         self.format_combo.addItem("WAV（无损）", "wav")
@@ -317,11 +327,9 @@ class VocalSeparationPanel(QWidget):
         output_row.addWidget(browse_button)
         form.addRow("输出目录:", output_row)
 
-        self.denoise_check = QCheckBox("降噪（模型尚未接入）")
-        self.denoise_check.setEnabled(False)
+        self.denoise_check = QCheckBox("AI 降噪（UVR DeNoise Lite）")
         form.addRow("增强处理:", self.denoise_check)
-        self.reverb_check = QCheckBox("混响移除（模型尚未接入）")
-        self.reverb_check.setEnabled(False)
+        self.reverb_check = QCheckBox("去回声/混响（UVR DeEcho-DeReverb）")
         form.addRow("", self.reverb_check)
 
         action_row = QHBoxLayout()
@@ -427,6 +435,19 @@ class VocalSeparationPanel(QWidget):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([360, 360])
+        self._update_enhancement_availability()
+
+    def _update_enhancement_availability(self, _index: int = -1):
+        vocals_enabled = self.output_type_combo.currentData() != "accompaniment"
+        message = (
+            "增强模型只作用于人声音轨；仅输出伴奏时不会运行。"
+            if not vocals_enabled
+            else ""
+        )
+        for checkbox in (self.denoise_check, self.reverb_check):
+            checkbox.setEnabled(vocals_enabled)
+        self.denoise_check.setToolTip(message or "去除分离后人声中的持续噪声")
+        self.reverb_check.setToolTip(message or "抑制分离后人声中的回声和混响拖尾")
 
     def set_songs(self, songs: list[dict]):
         self._songs = [song for song in songs if song.get("path")]
@@ -485,6 +506,33 @@ class VocalSeparationPanel(QWidget):
             if reply == QMessageBox.StandardButton.Yes:
                 self.model_library_requested.emit()
             return
+        requested_enhancements = [
+            key
+            for key, checked in (
+                ("denoise", self.denoise_check.isChecked()),
+                ("dereverb", self.reverb_check.isChecked()),
+            )
+            if checked and self.output_type_combo.currentData() != "accompaniment"
+        ]
+        missing_enhancements = [
+            key for key in requested_enhancements if not enhancement_model_installed(key)
+        ]
+        if missing_enhancements:
+            names = {
+                "denoise": "UVR DeNoise Lite",
+                "dereverb": "UVR DeEcho-DeReverb",
+            }
+            reply = QMessageBox.question(
+                self,
+                "增强模型尚未安装",
+                "以下模型尚未下载："
+                + "、".join(names[key] for key in missing_enhancements)
+                + "。是否现在打开模型库？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.model_library_requested.emit()
+            return
         output_dir = self.output_input.text().strip()
         if not output_dir:
             output_dir = str(Path(input_path).parent / "Separated")
@@ -507,6 +555,8 @@ class VocalSeparationPanel(QWidget):
                 else "cpu"
             ),
             self.output_type_combo.currentData(),
+            "denoise" in requested_enhancements,
+            "dereverb" in requested_enhancements,
             self,
         )
         self.worker.progress.connect(self._show_processing_progress)

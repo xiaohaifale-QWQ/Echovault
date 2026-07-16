@@ -56,3 +56,21 @@ def test_run_separation_process_reads_live_result(monkeypatch, tmp_path):
     assert result.vocals_path == vocals
     assert result.accompaniment_path is None
     assert events == [(50, "GPU")]
+
+
+def test_worker_command_includes_requested_enhancements(monkeypatch):
+    monkeypatch.setattr(separation_process.sys, "frozen", True, raising=False)
+
+    command = separation_process._worker_command(
+        "song.wav",
+        "output",
+        "htdemucs",
+        "cuda",
+        "both",
+        "events.jsonl",
+        denoise=True,
+        dereverb=True,
+    )
+
+    assert "--denoise" in command
+    assert "--dereverb" in command

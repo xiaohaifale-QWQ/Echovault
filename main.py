@@ -656,6 +656,13 @@ def cmd_separation_worker(args):
             )
         from core.vocal_separation import separate_vocals
 
+        enhancement_keys = [
+            key
+            for key, enabled in (("denoise", args.denoise), ("dereverb", args.dereverb))
+            if enabled and args.output_content in {"both", "vocals"}
+        ]
+        separation_scale = 70 if enhancement_keys else 100
+
         result = separate_vocals(
             args.input,
             args.output_dir,
@@ -666,11 +673,47 @@ def cmd_separation_worker(args):
                 args.events_file,
                 {
                     "type": "progress",
-                    "percent": percent,
-                    "message": message,
+                    "percent": int(percent * separation_scale / 100),
+                    "message": (
+                        "人声与伴奏分离完成，准备增强人声…"
+                        if enhancement_keys and percent >= 100
+                        else message
+                    ),
                 },
             ),
         )
+        if enhancement_keys and result.vocals_path:
+            from core.audio_enhancement import enhance_audio
+
+            stage_width = 30 / len(enhancement_keys)
+            for index, enhancement in enumerate(enhancement_keys):
+                stage_start = 70 + index * stage_width
+                enhance_audio(
+                    result.vocals_path,
+                    result.vocals_path,
+                    model=enhancement,
+                    device=args.device,
+                    progress=lambda percent, message, start=stage_start: (
+                        write_separation_event(
+                            args.events_file,
+                            {
+                                "type": "progress",
+                                "percent": min(
+                                    99, int(start + stage_width * percent / 100)
+                                ),
+                                "message": message,
+                            },
+                        )
+                    ),
+                )
+            write_separation_event(
+                args.events_file,
+                {
+                    "type": "progress",
+                    "percent": 100,
+                    "message": "分离与增强处理完成",
+                },
+            )
         write_separation_event(
             args.events_file,
             {
@@ -1012,6 +1055,8 @@ def main():
         required=True,
     )
     sp.add_argument("--events-file", required=True)
+    sp.add_argument("--denoise", action="store_true")
+    sp.add_argument("--dereverb", action="store_true")
     sp.set_defaults(func=cmd_separation_worker)
 
     args = p.parse_args()

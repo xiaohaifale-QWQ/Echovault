@@ -24,6 +24,8 @@ def test_vocal_separation_panel_has_settings_above_mixer(tmp_path):
     assert "保存调音结果" in panel.save_mix_button.text()
     assert panel.save_mix_button.minimumHeight() >= 42
     assert panel.output_type_combo.count() == 3
+    assert panel.denoise_check.isEnabled()
+    assert panel.reverb_check.isEnabled()
     assert not hasattr(panel, "song_combo")
     assert not hasattr(panel, "mode_combo")
     assert not hasattr(panel, "model_combo")
@@ -31,6 +33,18 @@ def test_vocal_separation_panel_has_settings_above_mixer(tmp_path):
     assert panel.pause_button.text() == "暂停"
     assert panel.speed_button.text() == "倍速 1x"
     assert panel.reverse_button.text() == "倒放"
+
+
+def test_enhancement_controls_disable_for_accompaniment_only():
+    ensure_app()
+    panel = keep_widget(VocalSeparationPanel())
+
+    panel.output_type_combo.setCurrentIndex(
+        panel.output_type_combo.findData("accompaniment")
+    )
+
+    assert not panel.denoise_check.isEnabled()
+    assert not panel.reverb_check.isEnabled()
 
 
 def test_waveform_red_playhead_can_be_dragged():

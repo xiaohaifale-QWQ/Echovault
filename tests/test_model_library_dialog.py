@@ -1,3 +1,4 @@
+from core.audio_enhancement import ENHANCEMENT_MODELS
 from core.config import AppConfig
 from core.runtime_detection import HardwareReport
 from core.vocal_separation import SEPARATION_MODELS
@@ -24,7 +25,10 @@ def test_model_library_contains_asr_and_separation_models(monkeypatch):
     assert dialog.asr_card.objectName() == "asrModelCard"
     assert dialog.separation_card.objectName() == "separationModelCard"
     assert dialog.asr_table.rowCount() == 4
-    assert dialog.separation_table.rowCount() == len(SEPARATION_MODELS)
+    assert dialog.separation_table.rowCount() == len(SEPARATION_MODELS) + len(
+        ENHANCEMENT_MODELS
+    )
+    assert dialog.separation_table.minimumHeight() >= 235
     assert dialog.separation_model_combo.count() == len(SEPARATION_MODELS)
     assert dialog.separation_model_combo.currentData() == "htdemucs"
     assert not dialog.separation_gpu_check.isEnabled()

@@ -6,3 +6,6 @@ openai-whisper>=20231117
 
 # 人声/伴奏分离与识别前人声增强。
 demucs>=4.1.0,<5
+
+# UVR enhancement models used for denoise and de-reverb after vocal separation.
+audio-separator[cpu]>=0.44.2,<0.45
