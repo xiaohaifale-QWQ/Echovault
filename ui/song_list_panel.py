@@ -1,10 +1,23 @@
 """Song list with filters + rename + instrumental marking"""
 import os
 from pathlib import Path
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
-    QLabel, QLineEdit, QHBoxLayout, QAbstractItemView, QComboBox, QMessageBox, QMenu)
+
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QBrush, QColor, QIcon, QPixmap
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from core.metadata import read_cover_art
 from services.library_service import InstrumentalStore
@@ -12,7 +25,14 @@ from services.library_service import InstrumentalStore
 COLOR_HAS_LRC = QColor(76, 175, 80)
 COLOR_INST = QColor(255, 152, 0)
 
-def _fmt_size(b): return f"{b/1024:.0f}KB" if b>1024 else f"{b}B"
+def _fmt_size(size):
+    if size >= 1024**3:
+        return f"{size / 1024**3:.1f} GB"
+    if size >= 1024**2:
+        return f"{size / 1024**2:.1f} MB"
+    if size >= 1024:
+        return f"{size / 1024:.0f} KB"
+    return f"{size} B"
 
 class SongListPanel(QWidget):
     song_selected = pyqtSignal(dict)
@@ -32,25 +52,31 @@ class SongListPanel(QWidget):
     def _setup_ui(self):
         l = QVBoxLayout(self); l.setContentsMargins(4,4,4,4)
         h = QHBoxLayout()
-        self.title_label = QLabel("素材列表"); self.title_label.setStyleSheet("font-weight:bold;font-size:13px;padding:4px")
+        self.title_label = QLabel("素材文件")
+        self.title_label.setStyleSheet("font-weight:700;font-size:14px;padding:2px 0")
         h.addWidget(self.title_label); h.addStretch()
-        self.search_box = QLineEdit(); self.search_box.setPlaceholderText("搜索...")
-        self.search_box.setClearButtonEnabled(True); self.search_box.setMaximumWidth(120)
+        self.search_box = QLineEdit(); self.search_box.setPlaceholderText("搜索素材名称")
+        self.search_box.setClearButtonEnabled(True); self.search_box.setMaximumWidth(190)
         self.search_box.textChanged.connect(self._do_refresh); h.addWidget(self.search_box)
         self.lyric_filter = QComboBox(); self.lyric_filter.addItems(["全部","已完成","未完成","纯音乐"])
-        self.lyric_filter.setMaximumWidth(70); self.lyric_filter.currentIndexChanged.connect(self._do_refresh)
+        self.lyric_filter.setMinimumWidth(96); self.lyric_filter.setMaximumWidth(110)
+        self.lyric_filter.currentIndexChanged.connect(self._do_refresh)
         h.addWidget(self.lyric_filter)
         self.fmt_filter = QComboBox(); self.fmt_filter.addItem("全部格式")
-        self.fmt_filter.setMaximumWidth(85); self.fmt_filter.currentIndexChanged.connect(self._do_refresh)
+        self.fmt_filter.setMinimumWidth(100); self.fmt_filter.setMaximumWidth(120)
+        self.fmt_filter.currentIndexChanged.connect(self._do_refresh)
         h.addWidget(self.fmt_filter)
         l.addLayout(h)
         self.table = QTableWidget(); self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(["音频名称","格式","完成","大小","文件夹","路径"])
+        self.table.setHorizontalHeaderLabels(["音频名称","格式","状态","大小","来源文件夹","路径"])
         self.table.setColumnHidden(self.COL_PATH, True)
+        self.table.setColumnHidden(self.COL_FOLDER, True)
         hv = self.table.horizontalHeader()
         hv.setSectionResizeMode(self.COL_NAME, QHeaderView.ResizeMode.Stretch)
-        [hv.setSectionResizeMode(c, QHeaderView.ResizeMode.Fixed) for c in [1,2,3,4]]
-        self.table.setColumnWidth(1,50); self.table.setColumnWidth(2,50); self.table.setColumnWidth(3,60); self.table.setColumnWidth(4,100)
+        [hv.setSectionResizeMode(c, QHeaderView.ResizeMode.Fixed) for c in [1,2,3]]
+        self.table.setColumnWidth(1, 64)
+        self.table.setColumnWidth(2, 76)
+        self.table.setColumnWidth(3, 88)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -93,10 +119,10 @@ class SongListPanel(QWidget):
     def set_material_mode(self, mode: str):
         self._mode = mode
         is_video = mode == "video"
-        self.title_label.setText("素材列表（视频）" if is_video else "素材列表（音乐）")
+        self.title_label.setText("视频素材" if is_video else "音乐素材")
         self.table.setHorizontalHeaderLabels(
-            ["视频名称", "格式", "完成", "大小", "文件夹", "路径"]
-            if is_video else ["音频名称", "格式", "完成", "大小", "文件夹", "路径"]
+            ["视频名称", "格式", "状态", "大小", "来源文件夹", "路径"]
+            if is_video else ["音频名称", "格式", "状态", "大小", "来源文件夹", "路径"]
         )
         self.lyric_filter.blockSignals(True)
         self.lyric_filter.clear()
@@ -121,6 +147,7 @@ class SongListPanel(QWidget):
         for i, s in enumerate(f):
             n = QTableWidgetItem(Path(s["name"]).stem)
             n.setData(Qt.ItemDataRole.UserRole, s)
+            n.setToolTip(s.get("path", ""))
             if self._mode == "music":
                 n.setIcon(self._cover_icon(s.get("path", "")))
             self.table.setItem(i, 0, n)
@@ -140,7 +167,9 @@ class SongListPanel(QWidget):
             self.table.setItem(i, 2, si)
             zi = QTableWidgetItem(_fmt_size(s.get("size",0)))
             zi.setTextAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter); self.table.setItem(i, 3, zi)
-            self.table.setItem(i, 4, QTableWidgetItem(s.get("folder","")))
+            folder_item = QTableWidgetItem(s.get("folder", ""))
+            folder_item.setToolTip(s.get("folder", ""))
+            self.table.setItem(i, 4, folder_item)
             self.table.setItem(i, 5, QTableWidgetItem(s.get("path","")))
         self.model_updated.emit()
 
@@ -243,7 +272,9 @@ class SongListPanel(QWidget):
         song = item.data(Qt.ItemDataRole.UserRole)
         if not song: return
         old_path = Path(song["path"])
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout as VL, QDialogButtonBox as DBB
+        from PyQt6.QtWidgets import QDialog
+        from PyQt6.QtWidgets import QDialogButtonBox as DBB
+        from PyQt6.QtWidgets import QVBoxLayout as VL
         dlg = QDialog(self); dlg.setWindowTitle("重命名")
         ll = VL(dlg); le = QLineEdit(old_path.stem); ll.addWidget(le)
         bb = DBB(DBB.StandardButton.Ok | DBB.StandardButton.Cancel)

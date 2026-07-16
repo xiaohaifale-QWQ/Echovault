@@ -21,10 +21,10 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     window = keep_widget(MainWindow())
 
     assert [button.text() for button in window.navigation_buttons.values()] == [
-        "▣  素材",
-        "♫  歌词与标签",
-        "≋  音频编辑",
-        "⇄  导出与传输",
+        "素材",
+        "歌词与标签",
+        "音频编辑",
+        "导出与传输",
     ]
     assert window.workspace_stack.currentWidget() is window.workspace_pages["materials"]
     assert [window.lyrics_tabs.tabText(index) for index in range(2)] == [
@@ -43,7 +43,9 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     assert window.ai_chat_panel.isHidden()
     assert window.menuBar().isHidden()
     assert window.global_search.placeholderText() == "搜索素材、歌词、标签或功能"
-    assert window.top_settings_button.text() == "⚙  设置"
+    assert window.top_settings_button.text() == "设置"
+    assert not hasattr(window, "batch_shortcut_button")
+    assert all(not button.isEnabled() for button in window.material_action_buttons)
     assert window.model_library_action.text() == "模型库"
     assert window.model_library_action in window.menuBar().actions()
     assert not hasattr(window.song_list_panel, "btn_batch")
@@ -75,6 +77,8 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
         == "primary"
     )
     assert window.sync_panel.send_button.property("buttonRole") == "primary"
+    window._on_song_selected({"path": "C:/music/song.mp3", "has_lrc": False})
+    assert all(button.isEnabled() for button in window.material_action_buttons)
 
     monkeypatch.setattr(
         "core.ai_assistant.settings_from_config",

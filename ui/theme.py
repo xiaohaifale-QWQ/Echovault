@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QAbstractButton,
+    QAbstractSpinBox,
     QApplication,
     QComboBox,
     QDoubleSpinBox,
@@ -106,8 +107,8 @@ QGroupBox {
     background: #FFFFFF;
     border: 1px solid #DCE3EB;
     border-radius: 11px;
-    margin-top: 15px;
-    padding: 12px 10px 10px 10px;
+    margin-top: 13px;
+    padding: 14px 11px 11px 11px;
     font-weight: 600;
 }
 QGroupBox::title {
@@ -116,7 +117,7 @@ QGroupBox::title {
     left: 12px;
     padding: 0 6px;
     color: #334155;
-    background: #F6F8FB;
+    background: #FFFFFF;
 }
 QGroupBox:checkable::indicator {
     width: 17px;
@@ -296,6 +297,26 @@ QProgressBar::chunk {
     background: #2F7DD1;
     border-radius: 7px;
 }
+QSlider::groove:horizontal {
+    height: 5px;
+    background: #DCE3EB;
+    border-radius: 2px;
+}
+QSlider::sub-page:horizontal {
+    background: #77AEE2;
+    border-radius: 2px;
+}
+QSlider::handle:horizontal {
+    width: 15px;
+    height: 15px;
+    margin: -5px 0;
+    background: #FFFFFF;
+    border: 2px solid #2F7DD1;
+    border-radius: 8px;
+}
+QSlider::handle:horizontal:hover {
+    background: #EAF3FC;
+}
 QSplitter::handle {
     background: transparent;
     width: 6px;
@@ -373,6 +394,8 @@ def polish_widget_tree(root: QWidget) -> None:
         elif isinstance(widget, (QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox)):
             if widget.minimumHeight() < 32:
                 widget.setMinimumHeight(32)
+            if isinstance(widget, QAbstractSpinBox):
+                widget.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
 
 
 def apply_application_theme(app: QApplication) -> None:

@@ -48,20 +48,22 @@ class LyricsPreviewPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
         header = QHBoxLayout()
-        self.title_label = QLabel("歌词预览")
-        self.title_label.setStyleSheet("font-weight:bold;font-size:13px;padding:4px")
+        self.title_label = QLabel("歌词正文")
+        self.title_label.setStyleSheet("font-weight:700;font-size:15px;padding:2px 0")
         header.addWidget(self.title_label)
         header.addStretch()
         self.save_button = QPushButton("保存")
         self.save_button.setToolTip("双击歌词区域后，保存对 LRC 文件的修改")
         self.save_button.setEnabled(False)
+        self.save_button.setVisible(False)
         self.save_button.clicked.connect(self._save)
         header.addWidget(self.save_button)
         layout.addLayout(header)
-        self.song_label = QLabel("切换至素材库时显示当前素材的歌词")
-        self.song_label.setStyleSheet("color:#666;padding:2px 4px")
+        self.song_label = QLabel("尚未选择素材 · 双击歌词正文可进入编辑")
+        self.song_label.setStyleSheet("color:#667085;padding:1px 0")
         self.song_label.setWordWrap(True)
         layout.addWidget(self.song_label)
         self.text = LyricsTextEdit()
@@ -69,8 +71,9 @@ class LyricsPreviewPanel(QWidget):
         self.text.edit_requested.connect(self._start_editing)
         self.text.setPlaceholderText("选择并识别音频或视频素材后，歌词会显示在这里…")
         self.text.setStyleSheet(
-            "QTextEdit{font-family:Consolas,Microsoft YaHei;font-size:13px;"
-            "background:#fafafa;border:1px solid #e0e0e0;border-radius:4px}"
+            "QTextEdit{font-family:Consolas,Microsoft YaHei UI;font-size:13px;"
+            "background:#FFFFFF;border:1px solid #DCE3EB;border-radius:10px;"
+            "padding:10px}"
         )
         layout.addWidget(self.text)
         self._lrc_path: Path | None = None
@@ -81,6 +84,7 @@ class LyricsPreviewPanel(QWidget):
             return
         self._lrc_path = None
         self.save_button.setEnabled(False)
+        self.save_button.setVisible(False)
         self.text.setReadOnly(True)
         self.song_label.setText(Path(song.get("name", "")).stem)
         lrc_path = song.get("lrc_path")
@@ -100,6 +104,7 @@ class LyricsPreviewPanel(QWidget):
         self.text.setReadOnly(False)
         self.text.setFocus()
         self.save_button.setEnabled(True)
+        self.save_button.setVisible(True)
         self.song_label.setText(f"{self._lrc_path.stem}（编辑中）")
         self.editing_started.emit()
 
@@ -120,6 +125,7 @@ class LyricsPreviewPanel(QWidget):
             return
         self.text.setReadOnly(True)
         self.save_button.setEnabled(False)
+        self.save_button.setVisible(False)
         self.song_label.setText(f"{self._lrc_path.stem}（已保存）")
         self.lyrics_saved.emit(str(self._lrc_path))
 
@@ -127,5 +133,6 @@ class LyricsPreviewPanel(QWidget):
         self._lrc_path = None
         self.text.setReadOnly(True)
         self.save_button.setEnabled(False)
-        self.song_label.setText("切换至素材库时显示当前素材的歌词")
+        self.save_button.setVisible(False)
+        self.song_label.setText("尚未选择素材 · 双击歌词正文可进入编辑")
         self.text.clear()

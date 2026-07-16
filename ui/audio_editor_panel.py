@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QStackedWidget,
@@ -280,15 +281,11 @@ class AudioToolPage(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        heading_row = QHBoxLayout()
-        back = QPushButton("← 返回工具")
-        back.clicked.connect(self.back_requested)
-        heading_row.addWidget(back)
-        heading = QLabel(f"{self.spec.icon}  {self.spec.title}")
+        layout.setContentsMargins(8, 6, 8, 8)
+        layout.setSpacing(8)
+        heading = QLabel(self.spec.title)
         heading.setStyleSheet("font-size:18px;font-weight:700")
-        heading_row.addWidget(heading)
-        heading_row.addStretch()
-        layout.addLayout(heading_row)
+        layout.addWidget(heading)
         note = QLabel(self.spec.description)
         note.setWordWrap(True)
         note.setStyleSheet("color:#667085;padding:4px 0 8px")
@@ -351,10 +348,6 @@ class AudioToolPage(QWidget):
 
         self.run_button = QPushButton(f"执行：{self.spec.title}")
         self.run_button.setMinimumHeight(38)
-        self.run_button.setStyleSheet(
-            "QPushButton{background:#2878C8;color:white;font-weight:700;"
-            "border-radius:5px;padding:8px}QPushButton:disabled{background:#AAB4C0}"
-        )
         self.run_button.clicked.connect(lambda: self.run_requested.emit(self))
         layout.addWidget(self.run_button)
         layout.addStretch()
@@ -506,16 +499,8 @@ class AudioEditorPanel(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        header = QHBoxLayout()
-        title = QLabel("音频编辑")
-        title.setStyleSheet("font-size:18px;font-weight:700;padding:4px")
-        header.addWidget(title)
-        header.addStretch()
-        self.current_label = QLabel("未选择素材")
-        self.current_label.setStyleSheet("color:#667085")
-        header.addWidget(self.current_label)
-        layout.addLayout(header)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
 
         self.stack = QStackedWidget()
         self.home_page = self._build_home()
@@ -541,13 +526,21 @@ class AudioEditorPanel(QWidget):
         parameter_frame = QFrame()
         parameter_frame.setObjectName("audioParameterPanel")
         parameter_layout = QVBoxLayout(parameter_frame)
-        parameter_layout.setContentsMargins(10, 8, 10, 8)
-        parameter_layout.addWidget(self.stack)
+        parameter_layout.setContentsMargins(4, 4, 4, 4)
+        parameter_scroll = QScrollArea()
+        parameter_scroll.setWidgetResizable(True)
+        parameter_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        parameter_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        parameter_scroll.setWidget(self.stack)
+        parameter_layout.addWidget(parameter_scroll)
+        self.parameter_scroll = parameter_scroll
         editor_splitter.addWidget(parameter_frame)
         editor_splitter.setStretchFactor(0, 0)
         editor_splitter.setStretchFactor(1, 1)
         editor_splitter.setStretchFactor(2, 0)
-        editor_splitter.setSizes([205, 620, 420])
+        editor_splitter.setSizes([210, 610, 430])
         layout.addWidget(editor_splitter, 1)
 
         self.progress = QProgressBar()
@@ -594,7 +587,7 @@ class AudioEditorPanel(QWidget):
     def _build_home(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        heading = QLabel("选择一个编辑工具")
+        heading = QLabel("从左侧选择编辑工具")
         heading.setStyleSheet("font-size:18px;font-weight:700;color:#14213D")
         layout.addWidget(heading)
         note = QLabel(
@@ -626,13 +619,22 @@ class AudioEditorPanel(QWidget):
         return page
 
     def _build_tool_navigation(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setMinimumWidth(190)
+        scroll.setMaximumWidth(225)
         rail = QFrame()
         rail.setObjectName("audioToolRail")
-        rail.setMinimumWidth(185)
-        rail.setMaximumWidth(230)
         layout = QVBoxLayout(rail)
         layout.setContentsMargins(8, 10, 8, 10)
         layout.setSpacing(3)
+        rail_title = QLabel("编辑工具")
+        rail_title.setStyleSheet(
+            "font-size:15px;font-weight:700;color:#14213D;padding:2px 6px 6px"
+        )
+        layout.addWidget(rail_title)
         self.tool_button_group = QButtonGroup(self)
         self.tool_button_group.setExclusive(True)
         self.tool_buttons = {}
@@ -645,7 +647,7 @@ class AudioEditorPanel(QWidget):
             layout.addWidget(title)
             for key in keys:
                 spec = by_key[key]
-                button = QPushButton(f"{spec.icon}  {spec.title}")
+                button = QPushButton(spec.title)
                 button.setObjectName("audioToolButton")
                 button.setCheckable(True)
                 button.setToolTip(spec.description)
@@ -656,7 +658,9 @@ class AudioEditorPanel(QWidget):
                 self.tool_buttons[key] = button
                 layout.addWidget(button)
         layout.addStretch()
-        return rail
+        scroll.setWidget(rail)
+        self.tool_navigation_scroll = scroll
+        return scroll
 
     def _build_preview_workspace(self):
         frame = QFrame()
@@ -664,9 +668,15 @@ class AudioEditorPanel(QWidget):
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(10)
+        heading_row = QHBoxLayout()
         heading = QLabel("素材与试听")
         heading.setStyleSheet("font-size:15px;font-weight:700;color:#14213D")
-        layout.addWidget(heading)
+        heading_row.addWidget(heading)
+        heading_row.addStretch()
+        self.current_label = QLabel("未选择素材")
+        self.current_label.setStyleSheet("color:#667085")
+        heading_row.addWidget(self.current_label)
+        layout.addLayout(heading_row)
         self.preview_material = QLabel("请先从素材工作区选择音乐或视频")
         self.preview_material.setWordWrap(True)
         self.preview_material.setStyleSheet(
@@ -716,10 +726,7 @@ class AudioEditorPanel(QWidget):
     def _build_file_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        back = QPushButton("← 返回工具")
-        back.clicked.connect(lambda: self.stack.setCurrentWidget(self.home_page))
-        layout.addWidget(back)
-        heading = QLabel("▣ 文件管理")
+        heading = QLabel("文件管理")
         heading.setStyleSheet("font-size:18px;font-weight:700")
         layout.addWidget(heading)
         self.file_info = QLabel("请选择素材")
@@ -745,10 +752,7 @@ class AudioEditorPanel(QWidget):
     def _build_record_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        back = QPushButton("← 返回工具")
-        back.clicked.connect(lambda: self.stack.setCurrentWidget(self.home_page))
-        layout.addWidget(back)
-        heading = QLabel("● 录音")
+        heading = QLabel("录音")
         heading.setStyleSheet("font-size:18px;font-weight:700")
         layout.addWidget(heading)
         note = QLabel("使用 Windows 默认麦克风录制 16-bit WAV；录音直接保存到编辑输出目录。")

@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ui.theme import polish_widget_tree
+
 HELP_SECTIONS = (
     (
         "快速开始",
@@ -178,5 +180,7 @@ class HelpDialog(QDialog):
         layout.addWidget(self.tabs)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        polish_widget_tree(self)

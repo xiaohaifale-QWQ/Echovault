@@ -42,6 +42,7 @@ def test_song_list_shows_embedded_cover_icon(monkeypatch, tmp_path):
         lambda _path: (bytes(encoded), "image/png"),
     )
     panel = keep_widget(SongListPanel())
+    assert panel.table.isColumnHidden(panel.COL_FOLDER)
     panel.load_songs(
         [
             {

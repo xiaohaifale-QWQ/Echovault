@@ -42,11 +42,11 @@ class FolderColumnsBrowser(QWidget):
         # Let the content take the viewport height. Its minimum width still keeps
         # every column readable and causes a horizontal bar when needed.
         self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.Shape.StyledPanel)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._content = QWidget()
         self._content_layout = QHBoxLayout(self._content)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
-        self._content_layout.setSpacing(1)
+        self._content_layout.setSpacing(6)
         self._scroll.setWidget(self._content)
         outer.addWidget(self._scroll)
 
@@ -75,7 +75,7 @@ class FolderColumnsBrowser(QWidget):
         self._update_content_minimum_width()
 
     def _update_content_minimum_width(self) -> None:
-        self._content.setMinimumWidth(max(238, len(self._columns) * 238))
+        self._content.setMinimumWidth(max(216, len(self._columns) * 216))
 
     def _entries_for(self, folder: str) -> list[str]:
         try:
@@ -90,30 +90,43 @@ class FolderColumnsBrowser(QWidget):
     def _add_column(self, title: str, paths: list[str], *, roots: bool = False) -> None:
         column = QFrame()
         column.setObjectName("materialFolderColumn")
-        column.setMinimumWidth(238)
+        column.setMinimumWidth(210)
         column.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
         column.setStyleSheet(
-            "QFrame#materialFolderColumn{background:#FFFFFF;border:1px solid #D9DEE5;}"
-            "QListWidget{border:0;background:#FFFFFF;}"
-            "QListWidget::item{padding:6px 7px;}"
-            "QListWidget::item:selected{background:#E7EDF3;color:#1F2933;}"
+            "QFrame#materialFolderColumn{background:#FFFFFF;border:1px solid #DCE3EB;"
+            "border-radius:9px;}"
+            "QLabel#materialFolderColumnTitle{padding:8px 10px;background:#F3F6FA;"
+            "color:#526073;font-weight:600;border-top-left-radius:8px;"
+            "border-top-right-radius:8px;}"
+            "QListWidget{border:0;background:#FFFFFF;border-bottom-left-radius:8px;"
+            "border-bottom-right-radius:8px;}"
+            "QListWidget::item{padding:7px 9px;border-radius:6px;margin:1px 4px;}"
+            "QListWidget::item:selected{background:#E7F1FC;color:#1F6FBB;}"
         )
         layout = QVBoxLayout(column)
         layout.setContentsMargins(0, 0, 0, 0)
         label = QLabel(title)
-        label.setStyleSheet("padding:7px 8px;background:#F1F3F5;color:#4B5563;font-weight:600;")
+        label.setObjectName("materialFolderColumnTitle")
         layout.addWidget(label)
         listing = QListWidget()
         listing.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        if not paths:
+            empty = QListWidgetItem(
+                "尚未添加文件夹" if roots else "此文件夹没有可显示内容"
+            )
+            empty.setFlags(Qt.ItemFlag.NoItemFlags)
+            listing.addItem(empty)
         for path in paths:
             item = QListWidgetItem(
-                ("▸ " if os.path.isdir(path) else "   ") + (os.path.basename(path) or path)
+                ("文件夹  " if os.path.isdir(path) else "文件  ")
+                + (os.path.basename(path) or path)
             )
             item.setData(Qt.ItemDataRole.UserRole, path)
             item.setData(Qt.ItemDataRole.UserRole + 1, roots)
+            item.setToolTip(path)
             listing.addItem(item)
         listing.itemClicked.connect(self._select_item)
         listing.itemDoubleClicked.connect(self._open_item)

@@ -144,9 +144,10 @@ class MainWindow(QMainWindow):
         workspace_container = QWidget()
         workspace_layout = QVBoxLayout(workspace_container)
         workspace_layout.setContentsMargins(18, 14, 18, 12)
-        workspace_layout.setSpacing(10)
+        workspace_layout.setSpacing(8)
         header_row = QHBoxLayout()
         header_text = QVBoxLayout()
+        header_text.setSpacing(2)
         self.workspace_title = QLabel("素材")
         self.workspace_title.setObjectName("workspaceTitle")
         self.workspace_hint = QLabel("添加文件夹、浏览素材，并选择接下来要执行的任务。")
@@ -155,10 +156,6 @@ class MainWindow(QMainWindow):
         header_text.addWidget(self.workspace_hint)
         header_row.addLayout(header_text)
         header_row.addStretch()
-        self.batch_shortcut_button = QPushButton("批量任务")
-        self.batch_shortcut_button.setObjectName("secondaryAction")
-        self.batch_shortcut_button.clicked.connect(self._show_batch_workspace)
-        header_row.addWidget(self.batch_shortcut_button)
         workspace_layout.addLayout(header_row)
 
         self.workspace_stack = QStackedWidget()
@@ -204,7 +201,7 @@ class MainWindow(QMainWindow):
                 border: 1px solid #D5DDE7;
                 border-radius: 8px;
                 color: #26354A;
-                padding: 7px 14px;
+                padding: 7px 16px;
                 font-weight: 600;
             }
             QPushButton#topActionButton:hover {
@@ -238,7 +235,7 @@ class MainWindow(QMainWindow):
             }
             QLabel#workspaceTitle {
                 color: #14213D;
-                font-size: 22px;
+                font-size: 23px;
                 font-weight: 700;
             }
             QLabel#workspaceHint {
@@ -262,6 +259,11 @@ class MainWindow(QMainWindow):
             QPushButton#primaryAction:hover {
                 background: #236DBB;
             }
+            QPushButton#primaryAction:disabled {
+                background: #E9EDF2;
+                border: 1px solid #DEE3E9;
+                color: #A0A8B3;
+            }
             QPushButton#secondaryAction {
                 background: #FFFFFF;
                 border: 1px solid #CBD5E1;
@@ -271,6 +273,11 @@ class MainWindow(QMainWindow):
             }
             QPushButton#secondaryAction:hover {
                 background: #F3F6FA;
+            }
+            QPushButton#secondaryAction:disabled {
+                background: #F3F5F7;
+                border-color: #E1E5EA;
+                color: #A0A8B3;
             }
             """
         )
@@ -293,21 +300,22 @@ class MainWindow(QMainWindow):
     def _build_top_header(self):
         header = QFrame()
         header.setObjectName("topHeader")
-        header.setFixedHeight(64)
+        header.setFixedHeight(60)
         layout = QHBoxLayout(header)
-        layout.setContentsMargins(18, 10, 16, 10)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 8, 18, 8)
+        layout.setSpacing(10)
 
         brand = QLabel("琳琅乐府 Echovault")
         brand.setObjectName("topBrand")
-        brand.setMinimumWidth(190)
+        brand.setMinimumWidth(220)
         layout.addWidget(brand)
 
         self.global_search = QLineEdit()
         self.global_search.setObjectName("globalSearch")
         self.global_search.setPlaceholderText("搜索素材、歌词、标签或功能")
         self.global_search.setClearButtonEnabled(True)
-        self.global_search.setMaximumWidth(430)
+        self.global_search.setMinimumWidth(320)
+        self.global_search.setMaximumWidth(520)
         self.global_search.textChanged.connect(
             lambda text: self.song_list_panel.search_box.setText(text)
         )
@@ -315,15 +323,15 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.global_search, 1)
         layout.addStretch()
 
-        top_batch = QPushButton("▣  批量任务")
+        top_batch = QPushButton("批量任务")
         top_batch.setObjectName("topActionButton")
         top_batch.clicked.connect(self._show_batch_workspace)
         layout.addWidget(top_batch)
-        top_models = QPushButton("◇  模型库")
+        top_models = QPushButton("模型库")
         top_models.setObjectName("topActionButton")
         top_models.clicked.connect(self._on_model_library)
         layout.addWidget(top_models)
-        self.top_settings_button = QPushButton("⚙  设置")
+        self.top_settings_button = QPushButton("设置")
         self.top_settings_button.setObjectName("topActionButton")
         self.top_settings_button.clicked.connect(self._show_top_settings_menu)
         layout.addWidget(self.top_settings_button)
@@ -373,17 +381,18 @@ class MainWindow(QMainWindow):
     def _build_navigation(self):
         navigation = QFrame()
         navigation.setObjectName("workspaceNavigation")
-        navigation.setFixedWidth(205)
+        navigation.setFixedWidth(200)
         layout = QVBoxLayout(navigation)
-        layout.setContentsMargins(10, 12, 10, 12)
+        layout.setContentsMargins(10, 14, 10, 12)
+        layout.setSpacing(6)
         self.navigation_group = QButtonGroup(self)
         self.navigation_group.setExclusive(True)
         self.navigation_buttons = {}
         entries = (
-            ("materials", "▣  素材"),
-            ("lyrics", "♫  歌词与标签"),
-            ("audio", "≋  音频编辑"),
-            ("transfer", "⇄  导出与传输"),
+            ("materials", "素材"),
+            ("lyrics", "歌词与标签"),
+            ("audio", "音频编辑"),
+            ("transfer", "导出与传输"),
         )
         for key, title in entries:
             button = QPushButton(title)
@@ -429,16 +438,20 @@ class MainWindow(QMainWindow):
         selected_layout.addLayout(text_layout, 1)
         lyrics_action = QPushButton("识别或匹配歌词")
         lyrics_action.setObjectName("secondaryAction")
+        lyrics_action.setEnabled(False)
         lyrics_action.clicked.connect(self._show_selected_lyrics)
         selected_layout.addWidget(lyrics_action)
         cover_action = QPushButton("封面与标签")
         cover_action.setObjectName("secondaryAction")
+        cover_action.setEnabled(False)
         cover_action.clicked.connect(self._show_cover_workspace)
         selected_layout.addWidget(cover_action)
         audio_action = QPushButton("编辑音频")
         audio_action.setObjectName("primaryAction")
+        audio_action.setEnabled(False)
         audio_action.clicked.connect(lambda: self._switch_workspace("audio"))
         selected_layout.addWidget(audio_action)
+        self.material_action_buttons = (lyrics_action, cover_action, audio_action)
         layout.addWidget(selected_card)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -461,7 +474,9 @@ class MainWindow(QMainWindow):
         recognition_splitter = QSplitter(Qt.Orientation.Horizontal)
         recognition_splitter.addWidget(self.lyrics_preview_panel)
         recognition_splitter.addWidget(self.detail_panel)
-        recognition_splitter.setSizes([720, 480])
+        recognition_splitter.setStretchFactor(0, 2)
+        recognition_splitter.setStretchFactor(1, 1)
+        recognition_splitter.setSizes([780, 440])
         recognition_layout.addWidget(recognition_splitter)
         self.lyrics_tabs.addTab(recognition_page, "识别、编辑与翻译")
 
@@ -471,7 +486,9 @@ class MainWindow(QMainWindow):
         online_splitter = QSplitter(Qt.Orientation.Horizontal)
         online_splitter.addWidget(self.online_comparison_panel)
         online_splitter.addWidget(self.online_lyrics_panel)
-        online_splitter.setSizes([760, 500])
+        online_splitter.setStretchFactor(0, 3)
+        online_splitter.setStretchFactor(1, 2)
+        online_splitter.setSizes([750, 500])
         online_layout.addWidget(online_splitter)
         self.lyrics_tabs.addTab(online_page, "在线歌词与封面")
         self.lyrics_tabs.currentChanged.connect(self._on_lyrics_tab_changed)
@@ -488,7 +505,9 @@ class MainWindow(QMainWindow):
         separation_splitter = QSplitter(Qt.Orientation.Horizontal)
         separation_splitter.addWidget(self.vocal_lyrics_panel)
         separation_splitter.addWidget(self.vocal_separation_panel)
-        separation_splitter.setSizes([400, 820])
+        separation_splitter.setStretchFactor(0, 1)
+        separation_splitter.setStretchFactor(1, 2)
+        separation_splitter.setSizes([390, 830])
         separation_layout.addWidget(separation_splitter)
         self.audio_tabs.addTab(separation_page, "人声分离")
         return self.audio_tabs
@@ -878,6 +897,8 @@ class MainWindow(QMainWindow):
         status = "已有歌词" if song.get("has_lrc") else "待识别歌词"
         self.selected_material_name.setText(path.name)
         self.selected_material_path.setText(f"{path.parent}  ·  {status}")
+        for button in self.material_action_buttons:
+            button.setEnabled(True)
         self.navigation_status.setText(
             f"当前素材：{path.name}\n可继续处理、试听或导出。"
         )

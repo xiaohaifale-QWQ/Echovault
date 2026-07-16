@@ -6,7 +6,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QGroupBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -115,35 +115,47 @@ class BatchOperationsPanel(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        heading = QLabel("批量处理工作台")
-        heading.setStyleSheet("font-weight:bold;font-size:14px;padding:4px")
-        layout.addWidget(heading)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(10)
 
         self.scope_label = QLabel("当前素材：0 个")
         self.scope_label.setWordWrap(True)
-        self.scope_label.setStyleSheet("color:#666")
+        self.scope_label.setStyleSheet(
+            "background:#EEF4FB;color:#315B86;border-radius:8px;"
+            "padding:9px 12px;font-weight:600"
+        )
         layout.addWidget(self.scope_label)
 
-        recognition_group = QGroupBox("批量识别")
+        cards = QHBoxLayout()
+        cards.setSpacing(10)
+
+        recognition_group = QFrame()
+        recognition_group.setObjectName("batchTaskCard")
         recognition_layout = QVBoxLayout(recognition_group)
-        recognition_layout.addWidget(
-            QLabel("识别当前列表里尚未生成 LRC、且未标记为纯音乐的素材。")
+        recognition_layout.addWidget(self._card_title("批量识别"))
+        recognition_note = QLabel(
+            "为当前列表中尚未生成 LRC、且未标记为纯音乐的素材识别歌词。"
         )
+        recognition_note.setWordWrap(True)
+        recognition_layout.addWidget(recognition_note)
+        recognition_layout.addStretch()
         self.batch_transcribe_button = QPushButton("开始批量识别")
         self.batch_transcribe_button.setMinimumHeight(36)
         self.batch_transcribe_button.clicked.connect(
             self.batch_transcribe_requested.emit
         )
         recognition_layout.addWidget(self.batch_transcribe_button)
-        layout.addWidget(recognition_group)
+        cards.addWidget(recognition_group, 1)
 
-        translation_group = QGroupBox("批量翻译")
+        translation_group = QFrame()
+        translation_group.setObjectName("batchTaskCard")
         translation_layout = QVBoxLayout(translation_group)
-        translation_row = QHBoxLayout()
+        translation_layout.addWidget(self._card_title("批量翻译"))
         self.translation_engine = QComboBox()
         self.translation_engine.addItem("AI 翻译", "ai")
         self.translation_engine.addItem("本地库", "local")
-        translation_row.addWidget(self.translation_engine)
+        translation_layout.addWidget(self.translation_engine)
+        translation_row = QHBoxLayout()
         self.translation_source = QComboBox()
         self.translation_target = QComboBox()
         self.translation_source.addItem("自动检测", "auto")
@@ -157,21 +169,28 @@ class BatchOperationsPanel(QWidget):
         self.batch_translate_button.setMinimumHeight(36)
         self.batch_translate_button.clicked.connect(self._request_translation)
         translation_layout.addWidget(self.batch_translate_button)
-        layout.addWidget(translation_group)
+        cards.addWidget(translation_group, 1)
 
-        online_group = QGroupBox("批量在线匹配")
+        online_group = QFrame()
+        online_group.setObjectName("batchTaskCard")
         online_layout = QVBoxLayout(online_group)
+        online_layout.addWidget(self._card_title("批量在线匹配"))
         threshold_row = QHBoxLayout()
-        threshold_row.addWidget(QLabel("最低匹配分："))
+        threshold_row.addWidget(QLabel("最低匹配分"))
         self.minimum_score = QSpinBox()
         self.minimum_score.setRange(50, 100)
         self.minimum_score.setValue(80)
         self.minimum_score.setSuffix("%")
+        self.minimum_score.setFixedWidth(88)
         threshold_row.addWidget(self.minimum_score)
         threshold_row.addStretch()
         online_layout.addLayout(threshold_row)
         self.apply_best_checkbox = QCheckBox("自动写入最佳同步歌词（已有 LRC 先备份）")
+        self.apply_best_checkbox.setToolTip(
+            "关闭时只搜索并报告匹配结果，不改写任何歌词文件"
+        )
         online_layout.addWidget(self.apply_best_checkbox)
+        online_layout.addStretch()
         self.batch_online_button = QPushButton("开始批量在线匹配")
         self.batch_online_button.setMinimumHeight(36)
         self.batch_online_button.clicked.connect(
@@ -181,17 +200,39 @@ class BatchOperationsPanel(QWidget):
             )
         )
         online_layout.addWidget(self.batch_online_button)
-        layout.addWidget(online_group)
+        cards.addWidget(online_group, 1)
+        layout.addLayout(cards)
 
         self.progress = QProgressBar()
         self.progress.setVisible(False)
         layout.addWidget(self.progress)
+        result_heading = QLabel("任务进度与结果")
+        result_heading.setStyleSheet("font-weight:700;font-size:14px;padding-top:2px")
+        layout.addWidget(result_heading)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setPlaceholderText("批量任务进度与结果会显示在这里。")
         layout.addWidget(self.log, 1)
         self._active_task = ""
         self._last_log_entry = ""
+        self.setStyleSheet(
+            """
+            QFrame#batchTaskCard {
+                background: #FFFFFF;
+                border: 1px solid #DCE3EB;
+                border-radius: 11px;
+            }
+            QFrame#batchTaskCard QLabel {
+                color: #526073;
+            }
+            """
+        )
+
+    @staticmethod
+    def _card_title(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setStyleSheet("font-size:15px;font-weight:700;color:#14213D")
+        return label
 
     @staticmethod
     def _select_data(combo: QComboBox, value: str):

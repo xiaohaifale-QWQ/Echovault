@@ -36,6 +36,7 @@ from core.voice_cache import (
     sent_transfer_cache_dir,
     voice_cache_dir,
 )
+from ui.theme import polish_widget_tree
 
 
 class _CurrentPageStack(QStackedWidget):
@@ -241,6 +242,8 @@ class SettingsDialog(QDialog):
         super().__init__(parent); self.config = config
         self.section = section
         self._setup_ui(); self._load_config(); self._refresh_cache_stats()
+        polish_widget_tree(self)
+        self.setFixedSize(720, self._preferred_height)
 
     def _setup_ui(self):
         section_index = {
@@ -251,7 +254,17 @@ class SettingsDialog(QDialog):
             "local_ai": 4,
         }.get(self.section, 0)
         section_title = ("语音识别", "歌词输出", "快捷键", "缓存", "本地部署 AI")[section_index]
-        self.setWindowTitle(f"偏好设置 - {section_title}"); self.setMinimumWidth(500)
+        self.setWindowTitle(f"偏好设置 - {section_title}")
+        self.setMinimumWidth(620)
+        section_heights = {
+            "recognition": 600,
+            "lyrics": 570,
+            "shortcuts": 350,
+            "cache": 430,
+            "local_ai": 500,
+        }
+        self._preferred_height = section_heights.get(self.section, 520)
+        self.resize(720, self._preferred_height)
         l = QVBoxLayout(self)
 
         # 设置分类由顶栏“设置”菜单选择；对话框仅展示被选中的单个分类。
@@ -443,6 +456,8 @@ class SettingsDialog(QDialog):
         local_ai_layout.addStretch()
 
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText("保存")
+        btns.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         btns.accepted.connect(self._save); btns.rejected.connect(self.reject); l.addWidget(btns)
 
     def _create_settings_section(self, title_text: str) -> tuple[QWidget, QVBoxLayout]:

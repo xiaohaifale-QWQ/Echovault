@@ -44,6 +44,7 @@ from core.vocal_separation import (
     download_separation_model,
     separation_model_installed,
 )
+from ui.theme import polish_widget_tree
 
 
 @dataclass(frozen=True)
@@ -152,6 +153,7 @@ class ModelLibraryDialog(QDialog):
         self._setup_ui()
         self.refresh_tables()
         self._refresh_runtime_status()
+        polish_widget_tree(self)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)

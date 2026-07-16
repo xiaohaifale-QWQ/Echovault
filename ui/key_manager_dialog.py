@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.config import AppConfig, config_manager
+from ui.theme import polish_widget_tree
 
 
 class KeyManagerDialog(QDialog):
@@ -24,7 +25,8 @@ class KeyManagerDialog(QDialog):
         super().__init__(parent)
         self.config = config
         self.setWindowTitle("密钥管理")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(620)
+        self.resize(700, 560)
 
         layout = QVBoxLayout(self)
         notice = QLabel(
@@ -77,9 +79,12 @@ class KeyManagerDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        polish_widget_tree(self)
 
     @staticmethod
     def _key_input(value: str) -> QLineEdit:

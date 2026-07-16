@@ -25,12 +25,12 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
     QMenu,
     QPushButton,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -39,7 +39,7 @@ from ui.folder_columns import FolderColumnsBrowser
 
 
 class MaterialModeSwitch(QWidget):
-    """Full-width square, neutral-grey slide switch for the two library modes."""
+    """Compact segmented switch for music and video libraries."""
 
     toggled = pyqtSignal(bool)
 
@@ -52,10 +52,11 @@ class MaterialModeSwitch(QWidget):
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip("滑动切换音乐模式与视频模式")
-        self.setMinimumHeight(54)
+        self.setMinimumHeight(40)
+        self.setMaximumHeight(40)
 
     def sizeHint(self):
-        return QSize(260, 54)
+        return QSize(220, 40)
 
     def setChecked(self, checked: bool):
         checked = bool(checked)
@@ -84,23 +85,23 @@ class MaterialModeSwitch(QWidget):
 
     def paintEvent(self, _event):
         painter = QPainter(self)
-        track = self.rect().adjusted(2, 4, -2, -4)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#B8BEC6"))
-        painter.drawRoundedRect(track, 12, 12)
+        track = self.rect().adjusted(1, 1, -1, -1)
+        painter.setPen(QColor("#D3DCE7"))
+        painter.setBrush(QColor("#EEF3F8"))
+        painter.drawRoundedRect(track, 10, 10)
 
         half_width = track.width() // 2
-        knob_width = max(32, half_width - 6)
-        knob_x = track.x() + 3 + (track.width() - knob_width - 6) * self._knob_position
-        painter.setBrush(QColor("#767E87"))
-        painter.setPen(QColor("#626A73"))
+        knob_width = max(32, half_width - 4)
+        knob_x = track.x() + 2 + (track.width() - knob_width - 4) * self._knob_position
+        painter.setBrush(QColor("#FFFFFF"))
+        painter.setPen(QColor("#9DC0E3"))
         painter.drawRoundedRect(
             int(knob_x),
-            track.y() + 3,
+            track.y() + 2,
             knob_width,
-            track.height() - 6,
-            9,
-            9,
+            track.height() - 4,
+            8,
+            8,
         )
 
         font = painter.font()
@@ -108,9 +109,9 @@ class MaterialModeSwitch(QWidget):
         painter.setFont(font)
         left_rect = track.adjusted(0, 0, -half_width, 0)
         right_rect = track.adjusted(half_width, 0, 0, 0)
-        painter.setPen(QColor("#FFFFFF") if not self._checked else QColor("#3D4650"))
+        painter.setPen(QColor("#1F6FBB") if not self._checked else QColor("#667386"))
         painter.drawText(left_rect, Qt.AlignmentFlag.AlignCenter, "音乐模式")
-        painter.setPen(QColor("#FFFFFF") if self._checked else QColor("#3D4650"))
+        painter.setPen(QColor("#1F6FBB") if self._checked else QColor("#667386"))
         painter.drawText(right_rect, Qt.AlignmentFlag.AlignCenter, "视频模式")
 
 
@@ -183,16 +184,17 @@ class LibraryPanel(QWidget):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
-        splitter = QSplitter(Qt.Orientation.Vertical)
-
-        folder_section = QWidget()
-        folder_layout = QVBoxLayout(folder_section)
-        folder_layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
         header = QHBoxLayout()
+        header.setSpacing(8)
         self.folder_header = header
-        self.title = QLabel("素材库（音乐模式）")
-        self.title.setStyleSheet("font-weight:bold;font-size:13px;padding:4px")
+        self.title = QLabel("音乐素材文件夹")
+        self.title.setStyleSheet("font-weight:700;font-size:14px;padding:2px 0")
         header.addWidget(self.title)
+        self.mode_switch = MaterialModeSwitch()
+        self.mode_switch.setFixedWidth(220)
+        self.mode_switch.toggled.connect(self._switch_mode)
+        header.addWidget(self.mode_switch)
         header.addStretch()
         self.select_all_check = QCheckBox("全选")
         self.select_all_check.setToolTip("勾选后，详情页显示当前模式下所有素材文件夹的内容")
@@ -201,36 +203,30 @@ class LibraryPanel(QWidget):
         self.btn_add = QPushButton("添加文件夹")
         self.btn_add.clicked.connect(self._add_directory)
         header.addWidget(self.btn_add)
-        folder_layout.addLayout(header)
+        layout.addLayout(header)
+
         self.folder_browser = FolderColumnsBrowser()
         self.folder_browser.folder_selected.connect(self.folder_selected)
         self.folder_browser.material_selected.connect(self.material_selected)
         self.folder_browser.root_removal_requested.connect(self._remove_directory)
-        folder_layout.addWidget(self.folder_browser)
-        splitter.addWidget(folder_section)
+        layout.addWidget(self.folder_browser, 1)
 
-        controls = QWidget()
-        controls_layout = QVBoxLayout(controls)
-        controls_layout.setContentsMargins(4, 4, 4, 4)
-        self.mode_switch = MaterialModeSwitch()
-        self.mode_switch.toggled.connect(self._switch_mode)
-        controls_layout.addWidget(self.mode_switch)
-
-        self.video_controls = QWidget()
+        self.video_controls = QGroupBox("视频时间校准")
         video_layout = QVBoxLayout(self.video_controls)
-        video_layout.setContentsMargins(0, 6, 0, 0)
+        video_layout.setSpacing(8)
+        reference_row = QHBoxLayout()
+        reference_row.addWidget(QLabel("参考视频"))
         self.reference_combo = QComboBox()
         self.reference_combo.currentIndexChanged.connect(self._on_reference_changed)
-        video_layout.addWidget(QLabel("校准参考视频"))
-        video_layout.addWidget(self.reference_combo)
+        reference_row.addWidget(self.reference_combo, 1)
+        video_layout.addLayout(reference_row)
 
         calibration_box = QFrame()
         calibration_box.setStyleSheet(
-            "QFrame{background:#F6F8FA;border:1px solid #DCE4EC;border-radius:5px}"
+            "QFrame{background:#F7F9FC;border:1px solid #E0E6ED;border-radius:8px}"
         )
         calibration_layout = QFormLayout(calibration_box)
         calibration_layout.setContentsMargins(8, 8, 8, 8)
-        calibration_layout.addRow(QLabel("时间校准"), QLabel("左侧原始时间 — 右侧真实时间"))
         time_row = QHBoxLayout()
         self.calibration_left = QDateTimeEdit()
         self.calibration_left.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
@@ -258,7 +254,7 @@ class LibraryPanel(QWidget):
         self.calibration_right.setSpecialValueText("不校准")
         self.calibration_right.editingFinished.connect(self._on_right_time_changed)
         time_row.addWidget(self.calibration_right)
-        calibration_layout.addRow(time_row)
+        calibration_layout.addRow("原始时间 → 真实时间", time_row)
         video_layout.addWidget(calibration_box)
 
         action_row = QHBoxLayout()
@@ -268,13 +264,9 @@ class LibraryPanel(QWidget):
         self.btn_export = QPushButton("导出")
         self.btn_export.clicked.connect(self._request_export)
         action_row.addWidget(self.btn_export)
+        action_row.addStretch()
         video_layout.addLayout(action_row)
-        video_layout.addStretch()
-        controls_layout.addWidget(self.video_controls)
-        controls_layout.addStretch()
-        splitter.addWidget(controls)
-        splitter.setSizes([340, 340])
-        layout.addWidget(splitter)
+        layout.addWidget(self.video_controls)
         self.video_controls.setVisible(False)
 
     def set_directories(self, music_dirs: list[str], video_dirs: list[str]):
@@ -324,7 +316,7 @@ class LibraryPanel(QWidget):
 
     def _refresh_folders(self):
         is_video = self._mode == "video"
-        self.title.setText(f"素材库（{'视频' if is_video else '音乐'}模式）")
+        self.title.setText(f"{'视频' if is_video else '音乐'}素材文件夹")
         self.btn_add.setText(f"添加{'视频' if is_video else '音乐'}文件夹")
         self.video_controls.setVisible(is_video)
         self.folder_browser.set_roots(self._directories[self._mode])

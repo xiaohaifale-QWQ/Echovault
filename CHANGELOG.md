@@ -10,6 +10,17 @@
 - Applied a unified warm-white, rounded visual system to buttons, inputs, tabs,
   tables, cards, menus, progress bars, and scrollbars. Primary actions now use the
   same blue hierarchy throughout the desktop application.
+- Completed a full screenshot audit of all workspaces and primary dialogs. Removed
+  duplicated Batch Tasks entries and decorative glyphs, prevented inactive material
+  actions from looking enabled, and replaced native spin-box arrows with clean
+  text-entry controls.
+- Rebalanced each task page: the material table prioritizes cover and song name,
+  lyric translation no longer duplicates the original lyric pane, Audio Editing
+  uses scrollable tool and parameter rails, Vocal Separation preserves full controls
+  through a scrollable layout, Batch Tasks uses three compact cards, and phone
+  transfer toolbars no longer cover the result table.
+- Localized Settings, Key Manager, and Help dialog action buttons and sized each
+  settings category to its actual content instead of inheriting the largest page.
 - Replaced the seven equal right-side tabs with four task-oriented workspaces:
   Materials, Lyrics & Tags, Audio Editing, and Export & Transfer. Existing detailed
   behaviors remain available inside the relevant workspace instead of competing at

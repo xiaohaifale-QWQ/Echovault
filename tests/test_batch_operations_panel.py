@@ -1,3 +1,5 @@
+from PyQt6.QtWidgets import QFrame
+
 from core.config import AppConfig
 from core.online_lyrics import LyricsMatch, MediaSearchMetadata
 from tests.qt_test_app import ensure_app, keep_widget
@@ -40,6 +42,13 @@ def test_batch_panel_consolidates_three_operations_and_reports_scope():
     assert "可翻译 1 个" in panel.scope_label.text()
     assert panel.apply_best_checkbox.isChecked() is False
     assert panel.minimum_score.value() == 80
+    assert len(
+        [
+            card
+            for card in panel.findChildren(QFrame)
+            if card.objectName() == "batchTaskCard"
+        ]
+    ) == 3
 
 
 def test_batch_online_worker_reports_best_match_without_writing(monkeypatch, tmp_path):

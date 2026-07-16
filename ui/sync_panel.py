@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -405,12 +406,13 @@ class SyncPanel(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        title = QLabel("手机传输")
-        title.setStyleSheet("font-weight: bold; font-size: 14px; padding: 3px;")
-        layout.addWidget(title)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
 
         receive_group = QGroupBox("1. 从手机接收")
+        receive_group.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
         receive_layout = QVBoxLayout(receive_group)
         path_row = QHBoxLayout()
         self.receive_dir_input = QLineEdit(self.config.transfer.receive_dir)
@@ -437,6 +439,7 @@ class SyncPanel(QWidget):
         self.receive_progress.setVisible(False)
         receive_layout.addWidget(self.receive_progress)
         self.recent_received = QLabel("")
+        self.recent_received.setVisible(False)
         receive_layout.addWidget(self.recent_received)
         layout.addWidget(receive_group)
 
@@ -460,18 +463,30 @@ class SyncPanel(QWidget):
         self.outbox_path_label.setStyleSheet("font-size:11px;color:#666")
         outbox_row.addWidget(QLabel("待回传目录："))
         outbox_row.addWidget(self.outbox_path_label, 1)
-        self.select_all_diffs_button = QPushButton("全选差异")
-        self.select_all_diffs_button.clicked.connect(self._select_all_diffs)
-        outbox_row.addWidget(self.select_all_diffs_button)
-        self.clear_selection_button = QPushButton("清除选择")
-        self.clear_selection_button.clicked.connect(self._clear_selection)
-        outbox_row.addWidget(self.clear_selection_button)
         open_outbox = QPushButton("打开待回传目录")
         open_outbox.clicked.connect(self._open_outbox)
         outbox_row.addWidget(open_outbox)
         task_layout.addLayout(outbox_row)
         self.task_status = QLabel("尚未收到手机文件")
-        task_layout.addWidget(self.task_status)
+        self.task_status.setStyleSheet("color:#526073")
+
+        result_toolbar = QHBoxLayout()
+        result_toolbar.addWidget(self.task_status, 1)
+        self.select_all_diffs_button = QPushButton("全选差异")
+        self.select_all_diffs_button.clicked.connect(self._select_all_diffs)
+        result_toolbar.addWidget(self.select_all_diffs_button)
+        self.clear_selection_button = QPushButton("清除选择")
+        self.clear_selection_button.clicked.connect(self._clear_selection)
+        result_toolbar.addWidget(self.clear_selection_button)
+        preview = QPushButton("查看选中文件")
+        preview.clicked.connect(self._preview_selected)
+        result_toolbar.addWidget(preview)
+        open_file = QPushButton("打开文件")
+        open_file.clicked.connect(self._open_selected_file)
+        result_toolbar.addWidget(open_file)
+        self.selection_summary = QLabel("已选择 0 个文件")
+        result_toolbar.addWidget(self.selection_summary)
+        task_layout.addLayout(result_toolbar)
 
         self.diff_table = QTableWidget(0, 6)
         self.diff_table.setHorizontalHeaderLabels(
@@ -483,24 +498,16 @@ class SyncPanel(QWidget):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.diff_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.diff_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.diff_table.setMinimumHeight(170)
         self.diff_table.itemChanged.connect(self._selection_changed)
         self.diff_table.cellDoubleClicked.connect(lambda _row, _column: self._preview_selected())
         task_layout.addWidget(self.diff_table, 1)
-
-        diff_actions = QHBoxLayout()
-        preview = QPushButton("查看选中文件")
-        preview.clicked.connect(self._preview_selected)
-        open_file = QPushButton("打开文件")
-        open_file.clicked.connect(self._open_selected_file)
-        self.selection_summary = QLabel("已选择 0 个文件")
-        diff_actions.addWidget(preview)
-        diff_actions.addWidget(open_file)
-        diff_actions.addStretch()
-        diff_actions.addWidget(self.selection_summary)
-        task_layout.addLayout(diff_actions)
         layout.addWidget(task_group, 1)
 
         send_group = QGroupBox("3. 把处理结果传回手机")
+        send_group.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
         send_layout = QVBoxLayout(send_group)
         device_row = QHBoxLayout()
         self.device_combo = QComboBox()
@@ -509,18 +516,17 @@ class SyncPanel(QWidget):
         discover = QPushButton("刷新设备")
         discover.clicked.connect(self._refresh_devices)
         device_row.addWidget(discover)
-        send_layout.addLayout(device_row)
-        action_row = QHBoxLayout()
         self.send_button = QPushButton("发送选中的文件到手机")
         self.send_button.setMinimumHeight(38)
+        self.send_button.setMinimumWidth(250)
         self.send_button.setEnabled(False)
         self.send_button.clicked.connect(self._send_selected)
         self.cancel_send_button = QPushButton("取消")
         self.cancel_send_button.setVisible(False)
         self.cancel_send_button.clicked.connect(self._cancel_send)
-        action_row.addWidget(self.send_button, 1)
-        action_row.addWidget(self.cancel_send_button)
-        send_layout.addLayout(action_row)
+        device_row.addWidget(self.send_button)
+        device_row.addWidget(self.cancel_send_button)
+        send_layout.addLayout(device_row)
         self.send_progress = QProgressBar()
         self.send_progress.setVisible(False)
         send_layout.addWidget(self.send_progress)
@@ -530,6 +536,9 @@ class SyncPanel(QWidget):
         layout.addWidget(send_group)
 
         self.advanced_group = QGroupBox("高级文件夹同步")
+        self.advanced_group.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
         self.advanced_group.setCheckable(True)
         self.advanced_group.setChecked(False)
         advanced_layout = QVBoxLayout(self.advanced_group)
@@ -627,6 +636,7 @@ class SyncPanel(QWidget):
 
     def _on_file_received_ui(self, path):
         self.recent_received.setText(f"最近接收：{Path(path).name}")
+        self.recent_received.setVisible(True)
 
     def _on_session_completed_ui(self, payload):
         self.receive_progress.setVisible(False)

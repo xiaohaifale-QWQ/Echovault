@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
-    QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -24,8 +23,8 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSlider,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -289,23 +288,34 @@ class VocalSeparationPanel(QWidget):
         self._apply_system_audio_output()
 
     def _setup_ui(self):
-        root = QVBoxLayout(self)
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        root.addWidget(splitter)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        content.setMinimumHeight(720)
+        root = QVBoxLayout(content)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+        self.content_scroll = scroll
 
-        top_widget = QWidget()
-        top_layout = QVBoxLayout(top_widget)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        selected_group = QGroupBox("已选中")
+        selected_group = QGroupBox("已选素材")
         selected_layout = QHBoxLayout(selected_group)
         self.selected_song_label = QLabel("尚未从左侧选择素材")
         self.selected_song_label.setWordWrap(True)
         self.selected_song_label.setStyleSheet("font-weight:600;color:#234")
         selected_layout.addWidget(self.selected_song_label)
-        top_layout.addWidget(selected_group)
+        root.addWidget(selected_group)
 
         settings_group = QGroupBox("处理设置")
-        form = QFormLayout(settings_group)
+        settings_layout = QVBoxLayout(settings_group)
+        form = QGridLayout()
+        form.setColumnStretch(1, 1)
+        form.setColumnStretch(3, 1)
         self.output_type_combo = QComboBox()
         self.output_type_combo.addItem("人声 + 伴奏（推荐）", "both")
         self.output_type_combo.addItem("仅人声", "vocals")
@@ -313,24 +323,27 @@ class VocalSeparationPanel(QWidget):
         self.output_type_combo.currentIndexChanged.connect(
             self._update_enhancement_availability
         )
-        form.addRow("输出内容:", self.output_type_combo)
+        form.addWidget(QLabel("输出内容"), 0, 0)
+        form.addWidget(self.output_type_combo, 0, 1)
         self.format_combo = QComboBox()
         self.format_combo.addItem("WAV（无损）", "wav")
-        form.addRow("音频格式:", self.format_combo)
+        form.addWidget(QLabel("音频格式"), 0, 2)
+        form.addWidget(self.format_combo, 0, 3)
 
-        output_row = QHBoxLayout()
         self.output_input = QLineEdit()
         self.output_input.setPlaceholderText("选择输出目录")
-        output_row.addWidget(self.output_input, 1)
         browse_button = QPushButton("浏览")
         browse_button.clicked.connect(self._browse_output)
-        output_row.addWidget(browse_button)
-        form.addRow("输出目录:", output_row)
+        form.addWidget(QLabel("输出目录"), 1, 0)
+        form.addWidget(self.output_input, 1, 1, 1, 2)
+        form.addWidget(browse_button, 1, 3)
 
         self.denoise_check = QCheckBox("AI 降噪（UVR DeNoise Lite）")
-        form.addRow("增强处理:", self.denoise_check)
         self.reverb_check = QCheckBox("去回声/混响（UVR DeEcho-DeReverb）")
-        form.addRow("", self.reverb_check)
+        form.addWidget(QLabel("增强处理"), 2, 0)
+        form.addWidget(self.denoise_check, 2, 1)
+        form.addWidget(self.reverb_check, 2, 2, 1, 2)
+        settings_layout.addLayout(form)
 
         action_row = QHBoxLayout()
         self.start_button = QPushButton("▶ 开始处理")
@@ -342,19 +355,19 @@ class VocalSeparationPanel(QWidget):
         self.cancel_button.clicked.connect(self._cancel_separation)
         action_row.addWidget(self.cancel_button)
         action_row.addStretch()
-        form.addRow("", action_row)
+        settings_layout.addLayout(action_row)
         self.processing_progress = QProgressBar()
         self.processing_progress.setVisible(False)
-        form.addRow("处理进度:", self.processing_progress)
+        settings_layout.addWidget(self.processing_progress)
         self.processing_status = QLabel("")
         self.processing_status.setWordWrap(True)
         self.processing_status.setStyleSheet("color:#555")
-        form.addRow("", self.processing_status)
-        top_layout.addWidget(settings_group)
-        splitter.addWidget(top_widget)
+        settings_layout.addWidget(self.processing_status)
+        root.addWidget(settings_group)
 
-        mixer_group = QGroupBox("音量调节台")
+        mixer_group = QGroupBox("音轨试听与调音")
         mixer_layout = QVBoxLayout(mixer_group)
+        mixer_layout.setSpacing(7)
         self.current_file_label = QLabel("完成分离后可试听和调节两条音轨")
         self.current_file_label.setStyleSheet("color:#666")
         mixer_layout.addWidget(self.current_file_label)
@@ -377,10 +390,14 @@ class VocalSeparationPanel(QWidget):
 
         mixer_layout.addWidget(QLabel("伴奏"))
         self.accompaniment_waveform = WaveformView("#2A9D9B")
+        self.accompaniment_waveform.setMinimumHeight(64)
+        self.accompaniment_waveform.setMaximumHeight(90)
         self.accompaniment_waveform.seek_requested.connect(self._seek_to_ratio)
         mixer_layout.addWidget(self.accompaniment_waveform)
         mixer_layout.addWidget(QLabel("人声"))
         self.vocal_waveform = WaveformView("#D97845")
+        self.vocal_waveform.setMinimumHeight(64)
+        self.vocal_waveform.setMaximumHeight(90)
         self.vocal_waveform.seek_requested.connect(self._seek_to_ratio)
         mixer_layout.addWidget(self.vocal_waveform)
 
@@ -431,10 +448,7 @@ class VocalSeparationPanel(QWidget):
         self.save_mix_button.clicked.connect(self._save_mix)
         save_mix_row.addWidget(self.save_mix_button)
         mixer_layout.addLayout(save_mix_row)
-        splitter.addWidget(mixer_group)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([360, 360])
+        root.addWidget(mixer_group, 1)
         self._update_enhancement_availability()
 
     def _update_enhancement_availability(self, _index: int = -1):

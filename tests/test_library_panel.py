@@ -101,7 +101,7 @@ def test_select_all_precedes_add_folder_and_mode_text_is_on_the_switch():
     select_all_index = panel.folder_header.indexOf(panel.select_all_check)
     add_folder_index = panel.folder_header.indexOf(panel.btn_add)
     assert select_all_index < add_folder_index
-    assert panel.mode_switch.minimumHeight() == 54
+    assert panel.mode_switch.minimumHeight() == 40
 
 
 def test_removing_added_root_keeps_source_files_and_refreshes_roots(tmp_path):
@@ -137,4 +137,4 @@ def test_few_material_columns_expand_to_fill_the_available_width(tmp_path):
 
     columns = [listing.parentWidget() for _, listing in panel.folder_browser._columns]
     assert len(columns) == 2
-    assert all(column.width() > 238 for column in columns)
+    assert all(column.width() > 210 for column in columns)
