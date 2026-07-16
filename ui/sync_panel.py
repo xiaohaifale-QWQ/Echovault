@@ -383,7 +383,9 @@ class SyncPanel(QWidget):
     def __init__(self, parent=None, session_manager=None):
         super().__init__(parent)
         self.config = config_manager.load()
-        self.session_manager = session_manager or TransferSessionManager()
+        self.session_manager = session_manager or TransferSessionManager(
+            outbox_dir=self.config.transfer.outbox_dir or None
+        )
         self._localsend = None
         self._devices: dict[str, LocalSendDevice] = {}
         self._sessions: list[TransferSession] = []
@@ -449,6 +451,16 @@ class SyncPanel(QWidget):
         open_workspace.clicked.connect(self._open_workspace)
         task_row.addWidget(open_workspace)
         task_layout.addLayout(task_row)
+        outbox_row = QHBoxLayout()
+        self.outbox_path_label = QLabel(str(self.session_manager.outbox_dir))
+        self.outbox_path_label.setWordWrap(True)
+        self.outbox_path_label.setStyleSheet("font-size:11px;color:#666")
+        outbox_row.addWidget(QLabel("待回传目录："))
+        outbox_row.addWidget(self.outbox_path_label, 1)
+        open_outbox = QPushButton("打开待回传目录")
+        open_outbox.clicked.connect(self._open_outbox)
+        outbox_row.addWidget(open_outbox)
+        task_layout.addLayout(outbox_row)
         self.task_status = QLabel("尚未收到手机文件")
         task_layout.addWidget(self.task_status)
 
@@ -460,7 +472,6 @@ class SyncPanel(QWidget):
             ("新生成", "generated"),
             ("已修改", "modified"),
             ("原始文件", "unchanged"),
-            ("已发送", "returned"),
         ]:
             self.filter_combo.addItem(text, value)
         self.filter_combo.currentIndexChanged.connect(self._populate_diff_table)
@@ -545,6 +556,13 @@ class SyncPanel(QWidget):
         self.folder_sync_panel.set_dir_a(folder_path)
         if not self.receive_dir_input.text().strip():
             self.receive_dir_input.setText(str(Path(folder_path) / "Echovault接收"))
+        if not self.config.transfer.outbox_dir:
+            outbox = Path(folder_path) / "Echovault输出" / "待回传"
+            self.config.transfer.outbox_dir = str(outbox)
+            self.session_manager.outbox_dir = outbox
+            self.outbox_path_label.setText(str(outbox))
+            config_manager.config = self.config
+            config_manager.save()
 
     def _browse_receive_dir(self):
         directory = QFileDialog.getExistingDirectory(self, "选择手机文件接收目录")
@@ -678,8 +696,12 @@ class SyncPanel(QWidget):
                 diff.path for diff in self._diffs if diff.recommended
             )
             self._selection_initialized.add(self._current_session.session_id)
-        generated = sum(diff.status == "generated" for diff in self._diffs)
-        modified = sum(diff.status == "modified" for diff in self._diffs)
+        generated = sum(
+            diff.status == "generated" and not diff.returned for diff in self._diffs
+        )
+        modified = sum(
+            diff.status == "modified" and not diff.returned for diff in self._diffs
+        )
         self.task_status.setText(
             f"原始文件 {len(self._current_session.original_files)} 个，"
             f"新生成 {generated} 个，已修改 {modified} 个。"
@@ -688,13 +710,12 @@ class SyncPanel(QWidget):
 
     def _filtered_diffs(self):
         value = self.filter_combo.currentData()
+        pending = [diff for diff in self._diffs if not diff.returned]
         if value == "all":
-            return self._diffs
+            return pending
         if value == "recommended":
-            return [diff for diff in self._diffs if diff.recommended]
-        if value == "returned":
-            return [diff for diff in self._diffs if diff.returned]
-        return [diff for diff in self._diffs if diff.status == value]
+            return [diff for diff in pending if diff.recommended]
+        return [diff for diff in pending if diff.status == value]
 
     def _populate_diff_table(self):
         diffs = self._filtered_diffs()
@@ -791,6 +812,12 @@ class SyncPanel(QWidget):
             QDesktopServices.openUrl(
                 QUrl.fromLocalFile(self._current_session.workspace)
             )
+
+    def _open_outbox(self):
+        self.session_manager.outbox_dir.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(self.session_manager.outbox_dir))
+        )
 
     def _refresh_devices(self):
         if self._localsend:

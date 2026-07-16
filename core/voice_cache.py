@@ -8,16 +8,51 @@ from datetime import datetime
 from pathlib import Path
 
 
-def voice_cache_dir(cache_root: str | Path | None = None) -> Path:
-    """Return the app-owned cache directory, creating it when needed."""
+def app_cache_dir(cache_root: str | Path | None = None) -> Path:
     root = (
         Path(cache_root)
         if cache_root is not None
         else Path.home() / ".music-lyrics-sync" / "cache"
     )
-    directory = root / "voice-input"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def voice_cache_dir(cache_root: str | Path | None = None) -> Path:
+    """Return the app-owned cache directory, creating it when needed."""
+    directory = app_cache_dir(cache_root) / "voice-input"
     directory.mkdir(parents=True, exist_ok=True)
     return directory
+
+
+def sent_transfer_cache_dir(cache_root: str | Path | None = None) -> Path:
+    directory = app_cache_dir(cache_root) / "sent-transfer"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _directory_stats(directory: Path) -> tuple[int, int]:
+    count = 0
+    size = 0
+    if directory.exists():
+        for path in directory.rglob("*"):
+            if path.is_file():
+                count += 1
+                size += path.stat().st_size
+    return count, size
+
+
+def cache_stats(cache_root: str | Path | None = None) -> dict[str, int]:
+    voice_count, voice_size = _directory_stats(voice_cache_dir(cache_root))
+    sent_count, sent_size = _directory_stats(sent_transfer_cache_dir(cache_root))
+    return {
+        "voice_count": voice_count,
+        "voice_size": voice_size,
+        "sent_count": sent_count,
+        "sent_size": sent_size,
+        "total_count": voice_count + sent_count,
+        "total_size": voice_size + sent_size,
+    }
 
 
 def new_recording_path(cache_root: str | Path | None = None) -> Path:
@@ -58,3 +93,21 @@ def clear_voice_cache(cache_root: str | Path | None = None) -> int:
             item.unlink()
         removed += 1
     return removed
+
+
+def clear_sent_transfer_cache(cache_root: str | Path | None = None) -> int:
+    directory = sent_transfer_cache_dir(cache_root)
+    count, _size = _directory_stats(directory)
+    for item in directory.iterdir():
+        if item.is_dir():
+            shutil.rmtree(item)
+        else:
+            item.unlink()
+    return count
+
+
+def clear_app_cache(cache_root: str | Path | None = None) -> dict[str, int]:
+    before = cache_stats(cache_root)
+    clear_voice_cache(cache_root)
+    clear_sent_transfer_cache(cache_root)
+    return before

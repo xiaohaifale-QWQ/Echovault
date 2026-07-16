@@ -4,6 +4,11 @@
 
 ### Added
 
+- Processing artifacts from phone-transfer tasks are staged in a dedicated Pending
+  Return folder. Same-volume files use NTFS hard links when possible, avoiding a
+  second large WAV allocation while keeping the formal processing output intact.
+- Cache settings now show voice-cache and sent-transfer-cache file counts and sizes.
+
 - Replaced the primary Sync tab with a phone-transfer workflow that receives each
   LocalSend batch as a persistent task, records the original file baseline, scans
   generated/modified processing outputs, supports selection and preview, discovers
@@ -17,6 +22,9 @@
 
 ### Changed
 
+- Successfully returned staging files are moved into the sent-transfer cache and
+  disappear from the normal transfer list. Clearing application cache removes these
+  archived return copies and voice recordings, but never pending files or formal outputs.
 - Existing A/B bidirectional and mirror folder synchronization is preserved under a
   collapsed Advanced Folder Sync section. The main workflow no longer presents a
   misleading "phone folder path".

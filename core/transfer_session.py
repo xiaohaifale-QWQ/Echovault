@@ -5,12 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 TEXT_SNAPSHOT_SUFFIXES = {".lrc", ".txt", ".json", ".csv"}
+DEFAULT_OUTBOX_DIR = Path.home() / ".music-lyrics-sync" / "transfer-outbox" / "pending"
+DEFAULT_SENT_CACHE_DIR = Path.home() / ".music-lyrics-sync" / "cache" / "sent-transfer"
 
 
 def file_sha256(path: str | Path) -> str:
@@ -49,10 +52,17 @@ class TransferSession:
 class TransferSessionManager:
     DEFAULT_ROOT = Path.home() / ".music-lyrics-sync" / "transfers"
 
-    def __init__(self, root: str | Path | None = None):
+    def __init__(
+        self,
+        root: str | Path | None = None,
+        outbox_dir: str | Path | None = None,
+        sent_cache_dir: str | Path | None = None,
+    ):
         self.root = Path(root or self.DEFAULT_ROOT)
         self.sessions_dir = self.root / "sessions"
         self.snapshots_dir = self.root / "text-snapshots"
+        self.outbox_dir = Path(outbox_dir or DEFAULT_OUTBOX_DIR)
+        self.sent_cache_dir = Path(sent_cache_dir or DEFAULT_SENT_CACHE_DIR)
 
     def create_session(
         self,
@@ -152,19 +162,38 @@ class TransferSessionManager:
         output = Path(output_path).resolve()
         if session is None or not output.exists():
             return False
+        staged = self._stage_artifact(session, output, operation)
         entry = {
             "source_path": str(Path(source_path).resolve()),
-            "path": str(output),
+            "original_output_path": str(output),
+            "path": str(staged),
             "operation": operation,
             "registered_at": datetime.now().astimezone().isoformat(),
         }
         session.artifacts = [
-            item for item in session.artifacts if item.get("path") != entry["path"]
+            item
+            for item in session.artifacts
+            if item.get("original_output_path") != entry["original_output_path"]
         ]
         session.artifacts.append(entry)
         session.status = "ready_review"
         self.save(session)
         return True
+
+    def _stage_artifact(
+        self,
+        session: TransferSession,
+        output: Path,
+        operation: str,
+    ) -> Path:
+        destination = self.outbox_dir / session.session_id / operation / output.name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.unlink(missing_ok=True)
+        try:
+            os.link(output, destination)
+        except OSError:
+            shutil.copy2(output, destination)
+        return destination
 
     def record_return(
         self,
@@ -173,16 +202,43 @@ class TransferSessionManager:
         device: dict[str, Any],
         results: list[dict[str, Any]],
     ) -> None:
+        archived_results = []
+        for result in results:
+            item = dict(result)
+            path = Path(str(item.get("path", "")))
+            if item.get("status") in {"sent", "skipped"} and path.is_file():
+                try:
+                    relative = path.resolve().relative_to(self.outbox_dir.resolve())
+                except ValueError:
+                    relative = Path(session.session_id) / path.name
+                archived = self.sent_cache_dir / relative
+                archived.parent.mkdir(parents=True, exist_ok=True)
+                archived.unlink(missing_ok=True)
+                try:
+                    os.replace(path, archived)
+                except OSError:
+                    shutil.move(str(path), str(archived))
+                item["path"] = str(archived)
+                item["staged_path"] = str(path)
+                for artifact in session.artifacts:
+                    if artifact.get("path") == str(path):
+                        artifact["path"] = str(archived)
+                        artifact["archived"] = True
+            archived_results.append(item)
         session.return_history.append(
             {
                 "device": device,
                 "sent_at": datetime.now().astimezone().isoformat(),
-                "results": results,
+                "results": archived_results,
             }
         )
         session.status = (
             "returned"
-            if results and all(item.get("status") in {"sent", "skipped"} for item in results)
+            if archived_results
+            and all(
+                item.get("status") in {"sent", "skipped"}
+                for item in archived_results
+            )
             else "partially_failed"
         )
         self.save(session)
@@ -195,6 +251,11 @@ def register_artifact(
 ) -> bool:
     """Register an output only when its source belongs to a phone-transfer session."""
     try:
-        return TransferSessionManager().register_artifact(source_path, output_path, operation)
+        from core.config import config_manager
+
+        config = config_manager.load()
+        return TransferSessionManager(
+            outbox_dir=config.transfer.outbox_dir or None
+        ).register_artifact(source_path, output_path, operation)
     except OSError:
         return False

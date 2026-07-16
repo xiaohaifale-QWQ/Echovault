@@ -31,7 +31,13 @@ from core.process_utils import hidden_window_kwargs
 from core.runtime_detection import detect_hardware, select_runtime
 from core.runtime_manager import RuntimeInstallCancelled, RuntimeManagerError
 from core.runtime_setup import RuntimeSetupResult, RuntimeSetupService
-from core.voice_cache import clear_voice_cache, voice_cache_dir
+from core.voice_cache import (
+    app_cache_dir,
+    cache_stats,
+    clear_app_cache,
+    sent_transfer_cache_dir,
+    voice_cache_dir,
+)
 
 
 class _CurrentPageStack(QStackedWidget):
@@ -267,7 +273,7 @@ class SettingsDialog(QDialog):
     def __init__(self, config: AppConfig, parent=None, section: str = "recognition"):
         super().__init__(parent); self.config = config
         self.section = section
-        self._setup_ui(); self._load_config()
+        self._setup_ui(); self._load_config(); self._refresh_cache_stats()
 
     def _setup_ui(self):
         section_index = {
@@ -477,6 +483,16 @@ class SettingsDialog(QDialog):
         self.voice_cache_path.setWordWrap(True)
         self.voice_cache_path.setStyleSheet("font-size:11px;color:#666")
         cache_form.addRow("语音录音缓存:", self.voice_cache_path)
+        self.voice_cache_stats = QLabel("")
+        self.voice_cache_stats.setStyleSheet("font-size:11px;color:#666")
+        cache_form.addRow("语音缓存统计:", self.voice_cache_stats)
+        self.sent_cache_path = QLabel(str(sent_transfer_cache_dir()))
+        self.sent_cache_path.setWordWrap(True)
+        self.sent_cache_path.setStyleSheet("font-size:11px;color:#666")
+        cache_form.addRow("已发送文件缓存:", self.sent_cache_path)
+        self.sent_cache_stats = QLabel("")
+        self.sent_cache_stats.setStyleSheet("font-size:11px;color:#666")
+        cache_form.addRow("文件缓存统计:", self.sent_cache_stats)
         cache_actions = QHBoxLayout()
         open_cache_button = QPushButton("打开缓存文件夹")
         open_cache_button.clicked.connect(self._open_voice_cache)
@@ -846,23 +862,41 @@ class SettingsDialog(QDialog):
         if d: edit.setText(d)
 
     def _open_voice_cache(self):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(voice_cache_dir())))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_cache_dir())))
+
+    def _refresh_cache_stats(self):
+        stats = cache_stats()
+        self.voice_cache_stats.setText(
+            f"{stats['voice_count']} 个文件，{_format_cache_size(stats['voice_size'])}"
+        )
+        self.sent_cache_stats.setText(
+            f"{stats['sent_count']} 个文件，{_format_cache_size(stats['sent_size'])}"
+        )
+        self.cache_status.setText(
+            f"缓存合计：{stats['total_count']} 个文件，"
+            f"{_format_cache_size(stats['total_size'])}"
+        )
 
     def _clear_voice_cache(self):
         reply = QMessageBox.question(
             self,
-            "清理语音缓存",
-            "将删除本机语音输入录音缓存，不会删除模型、素材或歌词。是否继续？",
+            "清理缓存",
+            "将删除语音录音和已成功回传的文件缓存；"
+            "不会删除待回传文件、模型、素材或正式处理结果。是否继续？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
         try:
-            removed = clear_voice_cache()
+            removed = clear_app_cache()
         except OSError as exc:
             QMessageBox.warning(self, "清理缓存", f"无法清理缓存：{exc}")
             return
-        self.cache_status.setText(f"已清理 {removed} 个语音缓存文件。")
+        self._refresh_cache_stats()
+        self.cache_status.setText(
+            f"已清理 {removed['total_count']} 个缓存文件，"
+            f"释放 {_format_cache_size(removed['total_size'])}。"
+        )
 
     def _save(self):
         c = self.config
@@ -891,3 +925,12 @@ class SettingsDialog(QDialog):
         c.translation_target_language = self.translation_target_combo.currentData()
         config_manager.config = c; config_manager.save()
         self.accept()
+
+
+def _format_cache_size(size: int) -> str:
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.2f} {unit}"
+        value /= 1024
+    return f"{size} B"

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-CONFIG_SCHEMA_VERSION = 7
+CONFIG_SCHEMA_VERSION = 8
 SUPPORTED_AI_PROVIDERS = {"online", "local"}
 SUPPORTED_TRANSLATION_ENGINES = {"ai", "local"}
 SUPPORTED_PROVIDERS = {"groq", "local", "xunfei"}
@@ -45,6 +45,7 @@ class TransferConfig:
     """手机 LocalSend 接收、任务和回传配置。"""
 
     receive_dir: str = ""
+    outbox_dir: str = ""
     auto_start_receiver: bool = False
     device_alias: str = "Echovault"
     concurrent_uploads: int = 2
@@ -190,6 +191,7 @@ class ConfigManager:
             },
             "transfer": {
                 "receive_dir": c.transfer.receive_dir,
+                "outbox_dir": c.transfer.outbox_dir,
                 "auto_start_receiver": c.transfer.auto_start_receiver,
                 "device_alias": c.transfer.device_alias,
                 "concurrent_uploads": c.transfer.concurrent_uploads,
@@ -272,6 +274,7 @@ class ConfigManager:
         c.sync.remote_dir = sync_data.get("remote_dir", "")
         transfer_data = data.get("transfer", {})
         c.transfer.receive_dir = str(transfer_data.get("receive_dir", ""))
+        c.transfer.outbox_dir = str(transfer_data.get("outbox_dir", ""))
         c.transfer.auto_start_receiver = bool(
             transfer_data.get("auto_start_receiver", False)
         )

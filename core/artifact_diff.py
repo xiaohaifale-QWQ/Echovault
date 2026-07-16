@@ -48,6 +48,11 @@ def scan_session_diffs(
         for item in session.artifacts
         if item.get("path")
     }
+    artifact_sources = {
+        str(Path(item.get("original_output_path", "")).resolve())
+        for item in session.artifacts
+        if item.get("original_output_path")
+    }
     returned_paths = {
         str(Path(result["path"]).resolve())
         for history in session.return_history
@@ -79,6 +84,8 @@ def scan_session_diffs(
         if strict_hash and not changed:
             changed = file_sha256(path) != original.get("sha256", "")
         absolute = str(path.resolve())
+        if absolute in artifact_sources:
+            continue
         diffs.append(
             ArtifactDiff(
                 path=absolute,
@@ -93,6 +100,8 @@ def scan_session_diffs(
 
     for relative_path, path in current.items():
         absolute = str(path.resolve())
+        if absolute in artifact_sources:
+            continue
         metadata = artifacts.get(absolute, {})
         diffs.append(
             ArtifactDiff(
