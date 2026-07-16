@@ -1,5 +1,7 @@
 import hashlib
 import logging
+import sys
+import types
 from pathlib import Path
 
 from core import audio_enhancement
@@ -88,7 +90,12 @@ def test_enhance_audio_writes_requested_clean_stem(monkeypatch, tmp_path):
             # Some frozen audio-separator builds write the file but return an empty list.
             return []
 
-    monkeypatch.setattr("audio_separator.separator.Separator", FakeSeparator)
+    separator_module = types.ModuleType("audio_separator.separator")
+    separator_module.Separator = FakeSeparator
+    package_module = types.ModuleType("audio_separator")
+    package_module.separator = separator_module
+    monkeypatch.setitem(sys.modules, "audio_separator", package_module)
+    monkeypatch.setitem(sys.modules, "audio_separator.separator", separator_module)
 
     result = audio_enhancement.enhance_audio(
         source, output, model="test", progress=lambda *_args: None
