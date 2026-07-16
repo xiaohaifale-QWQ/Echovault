@@ -99,11 +99,23 @@ class LocalSendReceiver:
     def _start_https_server(self):
         r = self
         class H(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
             def log_message(s, *a): pass
             def _json(s, d, st=200):
                 b = json.dumps(d, ensure_ascii=False).encode()
-                s.send_response(st); s.send_header("Content-Type", "application/json")
-                s.send_header("Content-Length", str(len(b))); s.end_headers(); s.wfile.write(b)
+                s.send_response(st)
+                s.send_header("Content-Type", "application/json; charset=utf-8")
+                s.send_header("Content-Length", str(len(b)))
+                s.end_headers()
+                if b:
+                    s.wfile.write(b)
+                s.wfile.flush()
+            def _empty(s, st=204):
+                s.send_response(st)
+                s.send_header("Content-Length", "0")
+                s.end_headers()
+                s.wfile.flush()
             def _read(s):
                 n = int(s.headers.get("Content-Length", 0))
                 return json.loads(s.rfile.read(n)) if n else {}
@@ -143,7 +155,7 @@ class LocalSendReceiver:
                     tk = uuid.uuid4().hex[:16]; tokens[fid] = tk
                     sf[fid] = {"name":nm,"size":sz,"token":tk}
                 if skipped: logger.info(f"skip {skipped} dups")
-                if not sf: s.send_response(204); s.end_headers(); return
+                if not sf: s._empty(204); return
                 workspace.mkdir(parents=True, exist_ok=True)
                 info = dict(d.get("info", {}))
                 info["ip"] = s.client_address[0]
@@ -198,7 +210,6 @@ class LocalSendReceiver:
                     if temp_path.exists(): temp_path.unlink()
                     logger.error(f"upload failed: {exc}"); s._json({"message":"write failed"},500); return
                 logger.info(f"received: {safe} ({received}B)")
-                if r.on_file_received: r.on_file_received(str(fp))
                 completed = None
                 with r._session_lock:
                     se["received"].add(fid); se["paths"].append(str(fp))
@@ -211,15 +222,26 @@ class LocalSendReceiver:
                             "received_at": datetime.datetime.now().astimezone().isoformat(),
                         }
                         del r._sessions[sid]
+                # Acknowledge the upload before indexing and UI callbacks. Current
+                # LocalSend clients treat a delayed/ambiguous final response as a
+                # failed transfer even when the complete file reached disk.
+                s._json({})
+                if r.on_file_received:
+                    try:
+                        r.on_file_received(str(fp))
+                    except Exception:
+                        logger.exception("file received callback failed")
                 if completed and r.on_session_completed:
-                    r.on_session_completed(completed)
-                s.send_response(200); s.end_headers()
+                    try:
+                        r.on_session_completed(completed)
+                    except Exception:
+                        logger.exception("session completion callback failed")
             def _cancel(s):
                 import urllib.parse; q = dict(urllib.parse.parse_qsl(s.path.split("?")[1])) if "?" in s.path else {}
                 sid = q.get("sessionId","")
                 with r._session_lock:
                     if sid in r._sessions: del r._sessions[sid]
-                s.send_response(200); s.end_headers()
+                s._json({})
             def _info(s):
                 s._json({"alias":r.alias,"version":PROTOCOL_VERSION,"deviceModel":"Windows",
                     "deviceType":DEVICE_TYPE,"fingerprint":r.fingerprint,"port":HTTP_PORT,

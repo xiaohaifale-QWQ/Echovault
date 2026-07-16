@@ -34,6 +34,7 @@ from core.ai_control import validate_cli_command
 from core.asr.router import get_router
 from core.config import config_manager
 from core.environment import build_environment_report
+from core.metadata import write_cover_art
 from core.resource_monitor import format_resource_usage, sample_resource_usage
 from core.video_aggregation import write_video_transcript_timeline
 from core.video_library import scan_video_catalog, scan_videos
@@ -47,6 +48,7 @@ from ui.library_panel import LibraryPanel
 from ui.lyrics_preview_panel import LyricsPreviewPanel
 from ui.model_library_dialog import ModelLibraryDialog
 from ui.online_lyrics_panel import (
+    CoverApplyAction,
     LyricsCalibrationWorker,
     OnlineLyricsComparisonPane,
     OnlineLyricsPanel,
@@ -479,6 +481,7 @@ class MainWindow(QMainWindow):
             "path": str(path),
             "lrc_path": str(lrc_path),
             "has_lrc": lrc_path.is_file(),
+            "material_type": self.library_panel.mode,
         }
         self.lyrics_preview_panel.show_song(song)
         self.vocal_lyrics_panel.show_song(song)
@@ -488,6 +491,39 @@ class MainWindow(QMainWindow):
     def _on_online_lyrics_action(self, media_path: str, payload, action: str):
         if action == "transcribe_local":
             self._on_transcribe_single(media_path)
+            return
+        if action == "apply_cover":
+            if not isinstance(payload, CoverApplyAction):
+                return
+            reply = QMessageBox.question(
+                self,
+                "写入音频封面",
+                f"将把当前封面写入音频标签：\n{media_path}\n\n"
+                "音频内容不会重新编码，是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                write_cover_art(
+                    media_path,
+                    payload.image_data,
+                    payload.mime_type,
+                )
+            except (OSError, ValueError, RuntimeError) as exc:
+                QMessageBox.warning(self, "写入封面失败", str(exc))
+                return
+            self.song_list_panel.invalidate_cover(media_path)
+            self.online_lyrics_panel.reload_cover()
+            self.online_lyrics_panel.status_label.setText(
+                "封面已写入音频标签，素材列表缩略图已刷新。"
+            )
+            self._online_catalog_dirty = True
+            QMessageBox.information(
+                self,
+                "封面已写入",
+                f"封面已写入：\n{media_path}\n\n来源：{payload.source}",
+            )
             return
 
         lrc_path = Path(media_path).with_suffix(".lrc")

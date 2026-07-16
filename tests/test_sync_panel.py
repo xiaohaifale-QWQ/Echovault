@@ -24,6 +24,8 @@ def test_sync_panel_uses_phone_task_workflow_and_hides_advanced_sync(
     )
 
     assert panel.receiver_button.text() == "开启接收"
+    assert panel.open_receive_button.text() == "打开目录"
+    assert panel.browse_receive_button.text() == "选择目录"
     assert panel.send_button.text() == "发送选中的文件到手机"
     assert panel.advanced_group.isCheckable()
     assert panel.advanced_group.isChecked() is False

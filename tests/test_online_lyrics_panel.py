@@ -1,8 +1,18 @@
+import base64
 from pathlib import Path
 
 from core.online_lyrics import LyricsMatch, MediaSearchMetadata
 from tests.qt_test_app import ensure_app, keep_widget
-from ui.online_lyrics_panel import OnlineLyricsComparisonPane, OnlineLyricsPanel
+from ui.online_lyrics_panel import (
+    CoverApplyAction,
+    OnlineLyricsComparisonPane,
+    OnlineLyricsPanel,
+)
+
+PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+    "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 
 
 def _match():
@@ -164,3 +174,41 @@ def test_online_panel_separates_music_and_video_sources():
 
     assert panel.song_selector.count() == 1
     assert panel.song_selector.itemText(0) == "[视频] Clip"
+    panel.song_selector.setCurrentIndex(0)
+    assert not panel.apply_cover_button.isEnabled()
+    assert not panel.local_cover_button.isEnabled()
+
+
+def test_online_panel_supports_online_and_local_cover_actions(monkeypatch, tmp_path):
+    ensure_app()
+    monkeypatch.setattr(
+        "ui.online_lyrics_panel.media_search_metadata",
+        lambda _path: MediaSearchMetadata("Song", "Singer", "Album", 10.0),
+    )
+    monkeypatch.setattr("ui.online_lyrics_panel.read_cover_art", lambda _path: None)
+    media_path = tmp_path / "Song.mp3"
+    media_path.write_bytes(b"audio")
+    panel = keep_widget(OnlineLyricsPanel())
+    panel.show_song(
+        {
+            "name": media_path.name,
+            "path": str(media_path),
+            "material_type": "music",
+        }
+    )
+    captured = []
+    panel.action_requested.connect(
+        lambda path, payload, action: captured.append((path, payload, action))
+    )
+
+    assert panel.search_cover_button.text() == "搜索在线封面"
+    assert panel.local_cover_button.text() == "选择本地封面"
+    assert panel.apply_cover_button.text() == "写入音频标签"
+
+    assert panel._set_cover_preview(PNG, "image/png", "本地封面：cover.png")
+    panel._request_cover_apply()
+
+    assert captured[0][0] == str(media_path)
+    assert captured[0][2] == "apply_cover"
+    assert isinstance(captured[0][1], CoverApplyAction)
+    assert captured[0][1].image_data == PNG

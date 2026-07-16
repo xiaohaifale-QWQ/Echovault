@@ -3,12 +3,13 @@
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor, QTextFormat
+from PyQt6.QtCore import QSize, Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QPixmap, QTextCharFormat, QTextCursor, QTextFormat
 from PyQt6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -27,6 +28,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.cover_art import (
+    CoverArtMatch,
+    download_cover_art,
+    image_mime_type,
+    search_cover_art,
+)
+from core.metadata import COVER_EDITABLE_FORMATS, read_cover_art
 from core.online_lyrics import (
     LyricsMatch,
     active_lrc_line_index,
@@ -49,6 +57,13 @@ class OnlineLyricsAction:
     online_content: str
 
 
+@dataclass(frozen=True)
+class CoverApplyAction:
+    image_data: bytes
+    mime_type: str
+    source: str
+
+
 class LRCLIBSearchWorker(QThread):
     completed = pyqtSignal(list)
     failed = pyqtSignal(str)
@@ -69,6 +84,45 @@ class LRCLIBSearchWorker(QThread):
                 duration=self.duration,
             )
             self.completed.emit(results)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class CoverSearchWorker(QThread):
+    completed = pyqtSignal(list)
+    failed = pyqtSignal(str)
+
+    def __init__(self, track_name, artist_name, album_name, parent=None):
+        super().__init__(parent)
+        self.track_name = track_name
+        self.artist_name = artist_name
+        self.album_name = album_name
+
+    def run(self):
+        try:
+            self.completed.emit(
+                search_cover_art(
+                    self.track_name,
+                    artist_name=self.artist_name,
+                    album_name=self.album_name,
+                )
+            )
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class CoverDownloadWorker(QThread):
+    completed = pyqtSignal(object, bytes, str)
+    failed = pyqtSignal(str)
+
+    def __init__(self, match: CoverArtMatch, parent=None):
+        super().__init__(parent)
+        self.match = match
+
+    def run(self):
+        try:
+            data, mime_type = download_cover_art(self.match.image_url)
+            self.completed.emit(self.match, data, mime_type)
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -350,6 +404,11 @@ class OnlineLyricsPanel(QWidget):
         self._songs: list[dict] = []
         self._song: dict = {}
         self._matches: list[LyricsMatch] = []
+        self._cover_matches: list[CoverArtMatch] = []
+        self._cover_image_data = b""
+        self._cover_mime_type = ""
+        self._cover_source = ""
+        self._cover_busy = False
         self._duration = 0.0
         self._comparison: OnlineLyricsComparisonPane | None = None
         self._setup_ui()
@@ -358,7 +417,7 @@ class OnlineLyricsPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         heading_row = QHBoxLayout()
-        heading = QLabel("在线歌词搜索与应用")
+        heading = QLabel("在线歌词与封面匹配")
         heading.setStyleSheet("font-weight:bold;font-size:14px;padding:4px")
         heading_row.addWidget(heading)
         heading_row.addStretch()
@@ -399,6 +458,44 @@ class OnlineLyricsPanel(QWidget):
         self.current_file_label.setWordWrap(True)
         self.current_file_label.setStyleSheet("font-size:11px;color:#666")
         layout.addWidget(self.current_file_label)
+
+        cover_group = QGroupBox("封面匹配")
+        cover_layout = QHBoxLayout(cover_group)
+        self.cover_preview = QLabel("暂无封面")
+        self.cover_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cover_preview.setFixedSize(112, 112)
+        self.cover_preview.setStyleSheet(
+            "QLabel{border:1px solid #CCD3DA;background:#F5F6F7;color:#888;}"
+        )
+        cover_layout.addWidget(self.cover_preview)
+        cover_controls = QVBoxLayout()
+        self.cover_selector = QComboBox()
+        self.cover_selector.setIconSize(QSize(42, 42))
+        self.cover_selector.setPlaceholderText("搜索后选择在线封面")
+        self.cover_selector.currentIndexChanged.connect(
+            self._on_cover_result_selected
+        )
+        cover_controls.addWidget(self.cover_selector)
+        cover_buttons = QHBoxLayout()
+        self.search_cover_button = QPushButton("搜索在线封面")
+        self.search_cover_button.clicked.connect(self._start_cover_search)
+        cover_buttons.addWidget(self.search_cover_button)
+        self.local_cover_button = QPushButton("选择本地封面")
+        self.local_cover_button.clicked.connect(self._choose_local_cover)
+        cover_buttons.addWidget(self.local_cover_button)
+        cover_controls.addLayout(cover_buttons)
+        self.apply_cover_button = QPushButton("写入音频标签")
+        self.apply_cover_button.clicked.connect(self._request_cover_apply)
+        cover_controls.addWidget(self.apply_cover_button)
+        self.cover_status_label = QLabel(
+            "支持在线匹配或本地 JPEG/PNG；写入时不改变音频内容。"
+        )
+        self.cover_status_label.setWordWrap(True)
+        self.cover_status_label.setStyleSheet("font-size:11px;color:#666")
+        cover_controls.addWidget(self.cover_status_label)
+        cover_controls.addStretch()
+        cover_layout.addLayout(cover_controls, 1)
+        layout.addWidget(cover_group)
 
         self.results_table = QTableWidget(0, 5)
         self.results_table.setHorizontalHeaderLabels(
@@ -524,6 +621,10 @@ class OnlineLyricsPanel(QWidget):
         self._song["lrc_path"] = str(lrc_path)
         self._song["has_lrc"] = lrc_path.is_file()
         self._matches = []
+        self._cover_matches = []
+        self.cover_selector.blockSignals(True)
+        self.cover_selector.clear()
+        self.cover_selector.blockSignals(False)
         if sync_selector:
             index = next(
                 (
@@ -548,11 +649,221 @@ class OnlineLyricsPanel(QWidget):
         self.results_table.setRowCount(0)
         if self._comparison is not None:
             self._comparison.show_song(self._song)
+        self.reload_cover()
         self.comparison_label.setText(
             "搜索并选择结果后，歌词会显示在左侧对照区的右半栏。"
         )
         self.status_label.setText("已选择本地素材，可以搜索公开歌词库。")
         self._refresh_action_state()
+
+    def reload_cover(self):
+        media_path = self._song.get("path", "")
+        if not media_path:
+            self._clear_cover_preview("暂无封面")
+            self._refresh_cover_state()
+            return
+        try:
+            cover = read_cover_art(str(media_path))
+        except Exception as exc:
+            self._clear_cover_preview("无法读取")
+            self.cover_status_label.setText(f"无法读取内嵌封面：{exc}")
+            self._refresh_cover_state()
+            return
+        if cover:
+            self._set_cover_preview(
+                cover[0],
+                cover[1],
+                "当前音频内嵌封面",
+            )
+        else:
+            self._clear_cover_preview("暂无封面")
+            self.cover_status_label.setText(
+                "当前音频没有内嵌封面，可在线搜索或选择本地图片。"
+            )
+        self._refresh_cover_state()
+
+    def _set_cover_preview(
+        self,
+        image_data: bytes,
+        mime_type: str,
+        source: str,
+    ) -> bool:
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(image_data):
+            self.cover_status_label.setText("所选图片无法解析。")
+            return False
+        self._cover_image_data = bytes(image_data)
+        self._cover_mime_type = image_mime_type(image_data, mime_type)
+        self._cover_source = source
+        self.cover_preview.setText("")
+        self.cover_preview.setPixmap(
+            pixmap.scaled(
+                self.cover_preview.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        self.cover_status_label.setText(source)
+        self._refresh_cover_state()
+        return True
+
+    def _clear_cover_preview(self, text: str):
+        self._cover_image_data = b""
+        self._cover_mime_type = ""
+        self._cover_source = ""
+        self.cover_preview.clear()
+        self.cover_preview.setText(text)
+
+    def _is_cover_editable_song(self) -> bool:
+        path = Path(self._song.get("path", ""))
+        return (
+            bool(path.name)
+            and self._song.get("material_type", "music") != "video"
+            and path.suffix.lower() in COVER_EDITABLE_FORMATS
+        )
+
+    def _refresh_cover_state(self):
+        editable = self._is_cover_editable_song()
+        self.search_cover_button.setEnabled(editable and not self._cover_busy)
+        self.local_cover_button.setEnabled(editable and not self._cover_busy)
+        self.cover_selector.setEnabled(
+            editable and not self._cover_busy and bool(self._cover_matches)
+        )
+        self.apply_cover_button.setEnabled(
+            editable and not self._cover_busy and bool(self._cover_image_data)
+        )
+
+    def _start_cover_search(self):
+        if not self._is_cover_editable_song():
+            self.cover_status_label.setText(
+                "当前素材格式不支持写入封面，请选择音乐文件。"
+            )
+            return
+        track_name = self.track_input.text().strip()
+        album_name = self.album_input.text().strip()
+        if not track_name and not album_name:
+            self.cover_status_label.setText("请先填写歌名或专辑名。")
+            return
+        self._cover_busy = True
+        self._refresh_cover_state()
+        self.cover_status_label.setText("正在搜索 MusicBrainz 与 Cover Art Archive…")
+        self._cover_search_worker = CoverSearchWorker(
+            track_name,
+            self.artist_input.text().strip(),
+            album_name,
+            self,
+        )
+        self._cover_search_worker.completed.connect(self._show_cover_results)
+        self._cover_search_worker.failed.connect(self._show_cover_error)
+        self._cover_search_worker.start()
+
+    def _show_cover_results(self, matches: list):
+        self._cover_busy = False
+        self._cover_matches = list(matches)
+        self.cover_selector.blockSignals(True)
+        self.cover_selector.clear()
+        for match in self._cover_matches:
+            date = f" · {match.first_release_date[:4]}" if match.first_release_date else ""
+            artist = f" · {match.artist_name}" if match.artist_name else ""
+            self.cover_selector.addItem(
+                f"{match.score:.0f}% · {match.title}{artist}{date}",
+                match,
+            )
+        self.cover_selector.blockSignals(False)
+        if self._cover_matches:
+            self.cover_status_label.setText(
+                f"找到 {len(self._cover_matches)} 张封面，正在载入第一张…"
+            )
+            self.cover_selector.setCurrentIndex(0)
+            self._on_cover_result_selected(0)
+        else:
+            self.cover_status_label.setText(
+                "没有找到可用封面，可调整歌名/专辑名或选择本地图片。"
+            )
+        self._refresh_cover_state()
+
+    def _show_cover_error(self, message: str):
+        self._cover_busy = False
+        self.cover_status_label.setText(f"封面搜索失败：{message}")
+        self._refresh_cover_state()
+
+    def _on_cover_result_selected(self, index: int):
+        match = self.cover_selector.itemData(index) if index >= 0 else None
+        if not isinstance(match, CoverArtMatch):
+            return
+        self._cover_busy = True
+        self._cover_image_data = b""
+        self.cover_status_label.setText(f"正在下载封面：{match.title}…")
+        self._refresh_cover_state()
+        self._cover_download_worker = CoverDownloadWorker(match, self)
+        self._cover_download_worker.completed.connect(self._cover_downloaded)
+        self._cover_download_worker.failed.connect(self._show_cover_error)
+        self._cover_download_worker.start()
+
+    def _cover_downloaded(
+        self,
+        match: CoverArtMatch,
+        image_data: bytes,
+        mime_type: str,
+    ):
+        current = self.cover_selector.currentData()
+        if not isinstance(current, CoverArtMatch):
+            return
+        if current.release_group_id != match.release_group_id:
+            return
+        self._cover_busy = False
+        self._set_cover_preview(
+            image_data,
+            mime_type,
+            f"在线封面：{match.title} · {match.artist_name or '未知歌手'}",
+        )
+        self._refresh_cover_state()
+
+    def _choose_local_cover(self):
+        if not self._is_cover_editable_song():
+            return
+        file_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "选择本地封面",
+            "",
+            "封面图片 (*.jpg *.jpeg *.png);;所有文件 (*)",
+        )
+        if not file_path:
+            return
+        try:
+            image_data = Path(file_path).read_bytes()
+        except OSError as exc:
+            self.cover_status_label.setText(f"无法读取本地封面：{exc}")
+            return
+        if len(image_data) > 20 * 1024 * 1024:
+            self.cover_status_label.setText("本地封面不能超过 20 MB。")
+            return
+        mime_type = image_mime_type(image_data)
+        if mime_type not in {"image/jpeg", "image/png"}:
+            self.cover_status_label.setText("请选择 JPEG 或 PNG 图片。")
+            return
+        self.cover_selector.blockSignals(True)
+        self.cover_selector.setCurrentIndex(-1)
+        self.cover_selector.blockSignals(False)
+        self._set_cover_preview(
+            image_data,
+            mime_type,
+            f"本地封面：{Path(file_path).name}",
+        )
+
+    def _request_cover_apply(self):
+        media_path = self._song.get("path")
+        if not media_path or not self._cover_image_data:
+            return
+        self.action_requested.emit(
+            str(media_path),
+            CoverApplyAction(
+                image_data=self._cover_image_data,
+                mime_type=self._cover_mime_type,
+                source=self._cover_source,
+            ),
+            "apply_cover",
+        )
 
     def reload_local_lyrics(self):
         path = Path(self._song.get("path", ""))
@@ -669,6 +980,7 @@ class OnlineLyricsPanel(QWidget):
             has_online_timeline and bool(local_content.strip())
         )
         self.calibrate_button.setEnabled(has_local_timeline and has_online_text)
+        self._refresh_cover_state()
 
     def _request_action(self, action: str):
         media_path = self._song.get("path")

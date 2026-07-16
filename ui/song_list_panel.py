@@ -3,8 +3,10 @@ import os
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
     QLabel, QLineEdit, QHBoxLayout, QAbstractItemView, QComboBox, QMessageBox, QMenu)
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QBrush, QAction
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QAction, QBrush, QColor, QIcon, QPixmap
+
+from core.metadata import read_cover_art
 from services.library_service import InstrumentalStore
 
 COLOR_HAS_LRC = QColor(76, 175, 80)
@@ -20,6 +22,7 @@ class SongListPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._songs = []; self._instrumental = set(); self._auto_inst = set(); self._mode = "music"
+        self._cover_icons = {}
         self._instrumental_store = None
         self._setup_ui()
         self.lyric_filter.setCurrentIndex(2)  # default "no lyrics"
@@ -52,6 +55,8 @@ class SongListPanel(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True); self.table.verticalHeader().setVisible(False)
+        self.table.setIconSize(QSize(36, 36))
+        self.table.verticalHeader().setDefaultSectionSize(42)
         self.table.setShowGrid(False); self.table.itemSelectionChanged.connect(self._on_sel)
         self.table.cellDoubleClicked.connect(self._on_double_click)
         l.addWidget(self.table)
@@ -114,7 +119,11 @@ class SongListPanel(QWidget):
             f = [s for s in f if Path(s["name"]).suffix.upper().lstrip(".") == ff.upper()]
         self.table.setRowCount(len(f))
         for i, s in enumerate(f):
-            n = QTableWidgetItem(Path(s["name"]).stem); n.setData(Qt.ItemDataRole.UserRole, s); self.table.setItem(i, 0, n)
+            n = QTableWidgetItem(Path(s["name"]).stem)
+            n.setData(Qt.ItemDataRole.UserRole, s)
+            if self._mode == "music":
+                n.setIcon(self._cover_icon(s.get("path", "")))
+            self.table.setItem(i, 0, n)
             fmt = Path(s["name"]).suffix.lstrip(".").upper()
             fi = QTableWidgetItem(fmt); fi.setTextAlignment(Qt.AlignmentFlag.AlignCenter); self.table.setItem(i, 1, fi)
             if self._mode == "video":
@@ -134,6 +143,41 @@ class SongListPanel(QWidget):
             self.table.setItem(i, 4, QTableWidgetItem(s.get("folder","")))
             self.table.setItem(i, 5, QTableWidgetItem(s.get("path","")))
         self.model_updated.emit()
+
+    def _cover_icon(self, file_path: str) -> QIcon:
+        if not file_path:
+            return QIcon()
+        path = Path(file_path)
+        try:
+            stat = path.stat()
+        except OSError:
+            return QIcon()
+        fingerprint = (stat.st_mtime_ns, stat.st_size)
+        cached = self._cover_icons.get(str(path))
+        if cached and cached[0] == fingerprint:
+            return cached[1]
+        icon = QIcon()
+        try:
+            cover = read_cover_art(str(path))
+            if cover:
+                pixmap = QPixmap()
+                if pixmap.loadFromData(cover[0]):
+                    icon = QIcon(
+                        pixmap.scaled(
+                            36,
+                            36,
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation,
+                        )
+                    )
+        except Exception:
+            icon = QIcon()
+        self._cover_icons[str(path)] = (fingerprint, icon)
+        return icon
+
+    def invalidate_cover(self, file_path: str):
+        self._cover_icons.pop(str(Path(file_path)), None)
+        self._do_refresh()
 
     def _on_sel(self):
         sel = self.get_selected_songs()

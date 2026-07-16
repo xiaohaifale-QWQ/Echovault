@@ -4,6 +4,9 @@
 
 ### Added
 
+- Online Matching now searches MusicBrainz and Cover Art Archive for album artwork,
+  previews selectable candidates, accepts local JPEG/PNG covers, and embeds the chosen
+  image into common audio tags. The song list displays embedded covers as thumbnails.
 - Processing artifacts from phone-transfer tasks are staged in a dedicated Pending
   Return folder. Same-volume files use NTFS hard links when possible, avoiding a
   second large WAV allocation while keeping the formal processing output intact.
@@ -22,6 +25,10 @@
 
 ### Changed
 
+- The phone receiver now sends an explicit HTTP/1.1 success response before UI/session
+  indexing callbacks, preventing LocalSend mobile clients from reporting a failed
+  transfer after the file was already saved. Receive-directory controls are now
+  separate “Open Folder” and “Choose Folder” buttons.
 - Simplified the phone-transfer result toolbar: the redundant result filter was removed,
   only pending generated/modified differences are shown, and selection actions now sit
   beside the Pending Return directory.

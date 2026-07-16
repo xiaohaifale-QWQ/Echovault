@@ -47,6 +47,7 @@ OPERATION_TEXT = {
     "transcription": "歌词识别",
     "translation": "歌词翻译",
     "online_lyrics": "在线歌词",
+    "cover_art": "封面标签",
     "vocal_separation": "人声分离",
     "audio_enhancement": "音频增强",
     "video_aggregation": "视频汇总",
@@ -416,10 +417,12 @@ class SyncPanel(QWidget):
         self.receive_dir_input.setPlaceholderText("选择手机文件接收目录…")
         path_row.addWidget(QLabel("接收目录："))
         path_row.addWidget(self.receive_dir_input)
-        browse = QPushButton("…")
-        browse.setFixedWidth(36)
-        browse.clicked.connect(self._browse_receive_dir)
-        path_row.addWidget(browse)
+        self.open_receive_button = QPushButton("打开目录")
+        self.open_receive_button.clicked.connect(self._open_receive_dir)
+        path_row.addWidget(self.open_receive_button)
+        self.browse_receive_button = QPushButton("选择目录")
+        self.browse_receive_button.clicked.connect(self._browse_receive_dir)
+        path_row.addWidget(self.browse_receive_button)
         receive_layout.addLayout(path_row)
         service_row = QHBoxLayout()
         self.receiver_button = QPushButton("开启接收")
@@ -552,6 +555,22 @@ class SyncPanel(QWidget):
         directory = QFileDialog.getExistingDirectory(self, "选择手机文件接收目录")
         if directory:
             self.receive_dir_input.setText(directory)
+            self.config.transfer.receive_dir = directory
+            config_manager.config = self.config
+            config_manager.save()
+
+    def _open_receive_dir(self):
+        directory = self.receive_dir_input.text().strip()
+        if not directory:
+            QMessageBox.information(self, "打开接收目录", "请先选择接收目录。")
+            return
+        path = Path(directory)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            QMessageBox.warning(self, "打开接收目录", f"无法创建接收目录：{exc}")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _toggle_receiver(self, checked):
         if checked:

@@ -1,4 +1,6 @@
 import socket
+import threading
+import time
 from pathlib import Path
 
 from server import localsend_receiver as receiver_module
@@ -20,16 +22,27 @@ def test_localsend_sender_and_receiver_transfer_real_file(monkeypatch, tmp_path)
     monkeypatch.setattr(LocalSendReceiver, "_start_udp_multicast", lambda _self: None)
     monkeypatch.setattr(LocalSendReceiver, "_send_announcement", lambda _self: None)
     completed = []
+    callback_started = threading.Event()
+    release_callback = threading.Event()
+    callback_finished = threading.Event()
+
+    def on_completed(payload):
+        callback_started.set()
+        release_callback.wait(3)
+        completed.append(payload)
+        callback_finished.set()
+
     receive_root = tmp_path / "received"
     receiver = LocalSendReceiver(
         str(receive_root),
         "Receiver",
-        on_session_completed=completed.append,
+        on_session_completed=on_completed,
     )
     receiver.start()
     source = tmp_path / "歌词.lrc"
     source.write_text("[00:01.00]测试\n", encoding="utf-8")
     try:
+        started_at = time.monotonic()
         results = LocalSendSender("Sender").send_files(
             LocalSendDevice(
                 alias="Receiver",
@@ -40,7 +53,13 @@ def test_localsend_sender_and_receiver_transfer_real_file(monkeypatch, tmp_path)
             ),
             [source],
         )
+        elapsed = time.monotonic() - started_at
+        assert callback_started.wait(1)
+        assert elapsed < 1.5
+        release_callback.set()
+        assert callback_finished.wait(1)
     finally:
+        release_callback.set()
         receiver.stop()
 
     assert results[0]["status"] == "sent"

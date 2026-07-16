@@ -4,7 +4,7 @@ from core.config import AppConfig
 from core.online_lyrics import LyricsMatch
 from tests.qt_test_app import ensure_app, keep_widget
 from ui.main_window import MainWindow
-from ui.online_lyrics_panel import OnlineLyricsAction
+from ui.online_lyrics_panel import CoverApplyAction, OnlineLyricsAction
 
 
 def test_main_window_has_six_right_tabs_and_no_scattered_batch_buttons(monkeypatch):
@@ -103,3 +103,43 @@ def test_online_catalog_includes_music_and_video(monkeypatch, tmp_path):
         "video",
     }
     assert window.online_lyrics_panel.song_selector.count() == 2
+
+
+def test_main_window_writes_selected_cover_and_refreshes_thumbnail(
+    monkeypatch, tmp_path
+):
+    ensure_app()
+    monkeypatch.setattr("ui.main_window.config_manager.load", AppConfig)
+    monkeypatch.setattr(
+        "ui.main_window.build_environment_report",
+        lambda _config: {"ffmpeg": {"available": True}},
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(QMessageBox, "information", lambda *_args, **_kwargs: None)
+    written = []
+    monkeypatch.setattr(
+        "ui.main_window.write_cover_art",
+        lambda *args: written.append(args),
+    )
+    window = keep_widget(MainWindow())
+    refreshed = []
+    monkeypatch.setattr(
+        window.song_list_panel,
+        "invalidate_cover",
+        refreshed.append,
+    )
+    monkeypatch.setattr(window.online_lyrics_panel, "reload_cover", lambda: None)
+    media_path = str(tmp_path / "song.mp3")
+
+    window._on_online_lyrics_action(
+        media_path,
+        CoverApplyAction(b"\xff\xd8\xffcover", "image/jpeg", "本地封面"),
+        "apply_cover",
+    )
+
+    assert written == [(media_path, b"\xff\xd8\xffcover", "image/jpeg")]
+    assert refreshed == [media_path]
