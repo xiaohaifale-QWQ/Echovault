@@ -1164,6 +1164,8 @@ class MainWindow(QMainWindow):
             import logging
             logging.getLogger("linlangyuefu").info("GPU 安装完成，准备重启...")
             self._do_restart()
+        elif result == SettingsDialog.OPEN_MODEL_LIBRARY:
+            self._on_model_library()
         elif result:
             # 设置已保存，重建 router
             self.router = get_router(self.config)
@@ -1176,13 +1178,11 @@ class MainWindow(QMainWindow):
     def _on_key_manager(self):
         """Open the local credential manager and rebuild the ASR router if saved."""
         dialog = KeyManagerDialog(self.config, self)
-        dialog.asr_provider_saved.connect(self._on_asr_provider_saved)
-        if dialog.exec():
+        accepted = bool(dialog.exec())
+        if accepted:
             self.router = get_router(self.config)
             self._refresh_statusbar()
-
-    def _on_asr_provider_saved(self, provider: str):
-        self.config.asr.provider = provider
+        return accepted
 
     def _on_ai_command_requested(self, raw_command: str):
         try:
@@ -1313,7 +1313,16 @@ class MainWindow(QMainWindow):
 
     def _on_model_library(self):
         dialog = ModelLibraryDialog(self, config=self.config)
+        dialog.model_state_changed.connect(self._on_model_library_changed)
         result = dialog.exec()
         if result == ModelLibraryDialog.OPEN_ASR_SETTINGS:
             self._on_settings("recognition")
+        elif result == ModelLibraryDialog.OPEN_KEY_MANAGER:
+            if self._on_key_manager():
+                self._on_model_library()
+        self._on_model_library_changed()
+
+    def _on_model_library_changed(self):
+        self.router = get_router(self.config)
+        self._refresh_statusbar()
         self.vocal_separation_panel.reload_settings()

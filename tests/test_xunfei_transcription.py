@@ -6,6 +6,7 @@ import pytest
 from core.asr.base import Segment, TranscriptionResult
 from core.asr.xunfei_transcription import (
     XunfeiAPIError,
+    XunfeiStreamClosedError,
     XunfeiTranscriptionProvider,
 )
 
@@ -231,3 +232,65 @@ def test_xunfei_attaches_streaming_punctuation_to_previous_segment():
 
     assert [segment.text for segment in normalized] == ["第一句，", "第二句。"]
     assert normalized[-1].end_time == 2.1
+
+
+def test_xunfei_retries_early_closed_stream_with_short_chunks(monkeypatch):
+    provider = XunfeiTranscriptionProvider(
+        app_id="app", api_key="key", api_secret="secret"
+    )
+    calls = []
+
+    def fake_transcribe(audio_data, _language, offset):
+        calls.append((len(audio_data), offset))
+        if len(audio_data) > provider._IAT_RETRY_SECONDS * 32000:
+            raise XunfeiStreamClosedError("socket is already closed")
+        return [Segment(offset, offset + len(audio_data) / 32000, f"片段{offset:g}")]
+
+    monkeypatch.setattr(provider, "_transcribe_streaming_chunk", fake_transcribe)
+    audio_data = b"\0" * (20 * 32000)
+
+    segments = provider._transcribe_streaming_chunk_resilient(
+        audio_data,
+        "zh",
+        10.0,
+    )
+
+    assert [length for length, _offset in calls] == [
+        20 * 32000,
+        8 * 32000,
+        8 * 32000,
+        4 * 32000,
+    ]
+    assert [segment.start_time for segment in segments] == [10.0, 18.0, 26.0]
+
+
+def test_xunfei_retries_when_long_chunk_finishes_before_later_voice(monkeypatch):
+    provider = XunfeiTranscriptionProvider(
+        app_id="app", api_key="key", api_secret="secret"
+    )
+    calls = []
+
+    def fake_transcribe(audio_data, _language, offset):
+        calls.append((len(audio_data), offset))
+        if len(audio_data) > provider._IAT_RETRY_SECONDS * 32000:
+            return []
+        if offset >= 16:
+            return [Segment(offset, offset + 2.0, "后半段歌词")]
+        return []
+
+    monkeypatch.setattr(provider, "_transcribe_streaming_chunk", fake_transcribe)
+
+    segments = provider._transcribe_streaming_chunk_resilient(
+        b"\0" * (20 * 32000),
+        "zh",
+        0.0,
+    )
+
+    assert [length for length, _offset in calls] == [
+        20 * 32000,
+        8 * 32000,
+        8 * 32000,
+        4 * 32000,
+    ]
+    assert [segment.text for segment in segments] == ["后半段歌词"]
+    assert segments[0].start_time == 16.0

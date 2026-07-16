@@ -25,10 +25,24 @@
 
 ### Changed
 
+- The Model Library is now the single place for choosing ASR models. It includes
+  an Online Recognition card for Groq and Xunfei plus selectable installed
+  Whisper models. Preferences retain language, vocal-separation, and GPU settings
+  without duplicating provider/model selectors.
+- Saving credentials no longer silently switches the active ASR provider. Missing
+  online credentials can be configured from the Model Library, which then returns
+  to model selection.
 - Xunfei recognition now falls back automatically from Speed Transcription to
   Streaming Dictation when the configured AppID returns license errors 11200 or
   11201. Streaming mode splits long audio into 50-second requests, runs up to four
   requests concurrently, and restores timestamps when merging the results.
+
+### Fixed
+
+- Xunfei Streaming Dictation now detects connections ended early by long
+  intros/interludes. It retries unfinished audio in 8-second pieces below the
+  service's endpoint-silence threshold instead of failing with
+  `socket is already closed` or silently missing later vocals.
 - Online Matching now uses one result area for both lyrics and artwork. “Search
   Lyrics” displays the lyrics table, while “Search Cover” displays a cover grid.
   The redundant “Write Audio Tags” button was removed; clicking an online cover or

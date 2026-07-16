@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 
-from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -21,24 +20,16 @@ from core.config import AppConfig, config_manager
 class KeyManagerDialog(QDialog):
     """Edit locally stored provider credentials without placing them in preferences."""
 
-    asr_provider_saved = pyqtSignal(str)
-
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent)
         self.config = config
-        self._initial_groq_key = config.groq_api_key
-        self._initial_xunfei_credentials = (
-            config.xunfei_app_id,
-            config.xunfei_api_key,
-            config.xunfei_api_secret,
-        )
         self.setWindowTitle("密钥管理")
         self.setMinimumWidth(520)
 
         layout = QVBoxLayout(self)
         notice = QLabel(
             "密钥只保存到本机配置文件，不会上传到 Echovault 服务器。"
-            "选择在线识别时，Groq 密钥才会被用于连接 Groq 服务。"
+            "保存后请到“模型库 → 在线识别模型”选择 Groq 或讯飞。"
         )
         notice.setWordWrap(True)
         notice.setStyleSheet("color:#5B6573;padding:4px 0")
@@ -125,16 +116,6 @@ class KeyManagerDialog(QDialog):
             else:
                 os.environ.pop(name, None)
         try:
-            if self.config.groq_api_key and self.config.groq_api_key != self._initial_groq_key:
-                self.config.asr.provider = "groq"
-                self.asr_provider_saved.emit("groq")
-            elif self.config.has_xunfei_credentials and (
-                self.config.xunfei_app_id,
-                self.config.xunfei_api_key,
-                self.config.xunfei_api_secret,
-            ) != self._initial_xunfei_credentials:
-                self.config.asr.provider = "xunfei"
-                self.asr_provider_saved.emit("xunfei")
             config_manager.config = self.config
             config_manager.save()
         except OSError as exc:

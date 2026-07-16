@@ -1,5 +1,4 @@
 """设置对话框"""
-import os
 import subprocess
 import sys
 
@@ -26,7 +25,6 @@ from PyQt6.QtWidgets import (
 )
 
 from core.config import AppConfig, config_manager
-from core.model_download import DownloadCancelled, ModelDownloadError, download_model
 from core.process_utils import hidden_window_kwargs
 from core.runtime_detection import detect_hardware, select_runtime
 from core.runtime_manager import RuntimeInstallCancelled, RuntimeManagerError
@@ -215,38 +213,6 @@ class _RuntimeSetupWorker(QThread):
             self.finished.emit(False, f"运行时配置失败：{exc}")
 
 
-class _DownloadWorker(QThread):
-    progress = pyqtSignal(int, str)
-    finished = pyqtSignal(bool, str)
-
-    def __init__(self, model: str):
-        super().__init__(); self.model = model; self._cancelled = False
-
-    def cancel(self):
-        self._cancelled = True
-        self.requestInterruption()
-
-    def run(self):
-        try:
-            result = download_model(
-                self.model,
-                progress=lambda percent, message: self.progress.emit(percent, message),
-                cancelled=lambda: self._cancelled or self.isInterruptionRequested(),
-            )
-            message = (
-                f"{self.model} 模型已缓存并通过校验"
-                if result.cached
-                else f"{self.model} 模型已从 GitHub Release 下载完成"
-            )
-            self.finished.emit(True, message)
-        except DownloadCancelled:
-            self.finished.emit(False, "下载已取消")
-        except ModelDownloadError as exc:
-            self.finished.emit(False, str(exc))
-        except Exception as exc:
-            self.finished.emit(False, f"下载失败: {exc}")
-
-
 class _TranslationInstallWorker(QThread):
     finished = pyqtSignal(bool, str)
 
@@ -269,6 +235,7 @@ class _TranslationInstallWorker(QThread):
 
 class SettingsDialog(QDialog):
     restart_requested = pyqtSignal()  # GPU 安装完成后请求重启
+    OPEN_MODEL_LIBRARY = 43
 
     def __init__(self, config: AppConfig, parent=None, section: str = "recognition"):
         super().__init__(parent); self.config = config
@@ -301,86 +268,19 @@ class SettingsDialog(QDialog):
 
         ag = QGroupBox("语音识别 (ASR)"); af = QFormLayout(ag)
         self.asr_form = af
-        self.provider_combo = QComboBox()
-        self.provider_combo.addItem("云端", "cloud")
-        self.provider_combo.addItem("本地", "local")
-        self.provider_combo.currentIndexChanged.connect(self._on_prov)
-        af.addRow("识别引擎:", self.provider_combo)
-
-        self.cloud_provider_label = QLabel("云端服务:")
-        self.cloud_provider_combo = QComboBox()
-        self.cloud_provider_combo.addItem("Groq", "groq")
-        self.cloud_provider_combo.addItem("讯飞", "xunfei")
-        self.cloud_provider_combo.currentIndexChanged.connect(
-            lambda _index: self._on_prov(self.provider_combo.currentIndex())
+        self.active_asr_label = QLabel("")
+        self.active_asr_label.setStyleSheet("font-weight:600;color:#245B9E")
+        af.addRow("当前识别模型:", self.active_asr_label)
+        self.open_model_library_button = QPushButton("打开模型库选择模型")
+        self.open_model_library_button.clicked.connect(
+            lambda: self.done(self.OPEN_MODEL_LIBRARY)
         )
-        af.addRow(self.cloud_provider_label, self.cloud_provider_combo)
-
-        self.api_input = QLineEdit(); self.api_input.setPlaceholderText("输入 API Key...")
-        self.api_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.groq_input_label = QLabel("Groq Key:")
-        af.addRow(self.groq_input_label, self.api_input)
-        self.groq_key_status = QLabel("已在密钥管理中配置 ✓")
-        self.groq_key_status.setStyleSheet("color:#248A4A;font-weight:600")
-        self.groq_status_label = QLabel("Groq Key:")
-        af.addRow(self.groq_status_label, self.groq_key_status)
-        self.groq_key_link = QLabel(
-            '<a href="https://console.groq.com/keys" style="color:#1976D2">免费获取 Groq Key</a>'
-        )
-        self.groq_key_link.setOpenExternalLinks(True)
-        self.groq_key_link.setStyleSheet("font-size:11px")
-        af.addRow("", self.groq_key_link)
-        self.groq_key_notice = QLabel("Key 将以明文保存在当前用户的本机配置中")
-        self.groq_key_notice.setStyleSheet("font-size:10px;color:#888")
-        af.addRow("", self.groq_key_notice)
-
-        self.xunfei_key_label = QLabel("讯飞配置:")
-        self.xunfei_key_status = QLabel("")
-        self.xunfei_key_status.setStyleSheet("color:#248A4A;font-weight:600")
-        af.addRow(self.xunfei_key_label, self.xunfei_key_status)
-        self.xunfei_notice = QLabel("")
-        self.xunfei_notice.setStyleSheet("font-size:10px;color:#888")
-        self.xunfei_notice.setWordWrap(True)
-        af.addRow("", self.xunfei_notice)
+        af.addRow("", self.open_model_library_button)
 
         self.lang_combo = QComboBox()
         for t, v in [("自动检测", None), ("中文", "zh"), ("英语", "en"), ("日语", "ja"), ("韩语", "ko")]:
             self.lang_combo.addItem(t, v)
         af.addRow("默认语言:", self.lang_combo)
-
-        self.model_combo = QComboBox()
-        for t, v in [
-            ("tiny (~144 MB, 最快)", "tiny"),
-            ("base (~139 MB, 推荐)", "base"),
-            ("small (~922 MB)", "small"),
-            ("medium (~2.85 GB, 更准确)", "medium"),
-        ]:
-            self.model_combo.addItem(t, v)
-        self.model_combo.setVisible(False)
-        self.local_model_label = QLabel("本地模型:")
-        af.addRow(self.local_model_label, self.model_combo)
-
-        # 下载按钮行
-        dl_btn_row = QHBoxLayout()
-        self.btn_dl = QPushButton("下载模型"); self.btn_dl.setVisible(False)
-        self.btn_dl.clicked.connect(self._on_download); dl_btn_row.addWidget(self.btn_dl)
-        self.btn_cancel_dl = QPushButton("取消下载"); self.btn_cancel_dl.setVisible(False)
-        self.btn_cancel_dl.setStyleSheet("color:#c0392b;")
-        self.btn_cancel_dl.clicked.connect(self._on_cancel_download); dl_btn_row.addWidget(self.btn_cancel_dl)
-        dl_btn_row.addStretch()
-        self.download_buttons_row = af.rowCount()
-        af.addRow("", dl_btn_row)
-
-        # 进度条行
-        self.dl_bar = QProgressBar(); self.dl_bar.setVisible(False); self.dl_bar.setMaximum(100)
-        self.download_progress_row = af.rowCount()
-        af.addRow("", self.dl_bar)
-
-        # 速度/进度信息行
-        self.dl_label = QLabel(""); self.dl_label.setStyleSheet("font-size:11px;color:#666;padding:2px 0")
-        self.dl_label.setVisible(False)
-        self.download_message_row = af.rowCount()
-        af.addRow("", self.dl_label)
 
         self.vocal_check = QCheckBox("启用 Demucs 人声分离 (每首多花 1-3 分钟，提升准确率)")
         af.addRow("", self.vocal_check)
@@ -388,7 +288,7 @@ class SettingsDialog(QDialog):
 
         # ── GPU 加速 ──
         self.gpu_group = QGroupBox("本地识别运行时"); gf = QFormLayout(self.gpu_group)
-        self.gpu_group.setVisible(False)
+        self.gpu_group.setVisible(True)
 
         gpu_scan_row = QHBoxLayout()
         self.btn_scan_gpu = QPushButton("重新检测"); self.btn_scan_gpu.setMaximumWidth(80)
@@ -556,14 +456,9 @@ class SettingsDialog(QDialog):
 
     def _load_config(self):
         c = self.config
-        i = 1 if c.asr.provider == "local" else 0; self.provider_combo.setCurrentIndex(i)
-        cloud_index = self.cloud_provider_combo.findData(c.asr.provider)
-        self.cloud_provider_combo.setCurrentIndex(cloud_index if cloud_index >= 0 else 0)
-        self.api_input.clear()
+        self.active_asr_label.setText(self._active_asr_name())
         li = [j for j in range(self.lang_combo.count()) if self.lang_combo.itemData(j) == c.asr.language]
         self.lang_combo.setCurrentIndex(li[0] if li else 0)
-        for i in range(self.model_combo.count()):
-            if self.model_combo.itemData(i) == c.asr.local_model: self.model_combo.setCurrentIndex(i); break
         self.vocal_check.setChecked(c.asr.use_vocal_separation)
         self.gpu_check.setChecked(c.asr.use_gpu)
         if c.output_lrc_dir: self.lrc_input.setText(c.output_lrc_dir)
@@ -584,7 +479,14 @@ class SettingsDialog(QDialog):
         # 仅打开语音识别分类时扫描显卡，避免其他设置页启动无关后台任务。
         if self.section == "recognition":
             self._on_scan_gpu()
-        self._refresh_cloud_provider_state()
+
+    def _active_asr_name(self) -> str:
+        provider = self.config.asr.provider
+        if provider == "groq":
+            return "在线模型 · Groq Whisper Large V3"
+        if provider == "xunfei":
+            return "在线模型 · 讯飞云端识别"
+        return f"本地模型 · Whisper {self.config.asr.local_model}"
 
     def _apply_local_ai_preset(self, index: int):
         endpoint = self.local_ai_preset.itemData(index)
@@ -630,97 +532,6 @@ class SettingsDialog(QDialog):
         self.translation_package_status.setText(message)
         self.translation_download_button.setEnabled(True)
         QMessageBox.warning(self, "本地翻译库", message)
-
-    def _on_prov(self, idx):
-        is_local = self.provider_combo.itemData(idx) == "local"
-        is_groq = self.cloud_provider_combo.currentData() == "groq"
-        is_xunfei = not is_local and not is_groq
-        self.cloud_provider_label.setVisible(not is_local)
-        self.cloud_provider_combo.setVisible(not is_local)
-        show_groq_input = not is_local and is_groq and not bool(self.config.groq_api_key)
-        show_groq_status = not is_local and is_groq and bool(self.config.groq_api_key)
-        self._set_asr_row_visible(self.api_input, show_groq_input)
-        self._set_asr_row_visible(self.groq_key_status, show_groq_status)
-        self._set_asr_row_visible(self.groq_key_link, show_groq_input)
-        self._set_asr_row_visible(self.groq_key_notice, show_groq_input)
-        self._set_asr_row_visible(self.xunfei_key_status, is_xunfei)
-        self._set_asr_row_visible(self.xunfei_notice, is_xunfei)
-        self._set_asr_row_visible(self.model_combo, is_local)
-        self.btn_dl.setVisible(is_local)
-        self.btn_cancel_dl.setVisible(False)
-        self.dl_bar.setVisible(False)
-        self.dl_label.setVisible(False)
-        self.asr_form.setRowVisible(self.download_buttons_row, is_local)
-        self.asr_form.setRowVisible(self.download_progress_row, False)
-        self.asr_form.setRowVisible(self.download_message_row, False)
-        self.gpu_group.setVisible(is_local)
-        self.settings_stack.updateGeometry()
-        if self.isVisible():
-            self.adjustSize()
-
-    def _set_asr_row_visible(self, field: QWidget, visible: bool):
-        """隐藏字段时连同 QFormLayout 的标签一起隐藏，避免残留空行。"""
-        label = self.asr_form.labelForField(field)
-        if label:
-            label.setVisible(visible)
-        field.setVisible(visible)
-
-    def _refresh_cloud_provider_state(self):
-        self.cloud_provider_combo.setItemText(
-            0, "Groq ✓" if self.config.groq_api_key else "Groq"
-        )
-        self.cloud_provider_combo.setItemText(
-            1, "讯飞 ✓" if self.config.has_xunfei_credentials else "讯飞"
-        )
-        if self.config.has_xunfei_credentials:
-            self.xunfei_key_status.setText("AppID、API Key、API Secret 已配置 ✓")
-            self.xunfei_key_status.setStyleSheet("color:#248A4A;font-weight:600")
-            self.xunfei_notice.setText(
-                "将优先使用讯飞极速录音转写；未授权时自动改用流式语音听写。"
-                "音频会上传到讯飞云端识别。"
-            )
-        else:
-            self.xunfei_key_status.setText("请在密钥管理中补齐三项")
-            self.xunfei_key_status.setStyleSheet("color:#B54708;font-weight:600")
-            self.xunfei_notice.setText(
-                "需要同一应用的 AppID、API Key、API Secret，并至少开通"
-                "“语音听写（流式版）”或“极速录音转写”。"
-            )
-        self._on_prov(self.provider_combo.currentIndex())
-
-    def _on_download(self):
-        model = self.model_combo.currentData()
-        self.btn_dl.setVisible(False); self.btn_cancel_dl.setVisible(True)
-        self.dl_bar.setVisible(True); self.dl_bar.setValue(0)
-        self.dl_label.setVisible(True); self.dl_label.setText("")
-        self.asr_form.setRowVisible(self.download_buttons_row, True)
-        self.asr_form.setRowVisible(self.download_progress_row, True)
-        self.asr_form.setRowVisible(self.download_message_row, True)
-        self.worker = _DownloadWorker(model)
-        self.worker.progress.connect(self._on_dl_progress)
-        self.worker.finished.connect(self._on_dl_done)
-        self.worker.start()
-
-    def _on_dl_progress(self, pct, msg):
-        self.dl_bar.setValue(pct)
-        self.dl_label.setText(msg)
-
-    def _on_cancel_download(self):
-        if hasattr(self, 'worker') and self.worker.isRunning():
-            self.worker.cancel()
-            self.dl_label.setText("正在取消...")
-            self.btn_cancel_dl.setEnabled(False)
-
-    def _on_dl_done(self, ok, msg):
-        self.btn_dl.setVisible(True); self.btn_cancel_dl.setVisible(False)
-        self.btn_cancel_dl.setEnabled(True)
-        self.dl_bar.setVisible(False); self.dl_label.setVisible(False)
-        self.asr_form.setRowVisible(self.download_progress_row, False)
-        self.asr_form.setRowVisible(self.download_message_row, False)
-        if ok: QMessageBox.information(self, "完成", msg)
-        elif "取消" in msg:
-            pass  # 用户主动取消，不弹错误框
-        else: QMessageBox.critical(self, "下载失败", msg)
 
     def _on_scan_gpu(self):
         self.btn_scan_gpu.setEnabled(False)
@@ -906,19 +717,9 @@ class SettingsDialog(QDialog):
 
     def _save(self):
         c = self.config
-        c.asr.provider = (
-            "local"
-            if self.provider_combo.currentData() == "local"
-            else self.cloud_provider_combo.currentData()
-        )
         c.asr.language = self.lang_combo.currentData()
-        c.asr.local_model = self.model_combo.currentData()
         c.asr.use_vocal_separation = self.vocal_check.isChecked()
         c.asr.use_gpu = self.gpu_check.isChecked()
-        key = self.api_input.text().strip()
-        if key:
-            c.groq_api_key = key
-        if key: os.environ["GROQ_API_KEY"] = key
         d = self.lrc_input.text().strip(); c.output_lrc_dir = d if d else None
         shortcut = self.voice_shortcut_edit.keySequence().toString().strip()
         c.voice_input_shortcut = shortcut or "Ctrl+Shift+Space"

@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -18,9 +19,11 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from core.audio_enhancement import (
@@ -52,6 +55,30 @@ class CatalogModel:
     speed: str
     quality: str
     size: str
+
+
+@dataclass(frozen=True)
+class OnlineModel:
+    key: str
+    name: str
+    description: str
+    speed: str
+
+
+ONLINE_MODELS = (
+    OnlineModel(
+        "groq",
+        "Groq Whisper Large V3",
+        "高速云端歌词识别，适合网络稳定且已配置 Groq Key 的场景。",
+        "很快",
+    ),
+    OnlineModel(
+        "xunfei",
+        "讯飞云端识别",
+        "优先极速录音转写，未授权时自动回退流式语音听写。",
+        "快",
+    ),
+)
 
 
 WHISPER_MODELS = (
@@ -108,16 +135,18 @@ class ModelInstallWorker(QThread):
 
 
 class ModelLibraryDialog(QDialog):
-    """Two white model cards opened from the application menu bar."""
+    """Central catalog for selecting online and local processing models."""
 
     model_state_changed = pyqtSignal()
     OPEN_ASR_SETTINGS = 42
+    OPEN_KEY_MANAGER = 43
 
     def __init__(self, parent=None, *, config=None, initial_category: str = "all"):
         super().__init__(parent)
         self.config = config or config_manager.config
         self.initial_category = initial_category
         self._worker = None
+        self._pending_local_model = ""
         self.setWindowTitle("模型库")
         self.resize(1050, 720)
         self._setup_ui()
@@ -129,7 +158,10 @@ class ModelLibraryDialog(QDialog):
         title = QLabel("模型库")
         title.setStyleSheet("font-size:20px;font-weight:700")
         layout.addWidget(title)
-        hint = QLabel("识别文字与人声分离使用不同模型；GPU 运行时也在各自卡片中管理。")
+        hint = QLabel(
+            "在这里统一选择在线识别、本地 Whisper、音频分离与增强模型。"
+            "在线服务的凭据仍由“密钥管理”保存。"
+        )
         hint.setStyleSheet("color:#666")
         layout.addWidget(hint)
         self.search_input = QLineEdit()
@@ -137,10 +169,19 @@ class ModelLibraryDialog(QDialog):
         self.search_input.textChanged.connect(self.refresh_tables)
         layout.addWidget(self.search_input)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        self.cards_layout = QVBoxLayout(content)
+
+        self.online_card, self.online_table = self._build_online_card()
+        self.cards_layout.addWidget(self.online_card)
+
         self.asr_card, self.asr_table, self.asr_runtime_label = self._build_card(
-            "文字识别模型",
-            "Whisper 模型用于把音乐或视频中的人声转换为带时间轴的文字；"
-            "同一模型文件可供 CPU/GPU 共用。",
+            "本地 Whisper 模型",
+            "下载后可离线把音乐或视频中的人声转换为带时间轴的文字；"
+            "点击“使用”会同时切换到本地识别。",
             "asr",
         )
         asr_runtime_row = QHBoxLayout()
@@ -152,7 +193,7 @@ class ModelLibraryDialog(QDialog):
         )
         asr_runtime_row.addWidget(self.asr_runtime_button)
         self.asr_card.layout().insertLayout(2, asr_runtime_row)
-        layout.addWidget(self.asr_card)
+        self.cards_layout.addWidget(self.asr_card)
 
         (
             self.separation_card,
@@ -188,7 +229,10 @@ class ModelLibraryDialog(QDialog):
         separation_runtime_row.addWidget(self.separation_gpu_check)
         separation_runtime_row.addWidget(self.separation_runtime_label, 1)
         self.separation_card.layout().insertLayout(3, separation_runtime_row)
-        layout.addWidget(self.separation_card)
+        self.cards_layout.addWidget(self.separation_card)
+        self.cards_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
 
         self.progress = QProgressBar()
         self.progress.setVisible(False)
@@ -205,6 +249,46 @@ class ModelLibraryDialog(QDialog):
         close_button.clicked.connect(self.accept)
         footer.addWidget(close_button)
         layout.addLayout(footer)
+
+    def _build_online_card(self):
+        card = QGroupBox()
+        card.setObjectName("onlineModelCard")
+        card.setStyleSheet(
+            "QGroupBox{background:white;border:1px solid #D8DEE7;border-radius:8px;"
+            "margin-top:0;padding:10px}"
+        )
+        card_layout = QVBoxLayout(card)
+        heading = QLabel("在线识别模型")
+        heading.setStyleSheet("font-size:16px;font-weight:700")
+        card_layout.addWidget(heading)
+        note = QLabel(
+            "在线模型无需下载，但需要先配置对应服务的密钥。"
+            "选择后会成为歌词识别和批量识别的默认引擎。"
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#666")
+        card_layout.addWidget(note)
+        table = QTableWidget(0, 5)
+        table.setHorizontalHeaderLabels(
+            ["模型名称", "适用场景", "速度", "状态", "操作"]
+        )
+        table.verticalHeader().setVisible(False)
+        table.setAlternatingRowColors(True)
+        table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        table.setMinimumHeight(145)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for column in (2, 3, 4):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        card_layout.addWidget(table)
+        key_row = QHBoxLayout()
+        key_row.addStretch()
+        key_button = QPushButton("管理在线模型密钥")
+        key_button.clicked.connect(lambda: self.done(self.OPEN_KEY_MANAGER))
+        key_row.addWidget(key_button)
+        card_layout.addLayout(key_row)
+        return card, table
 
     def _build_card(self, title: str, description: str, category: str):
         card = QGroupBox()
@@ -281,8 +365,50 @@ class ModelLibraryDialog(QDialog):
         return (Path.home() / ".cache" / "whisper" / f"{model.key}.pt").is_file()
 
     def refresh_tables(self, *_args):
+        self._fill_online_table()
         self._fill_table(self.asr_table, "asr")
         self._fill_table(self.separation_table, "separation")
+
+    def _fill_online_table(self):
+        query = self.search_input.text().strip().lower()
+        models = [
+            model
+            for model in ONLINE_MODELS
+            if not query
+            or query in f"{model.name} {model.description} {model.key}".lower()
+        ]
+        self.online_table.setRowCount(len(models))
+        for row, model in enumerate(models):
+            configured = self._online_model_configured(model.key)
+            active = self.config.asr.provider == model.key
+            for column, value in enumerate(
+                (model.name, model.description, model.speed)
+            ):
+                self.online_table.setItem(row, column, QTableWidgetItem(value))
+            if active and configured:
+                status = "正在使用 ✓"
+            elif active:
+                status = "当前选择 · 缺少密钥"
+            else:
+                status = "已配置" if configured else "缺少密钥"
+            self.online_table.setItem(row, 3, QTableWidgetItem(status))
+            button = QPushButton()
+            button.setProperty("provider", model.key)
+            if not configured:
+                button.setText("配置密钥")
+                button.clicked.connect(lambda: self.done(self.OPEN_KEY_MANAGER))
+            else:
+                button.setText("正在使用" if active else "使用")
+                button.setEnabled(not active)
+                button.clicked.connect(self._select_online_model)
+            self.online_table.setCellWidget(row, 4, button)
+
+    def _online_model_configured(self, provider: str) -> bool:
+        if provider == "groq":
+            return bool(self.config.groq_api_key)
+        if provider == "xunfei":
+            return self.config.has_xunfei_credentials
+        return False
 
     def _fill_table(self, table: QTableWidget, category: str):
         query = self.search_input.text().strip().lower()
@@ -304,13 +430,60 @@ class ModelLibraryDialog(QDialog):
             for column, value in enumerate(values):
                 table.setItem(row, column, QTableWidgetItem(value))
             installed = self._installed(model)
-            table.setItem(row, 5, QTableWidgetItem("已安装 ✓" if installed else "等待下载"))
-            button = QPushButton("重新下载" if installed else "下载")
+            active = (
+                category == "asr"
+                and installed
+                and self.config.asr.provider == "local"
+                and self.config.asr.local_model == model.key
+            )
+            status = (
+                "正在使用 ✓"
+                if active
+                else ("已安装 ✓" if installed else "等待下载")
+            )
+            table.setItem(row, 5, QTableWidgetItem(status))
+            if category == "asr" and installed:
+                button = QPushButton("正在使用" if active else "使用")
+                button.setEnabled(not active and self._worker is None)
+                button.setProperty("model", model.key)
+                button.clicked.connect(self._select_local_model)
+            else:
+                button = QPushButton("重新下载" if installed else "下载")
+                button.setEnabled(self._worker is None)
+                button.clicked.connect(self._install_clicked)
             button.setProperty("category", model.category)
             button.setProperty("model", model.key)
-            button.clicked.connect(self._install_clicked)
-            button.setEnabled(self._worker is None)
             table.setCellWidget(row, 6, button)
+
+    def _select_online_model(self):
+        provider = self.sender().property("provider")
+        if not self._online_model_configured(provider):
+            self.done(self.OPEN_KEY_MANAGER)
+            return
+        self.config.asr.provider = provider
+        self._save_config()
+        display_name = next(
+            (model.name for model in ONLINE_MODELS if model.key == provider),
+            provider,
+        )
+        self.status_label.setText(f"已切换到在线模型：{display_name}。")
+        self.refresh_tables()
+        self.model_state_changed.emit()
+
+    def _select_local_model(self):
+        self._activate_local_model(self.sender().property("model"))
+
+    def _activate_local_model(self, model: str):
+        self.config.asr.provider = "local"
+        self.config.asr.local_model = model
+        self._save_config()
+        self.status_label.setText(f"已切换到本地 Whisper {model}。")
+        self.refresh_tables()
+        self.model_state_changed.emit()
+
+    def _save_config(self):
+        config_manager.config = self.config
+        config_manager.save()
 
     def _refresh_runtime_status(self):
         try:
@@ -344,16 +517,21 @@ class ModelLibraryDialog(QDialog):
 
     def _save_separation_gpu_preference(self, enabled: bool):
         self.config.asr.vocal_separation_use_gpu = bool(enabled)
-        config_manager.config = self.config
-        config_manager.save()
+        self._save_config()
+        self.model_state_changed.emit()
 
     def _save_default_separation_model(self, _index: int = -1):
         self.config.asr.vocal_separation_model = self.separation_model_combo.currentData()
-        config_manager.config = self.config
-        config_manager.save()
+        self._save_config()
+        self.model_state_changed.emit()
 
     def _install_clicked(self):
         button = self.sender()
+        self._pending_local_model = (
+            button.property("model")
+            if button.property("category") == "asr"
+            else ""
+        )
         self._worker = ModelInstallWorker(
             button.property("category"), button.property("model"), self
         )
@@ -385,6 +563,12 @@ class ModelLibraryDialog(QDialog):
         self._worker = None
         self.refresh_tables()
         if success:
+            if self._pending_local_model:
+                model = self._pending_local_model
+                self._pending_local_model = ""
+                self._activate_local_model(model)
+                return
             self.model_state_changed.emit()
         elif "取消" not in message:
             QMessageBox.warning(self, "模型安装失败", message)
+        self._pending_local_model = ""

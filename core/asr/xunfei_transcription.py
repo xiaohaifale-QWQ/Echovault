@@ -40,6 +40,10 @@ class XunfeiAPIError(RuntimeError):
         self.status_code = status_code
 
 
+class XunfeiStreamClosedError(RuntimeError):
+    """流式听写因端点检测提前关闭，需要缩短音频片段重试。"""
+
+
 class XunfeiTranscriptionProvider(ASRProvider):
     """讯飞极速录音转写与流式语音听写兼容 Provider。"""
 
@@ -49,6 +53,8 @@ class XunfeiTranscriptionProvider(ASRProvider):
     _MAX_UPLOAD_BYTES = 30 * 1024 * 1024
     _IAT_URL = "wss://iat-api.xfyun.cn/v2/iat"
     _IAT_CHUNK_SECONDS = 50
+    _IAT_RETRY_SECONDS = 8
+    _IAT_EOS_SECONDS = 10
     _IAT_FRAME_BYTES = 1280
     _IAT_MAX_WORKERS = 4
     _SPEED_FALLBACK_CODES = {"11200", "11201"}
@@ -163,7 +169,7 @@ class XunfeiTranscriptionProvider(ASRProvider):
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
                 executor.submit(
-                    self._transcribe_streaming_chunk,
+                    self._transcribe_streaming_chunk_resilient,
                     audio_data,
                     language,
                     offset,
@@ -205,6 +211,61 @@ class XunfeiTranscriptionProvider(ASRProvider):
                 "讯飞流式识别需要 16 kHz、16-bit、单声道 PCM 音频。"
             )
         return pcm_data, sample_rate
+
+    def _transcribe_streaming_chunk_resilient(
+        self,
+        audio_data: bytes,
+        language: Optional[str],
+        offset: float,
+    ) -> list[Segment]:
+        try:
+            segments = self._transcribe_streaming_chunk(
+                audio_data,
+                language,
+                offset,
+            )
+        except XunfeiStreamClosedError:
+            return self._retry_streaming_tail(audio_data, language, offset, 0.0)
+
+        chunk_duration = len(audio_data) / 32000
+        if chunk_duration <= self._IAT_RETRY_SECONDS:
+            return segments
+        coverage_end = max(
+            (segment.end_time - offset for segment in segments),
+            default=0.0,
+        )
+        if chunk_duration - coverage_end <= self._IAT_EOS_SECONDS:
+            return segments
+        retry_start = max(0.0, coverage_end + 0.5) if segments else 0.0
+        return segments + self._retry_streaming_tail(
+            audio_data,
+            language,
+            offset,
+            retry_start,
+        )
+
+    def _retry_streaming_tail(
+        self,
+        audio_data: bytes,
+        language: Optional[str],
+        offset: float,
+        start_seconds: float,
+    ) -> list[Segment]:
+        retry_bytes = self._IAT_RETRY_SECONDS * 32000
+        start_byte = min(len(audio_data), int(start_seconds * 32000))
+        start_byte -= start_byte % 2
+        segments: list[Segment] = []
+        for byte_offset in range(start_byte, len(audio_data), retry_bytes):
+            retry_data = audio_data[byte_offset : byte_offset + retry_bytes]
+            retry_offset = offset + byte_offset / 32000
+            segments.extend(
+                self._transcribe_streaming_chunk(
+                    retry_data,
+                    language,
+                    retry_offset,
+                )
+            )
+        return segments
 
     def _transcribe_streaming_chunk(
         self,
@@ -250,7 +311,12 @@ class XunfeiTranscriptionProvider(ASRProvider):
 
             while True:
                 try:
-                    message = json.loads(connection.recv())
+                    raw_message = connection.recv()
+                    if not raw_message:
+                        raise XunfeiStreamClosedError(
+                            "讯飞在返回最终结果前关闭了流式连接。"
+                        )
+                    message = json.loads(raw_message)
                 except json.JSONDecodeError as exc:
                     raise RuntimeError("讯飞流式听写返回了无效 JSON。") from exc
                 code = message.get("code", -1)
@@ -263,6 +329,10 @@ class XunfeiTranscriptionProvider(ASRProvider):
                 packets.append(message)
                 if (message.get("data") or {}).get("status") == 2:
                     break
+        except websocket.WebSocketConnectionClosedException as exc:
+            raise XunfeiStreamClosedError(
+                "讯飞因长静音或端点检测提前关闭了流式连接。"
+            ) from exc
         except websocket.WebSocketException as exc:
             raise RuntimeError(f"讯飞流式听写连接中断：{exc}") from exc
         finally:

@@ -9,6 +9,7 @@ def test_key_manager_saves_all_keys_locally(tmp_path, monkeypatch):
     ensure_app()
     monkeypatch.setattr(config_manager, "config_path", tmp_path / "config.json")
     config = AppConfig()
+    config.asr.provider = "local"
     dialog = keep_widget(KeyManagerDialog(config))
     dialog.groq_input.setText("groq-key")
     dialog.groq_proxy_input.setText("http://127.0.0.1:7890")
@@ -30,6 +31,7 @@ def test_key_manager_saves_all_keys_locally(tmp_path, monkeypatch):
     assert config.ai_model_api_key == "ai-key"
     assert config.ai_base_url == "https://example.invalid"
     assert config.ai_model_name == "test-model"
+    assert config.asr.provider == "local"
     assert (tmp_path / "config.json").is_file()
 
 
