@@ -1,10 +1,10 @@
 ﻿"""
 琳琅乐府 主窗口
 
-三栏布局：
-- 左侧：音乐库文件夹树
-- 中间：歌曲列表 + 状态
-- 右侧：详情/同步（选项卡切换）
+工作区布局：
+- 左侧：素材 / 歌词与标签 / 音频编辑 / 导出与传输
+- 中间：当前工作区
+- 右侧：仅在启动 AI 后显示 AI 助手
 
 菜单栏：文件 / 识别 / 同步 / 设置 / 帮助
 状态栏：歌曲统计 + 上次同步时间
@@ -18,6 +18,9 @@ from pathlib import Path
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
+    QButtonGroup,
+    QFrame,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMenu,
@@ -28,6 +31,8 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QStatusBar,
     QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from core.ai_control import validate_cli_command
@@ -98,63 +103,136 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         """初始化 UI 布局"""
         self.setWindowTitle("琳琅乐府 — AI 歌词识别")
-        self.setMinimumSize(QSize(1100, 680))
-        self.resize(QSize(1280, 780))
+        self.setMinimumSize(QSize(1180, 720))
+        self.resize(QSize(1440, 860))
 
-        # 中间/右侧内容区。启用 AI 后，外层会在其左侧固定一栏聊天面板。
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.content_splitter = splitter
-
-        # 左侧：素材列表
+        # 所有业务面板只实例化一次，再按用户任务归入四个工作区。
         self.song_list_panel = SongListPanel()
         self.lyrics_preview_panel = LyricsPreviewPanel()
         self.online_comparison_panel = OnlineLyricsComparisonPane()
-        self.left_stack = QStackedWidget()
-        self.left_stack.addWidget(self.song_list_panel)
-        self.left_stack.addWidget(self.lyrics_preview_panel)
-        self.left_stack.addWidget(self.online_comparison_panel)
-        splitter.addWidget(self.left_stack)
-
         self.vocal_lyrics_panel = LyricsPreviewPanel()
         self.vocal_lyrics_panel.title_label.setText("实时歌词")
-        self.vocal_lyrics_panel.song_label.setText("左侧选择素材后显示本地识别歌词")
-        self.vocal_lyrics_panel.setVisible(False)
-        splitter.addWidget(self.vocal_lyrics_panel)
-
-        # 右侧：选项卡
-        self.right_tabs = QTabWidget()
-
+        self.vocal_lyrics_panel.song_label.setText("选择素材后显示本地识别歌词")
         self.detail_panel = DetailPanel(self.config)
-        self.right_tabs.addTab(self.detail_panel, "详情")
-
         self.library_panel = LibraryPanel()
-        self.right_tabs.addTab(self.library_panel, "素材库")
-
         self.online_lyrics_panel = OnlineLyricsPanel()
         self.online_lyrics_panel.bind_comparison_pane(self.online_comparison_panel)
-        self.right_tabs.addTab(self.online_lyrics_panel, "在线匹配")
-
         self.vocal_separation_panel = VocalSeparationPanel(self.config)
         self.vocal_separation_panel.model_library_requested.connect(
             self._on_model_library
         )
-        self.right_tabs.addTab(self.vocal_separation_panel, "人声分离")
-
         self.audio_editor_panel = AudioEditorPanel()
-        self.right_tabs.addTab(self.audio_editor_panel, "音频编辑")
-
         self.batch_operations_panel = BatchOperationsPanel(self.config)
-        self.right_tabs.addTab(self.batch_operations_panel, "批量处理")
-
         self.sync_panel = SyncPanel()
-        self.right_tabs.addTab(self.sync_panel, "手机传输")
 
-        splitter.addWidget(self.right_tabs)
+        shell = QWidget()
+        shell_layout = QHBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
 
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        splitter.setStretchFactor(2, 2)
-        splitter.setSizes([720, 0, 500])
+        self.navigation = self._build_navigation()
+        shell_layout.addWidget(self.navigation)
+
+        workspace_container = QWidget()
+        workspace_layout = QVBoxLayout(workspace_container)
+        workspace_layout.setContentsMargins(18, 14, 18, 12)
+        workspace_layout.setSpacing(10)
+        header_row = QHBoxLayout()
+        header_text = QVBoxLayout()
+        self.workspace_title = QLabel("素材")
+        self.workspace_title.setObjectName("workspaceTitle")
+        self.workspace_hint = QLabel("添加文件夹、浏览素材，并选择接下来要执行的任务。")
+        self.workspace_hint.setObjectName("workspaceHint")
+        header_text.addWidget(self.workspace_title)
+        header_text.addWidget(self.workspace_hint)
+        header_row.addLayout(header_text)
+        header_row.addStretch()
+        self.batch_shortcut_button = QPushButton("批量任务")
+        self.batch_shortcut_button.setObjectName("secondaryAction")
+        self.batch_shortcut_button.clicked.connect(self._show_batch_workspace)
+        header_row.addWidget(self.batch_shortcut_button)
+        workspace_layout.addLayout(header_row)
+
+        self.workspace_stack = QStackedWidget()
+        self.workspace_pages = {
+            "materials": self._build_materials_workspace(),
+            "lyrics": self._build_lyrics_workspace(),
+            "audio": self._build_audio_workspace(),
+            "transfer": self._build_transfer_workspace(),
+        }
+        for page in self.workspace_pages.values():
+            self.workspace_stack.addWidget(page)
+        workspace_layout.addWidget(self.workspace_stack, 1)
+        shell_layout.addWidget(workspace_container, 1)
+
+        self.setStyleSheet(
+            """
+            QFrame#workspaceNavigation {
+                background: #F7F9FC;
+                border-right: 1px solid #DDE3EA;
+            }
+            QLabel#productName {
+                color: #14213D;
+                font-size: 18px;
+                font-weight: 700;
+                padding: 8px 10px 18px 10px;
+            }
+            QPushButton#workspaceNavigationButton {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 7px;
+                color: #26354A;
+                font-size: 14px;
+                font-weight: 600;
+                padding: 12px 14px;
+                text-align: left;
+            }
+            QPushButton#workspaceNavigationButton:hover {
+                background: #EEF4FB;
+            }
+            QPushButton#workspaceNavigationButton:checked {
+                background: #E8F1FC;
+                border-color: #AFCBEA;
+                color: #1F6FBB;
+            }
+            QLabel#workspaceTitle {
+                color: #14213D;
+                font-size: 22px;
+                font-weight: 700;
+            }
+            QLabel#workspaceHint {
+                color: #6B7686;
+                font-size: 12px;
+            }
+            QFrame#selectedMaterialCard {
+                background: #FFFFFF;
+                border: 1px solid #DDE3EA;
+                border-radius: 9px;
+            }
+            QPushButton#primaryAction {
+                background: #2F7DD1;
+                border: none;
+                border-radius: 6px;
+                color: white;
+                font-size: 13px;
+                font-weight: 700;
+                padding: 10px 16px;
+            }
+            QPushButton#primaryAction:hover {
+                background: #236DBB;
+            }
+            QPushButton#secondaryAction {
+                background: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                color: #26354A;
+                padding: 8px 14px;
+            }
+            QPushButton#secondaryAction:hover {
+                background: #F3F6FA;
+            }
+            """
+        )
 
         self._ai_panel_width = 340
         self._ai_mode_enabled = False
@@ -162,13 +240,185 @@ class MainWindow(QMainWindow):
         self.ai_chat_panel.setFixedWidth(self._ai_panel_width)
         self.ai_chat_panel.setVisible(False)
         self.outer_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.outer_splitter.addWidget(shell)
         self.outer_splitter.addWidget(self.ai_chat_panel)
-        self.outer_splitter.addWidget(splitter)
-        self.outer_splitter.setCollapsible(0, False)
-        self.outer_splitter.setStretchFactor(0, 0)
-        self.outer_splitter.setStretchFactor(1, 1)
-        self.outer_splitter.setSizes([0, 1280])
+        self.outer_splitter.setCollapsible(1, False)
+        self.outer_splitter.setStretchFactor(0, 1)
+        self.outer_splitter.setStretchFactor(1, 0)
+        self.outer_splitter.setSizes([1440, 0])
         self.setCentralWidget(self.outer_splitter)
+        self._switch_workspace("materials")
+
+    def _build_navigation(self):
+        navigation = QFrame()
+        navigation.setObjectName("workspaceNavigation")
+        navigation.setFixedWidth(205)
+        layout = QVBoxLayout(navigation)
+        layout.setContentsMargins(10, 12, 10, 12)
+        product = QLabel("琳琅乐府\nEchovault")
+        product.setObjectName("productName")
+        layout.addWidget(product)
+
+        self.navigation_group = QButtonGroup(self)
+        self.navigation_group.setExclusive(True)
+        self.navigation_buttons = {}
+        entries = (
+            ("materials", "▣  素材"),
+            ("lyrics", "♫  歌词与标签"),
+            ("audio", "≋  音频编辑"),
+            ("transfer", "⇄  导出与传输"),
+        )
+        for key, title in entries:
+            button = QPushButton(title)
+            button.setObjectName("workspaceNavigationButton")
+            button.setCheckable(True)
+            button.setMinimumHeight(48)
+            button.clicked.connect(
+                lambda _checked=False, target=key: self._switch_workspace(target)
+            )
+            self.navigation_group.addButton(button)
+            self.navigation_buttons[key] = button
+            layout.addWidget(button)
+        layout.addStretch()
+
+        self.navigation_status = QLabel("选择素材后，按任务继续处理。")
+        self.navigation_status.setWordWrap(True)
+        self.navigation_status.setStyleSheet(
+            "color:#768295;font-size:11px;padding:8px 10px"
+        )
+        layout.addWidget(self.navigation_status)
+        return navigation
+
+    def _build_materials_workspace(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        selected_card = QFrame()
+        selected_card.setObjectName("selectedMaterialCard")
+        selected_layout = QHBoxLayout(selected_card)
+        selected_layout.setContentsMargins(16, 12, 16, 12)
+        text_layout = QVBoxLayout()
+        self.selected_material_name = QLabel("尚未选择素材")
+        self.selected_material_name.setStyleSheet(
+            "font-size:17px;font-weight:700;color:#14213D"
+        )
+        self.selected_material_path = QLabel("从下方素材列表选择音乐或视频。")
+        self.selected_material_path.setWordWrap(True)
+        self.selected_material_path.setStyleSheet("color:#6B7686;font-size:11px")
+        text_layout.addWidget(self.selected_material_name)
+        text_layout.addWidget(self.selected_material_path)
+        selected_layout.addLayout(text_layout, 1)
+        lyrics_action = QPushButton("识别或匹配歌词")
+        lyrics_action.setObjectName("secondaryAction")
+        lyrics_action.clicked.connect(self._show_selected_lyrics)
+        selected_layout.addWidget(lyrics_action)
+        cover_action = QPushButton("封面与标签")
+        cover_action.setObjectName("secondaryAction")
+        cover_action.clicked.connect(self._show_cover_workspace)
+        selected_layout.addWidget(cover_action)
+        audio_action = QPushButton("编辑音频")
+        audio_action.setObjectName("primaryAction")
+        audio_action.clicked.connect(lambda: self._switch_workspace("audio"))
+        selected_layout.addWidget(audio_action)
+        layout.addWidget(selected_card)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(self.library_panel)
+        splitter.addWidget(self.song_list_panel)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
+        splitter.setSizes([520, 760])
+        self.materials_splitter = splitter
+        layout.addWidget(splitter, 1)
+        return page
+
+    def _build_lyrics_workspace(self):
+        self.lyrics_tabs = QTabWidget()
+        self.lyrics_tabs.setDocumentMode(True)
+
+        recognition_page = QWidget()
+        recognition_layout = QHBoxLayout(recognition_page)
+        recognition_layout.setContentsMargins(0, 0, 0, 0)
+        recognition_splitter = QSplitter(Qt.Orientation.Horizontal)
+        recognition_splitter.addWidget(self.lyrics_preview_panel)
+        recognition_splitter.addWidget(self.detail_panel)
+        recognition_splitter.setSizes([720, 480])
+        recognition_layout.addWidget(recognition_splitter)
+        self.lyrics_tabs.addTab(recognition_page, "识别、编辑与翻译")
+
+        online_page = QWidget()
+        online_layout = QHBoxLayout(online_page)
+        online_layout.setContentsMargins(0, 0, 0, 0)
+        online_splitter = QSplitter(Qt.Orientation.Horizontal)
+        online_splitter.addWidget(self.online_comparison_panel)
+        online_splitter.addWidget(self.online_lyrics_panel)
+        online_splitter.setSizes([760, 500])
+        online_layout.addWidget(online_splitter)
+        self.lyrics_tabs.addTab(online_page, "在线歌词与封面")
+        self.lyrics_tabs.currentChanged.connect(self._on_lyrics_tab_changed)
+        return self.lyrics_tabs
+
+    def _build_audio_workspace(self):
+        self.audio_tabs = QTabWidget()
+        self.audio_tabs.setDocumentMode(True)
+        self.audio_tabs.addTab(self.audio_editor_panel, "音频编辑")
+
+        separation_page = QWidget()
+        separation_layout = QHBoxLayout(separation_page)
+        separation_layout.setContentsMargins(0, 0, 0, 0)
+        separation_splitter = QSplitter(Qt.Orientation.Horizontal)
+        separation_splitter.addWidget(self.vocal_lyrics_panel)
+        separation_splitter.addWidget(self.vocal_separation_panel)
+        separation_splitter.setSizes([400, 820])
+        separation_layout.addWidget(separation_splitter)
+        self.audio_tabs.addTab(separation_page, "人声分离")
+        return self.audio_tabs
+
+    def _build_transfer_workspace(self):
+        self.transfer_tabs = QTabWidget()
+        self.transfer_tabs.setDocumentMode(True)
+        self.transfer_tabs.addTab(self.sync_panel, "手机接收与回传")
+        self.transfer_tabs.addTab(self.batch_operations_panel, "批量任务")
+        return self.transfer_tabs
+
+    def _switch_workspace(self, key: str):
+        page = self.workspace_pages.get(key)
+        if page is None:
+            return
+        titles = {
+            "materials": ("素材", "添加文件夹、浏览素材，并选择接下来要执行的任务。"),
+            "lyrics": ("歌词与标签", "识别、编辑、翻译、在线匹配歌词和封面。"),
+            "audio": ("音频编辑", "编辑声音、分离人声，并把结果保存为新文件。"),
+            "transfer": ("导出与传输", "核对处理结果、执行批量任务并发送回手机。"),
+        }
+        title, hint = titles[key]
+        self.workspace_title.setText(title)
+        self.workspace_hint.setText(hint)
+        self.workspace_stack.setCurrentWidget(page)
+        self.navigation_buttons[key].setChecked(True)
+        if key == "lyrics" and self.lyrics_tabs.currentIndex() == 1:
+            self._refresh_online_catalog()
+        if key == "transfer":
+            self.sync_panel.refresh_transfer_results()
+
+    def _show_batch_workspace(self):
+        self._switch_workspace("transfer")
+        self.transfer_tabs.setCurrentWidget(self.batch_operations_panel)
+
+    def _show_selected_lyrics(self):
+        self._switch_workspace("lyrics")
+        self.lyrics_tabs.setCurrentIndex(0)
+
+    def _show_cover_workspace(self):
+        self._switch_workspace("lyrics")
+        self.lyrics_tabs.setCurrentIndex(1)
+        self.online_lyrics_panel._show_cover_results_mode()
+
+    def _on_lyrics_tab_changed(self, index: int):
+        if index == 1:
+            self._refresh_online_catalog()
 
     def _setup_menubar(self):
         """菜单栏"""
@@ -208,7 +458,7 @@ class MainWindow(QMainWindow):
         sync_goto_action = QAction("打开手机传输(&S)", self)
         sync_goto_action.setShortcut("Ctrl+D")
         sync_goto_action.triggered.connect(
-            lambda: self.right_tabs.setCurrentWidget(self.sync_panel)
+            lambda: self._switch_workspace("transfer")
         )
         sync_menu.addAction(sync_goto_action)
 
@@ -354,9 +604,9 @@ class MainWindow(QMainWindow):
         self.library_panel.calibration_changed.connect(self._on_video_calibration_changed)
         self.library_panel.aggregate_requested.connect(self._on_video_aggregate)
         self.library_panel.export_requested.connect(self._on_video_export)
-        self.right_tabs.currentChanged.connect(self._on_right_tab_changed)
 
         # 歌曲列表 → 详情面板
+        self.song_list_panel.song_selected.connect(self._on_song_selected)
         self.song_list_panel.song_selected.connect(self.detail_panel.show_song)
         self.song_list_panel.song_selected.connect(self.lyrics_preview_panel.show_song)
         self.song_list_panel.song_selected.connect(self.vocal_lyrics_panel.show_song)
@@ -484,7 +734,7 @@ class MainWindow(QMainWindow):
             self._on_folder_selected(folder)
 
     def _on_material_selected(self, material_path: str):
-        """Show the selected audio or video material's same-name LRC on the left."""
+        """Propagate a file selected directly from the folder browser."""
         path = Path(material_path)
         lrc_path = path.with_suffix(".lrc")
         song = {
@@ -494,11 +744,25 @@ class MainWindow(QMainWindow):
             "has_lrc": lrc_path.is_file(),
             "material_type": self.library_panel.mode,
         }
+        self._on_song_selected(song)
+        self.detail_panel.show_song(song)
         self.lyrics_preview_panel.show_song(song)
         self.vocal_lyrics_panel.show_song(song)
         self.online_lyrics_panel.show_song(song)
         self.audio_editor_panel.show_song(song)
-        self.left_stack.setCurrentWidget(self.lyrics_preview_panel)
+        self.vocal_separation_panel.select_song(str(path))
+
+    def _on_song_selected(self, song: dict):
+        if not song or not song.get("path"):
+            return
+        self._selected_song = dict(song)
+        path = Path(song["path"])
+        status = "已有歌词" if song.get("has_lrc") else "待识别歌词"
+        self.selected_material_name.setText(path.name)
+        self.selected_material_path.setText(f"{path.parent}  ·  {status}")
+        self.navigation_status.setText(
+            f"当前素材：{path.name}\n可继续处理、试听或导出。"
+        )
 
     def _on_audio_editor_output_created(
         self,
@@ -673,26 +937,6 @@ class MainWindow(QMainWindow):
                 break
         self.status_label.setText("歌词已保存")
         self._refresh_statusbar()
-
-    def _on_right_tab_changed(self, index: int):
-        current_panel = self.right_tabs.widget(index)
-        if current_panel is self.library_panel:
-            left_panel = self.lyrics_preview_panel
-        elif current_panel is self.online_lyrics_panel:
-            self._refresh_online_catalog()
-            left_panel = self.online_comparison_panel
-        elif current_panel is self.vocal_separation_panel:
-            left_panel = self.song_list_panel
-        else:
-            left_panel = self.song_list_panel
-        self.left_stack.setCurrentWidget(left_panel)
-        separation_mode = current_panel is self.vocal_separation_panel
-        self.vocal_lyrics_panel.setVisible(separation_mode)
-        self.left_stack.setMinimumWidth(280 if separation_mode else 0)
-        self.left_stack.setMaximumWidth(380 if separation_mode else 16777215)
-        self.content_splitter.setSizes(
-            [340, 420, 700] if separation_mode else [720, 0, 500]
-        )
 
     def _on_material_directories_changed(self, mode: str, directories: list[str]):
         if mode == "video":
@@ -1254,7 +1498,7 @@ class MainWindow(QMainWindow):
     def _toggle_ai_mode(self):
         if self._ai_mode_enabled:
             self.ai_chat_panel.setVisible(False)
-            self.outer_splitter.setSizes([0, max(1, self.width())])
+            self.outer_splitter.setSizes([max(1, self.width()), 0])
             self._ai_mode_enabled = False
             return
         from core.ai_assistant import settings_from_config
@@ -1276,7 +1520,7 @@ class MainWindow(QMainWindow):
             return
         self.ai_chat_panel.setVisible(True)
         self.outer_splitter.setSizes(
-            [self._ai_panel_width, max(1, self.width() - self._ai_panel_width)]
+            [max(1, self.width() - self._ai_panel_width), self._ai_panel_width]
         )
         self._ai_mode_enabled = True
 

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Changed
+
+- Replaced the seven equal right-side tabs with four task-oriented workspaces:
+  Materials, Lyrics & Tags, Audio Editing, and Export & Transfer. Existing detailed
+  behaviors remain available inside the relevant workspace instead of competing at
+  the same navigation level.
+- Moved the AI assistant from a fixed left column to a right-side drawer. The drawer
+  is absent during normal work and appears only after AI Mode is started.
+- Rebuilt Audio Editing as a continuous three-column workspace: categorized tools on
+  the left, persistent material/waveform/playback in the center, and the selected
+  tool's parameters on the right. Switching tools no longer loses the current media
+  context.
+- Added a selected-material action card that directly routes users to lyric work,
+  cover/tag work, or audio editing, plus a global Batch Tasks shortcut.
+
 ## 0.5.0 - 2026-07-17
 
 ### Added

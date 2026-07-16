@@ -15,12 +15,12 @@ from PyQt6.QtMultimedia import (
     QMediaPlayer,
 )
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QFrame,
-    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -30,8 +30,8 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
-    QScrollArea,
     QSpinBox,
+    QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -41,6 +41,7 @@ from core.audio_editor import AudioEditResult, process_audio
 from core.audio_utils import get_audio_info
 from core.metadata import read_tags
 from core.voice_cache import pcm_to_wav
+from ui.vocal_separation_panel import WaveformView
 
 
 @dataclass(frozen=True)
@@ -231,6 +232,13 @@ TOOLS = (
             ),
         ),
     ),
+)
+
+TOOL_GROUPS = (
+    ("基础编辑", ("edit", "trim", "split", "fade", "volume")),
+    ("音质处理", ("denoise", "normalize", "equalizer", "speed_pitch")),
+    ("多文件处理", ("concat", "mix")),
+    ("文件与输出", ("files", "extract", "tags", "record", "more")),
 )
 
 
@@ -526,7 +534,21 @@ class AudioEditorPanel(QWidget):
         self.record_page = self._build_record_page()
         self.stack.addWidget(self.file_page)
         self.stack.addWidget(self.record_page)
-        layout.addWidget(self.stack, 1)
+
+        editor_splitter = QSplitter(Qt.Orientation.Horizontal)
+        editor_splitter.addWidget(self._build_tool_navigation())
+        editor_splitter.addWidget(self._build_preview_workspace())
+        parameter_frame = QFrame()
+        parameter_frame.setObjectName("audioParameterPanel")
+        parameter_layout = QVBoxLayout(parameter_frame)
+        parameter_layout.setContentsMargins(10, 8, 10, 8)
+        parameter_layout.addWidget(self.stack)
+        editor_splitter.addWidget(parameter_frame)
+        editor_splitter.setStretchFactor(0, 0)
+        editor_splitter.setStretchFactor(1, 1)
+        editor_splitter.setStretchFactor(2, 0)
+        editor_splitter.setSizes([205, 620, 420])
+        layout.addWidget(editor_splitter, 1)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
@@ -537,36 +559,159 @@ class AudioEditorPanel(QWidget):
         self.status_label.setStyleSheet("font-size:11px;color:#667085")
         layout.addWidget(self.status_label)
 
+        self.setStyleSheet(
+            """
+            QFrame#audioToolRail {
+                background:#F7F9FC;
+                border:1px solid #DDE3EA;
+                border-radius:8px;
+            }
+            QPushButton#audioToolButton {
+                background:transparent;
+                border:1px solid transparent;
+                border-radius:5px;
+                color:#334155;
+                padding:7px 10px;
+                text-align:left;
+            }
+            QPushButton#audioToolButton:hover {
+                background:#EEF4FB;
+            }
+            QPushButton#audioToolButton:checked {
+                background:#E7F1FC;
+                border-color:#B7D1EC;
+                color:#1F6FBB;
+                font-weight:700;
+            }
+            QFrame#audioPreviewArea, QFrame#audioParameterPanel {
+                background:#FFFFFF;
+                border:1px solid #DDE3EA;
+                border-radius:8px;
+            }
+            """
+        )
+
     def _build_home(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        content = QWidget()
-        grid = QGridLayout(content)
-        for index, spec in enumerate(TOOLS):
-            button = QPushButton(f"{spec.icon}\n{spec.title}")
-            button.setMinimumSize(135, 82 if index < 4 else 68)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setToolTip(spec.description)
-            button.setStyleSheet(
-                "QPushButton{background:#F6F7FA;border:1px solid #DCE1E8;"
-                "border-radius:8px;font-size:14px;padding:8px;text-align:center}"
-                "QPushButton:hover{background:#EAF2FB;border-color:#6A9ED6}"
-            )
-            button.clicked.connect(lambda _checked=False, key=spec.key: self._open_tool(key))
-            if index < 4:
-                row, column = divmod(index, 2)
-            else:
-                row, column = divmod(index - 4, 3)
-                row += 2
-            grid.addWidget(button, row, column)
-        for column in range(3):
-            grid.setColumnStretch(column, 1)
-        scroll.setWidget(content)
-        layout.addWidget(scroll)
+        heading = QLabel("选择一个编辑工具")
+        heading.setStyleSheet("font-size:18px;font-weight:700;color:#14213D")
+        layout.addWidget(heading)
+        note = QLabel(
+            "左侧按任务分类选择工具。当前素材、波形和播放位置会一直保留；"
+            "右侧只切换当前工具的参数。"
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#667085;line-height:1.5")
+        layout.addWidget(note)
+
+        flow = QGroupBox("统一操作顺序")
+        flow_layout = QVBoxLayout(flow)
+        flow_layout.addWidget(QLabel("1　选择素材或时间范围"))
+        flow_layout.addWidget(QLabel("2　在右侧设置参数"))
+        flow_layout.addWidget(QLabel("3　试听输入与输出"))
+        flow_layout.addWidget(QLabel("4　执行处理并生成新文件"))
+        layout.addWidget(flow)
+
+        safe_note = QLabel(
+            "原文件不会被覆盖。默认结果保存到素材旁的 Echovault编辑输出，"
+            "手机任务来源会自动加入待回传。"
+        )
+        safe_note.setWordWrap(True)
+        safe_note.setStyleSheet(
+            "background:#F0F7F2;color:#2F6B3C;padding:10px;border-radius:6px"
+        )
+        layout.addWidget(safe_note)
+        layout.addStretch()
         return page
+
+    def _build_tool_navigation(self):
+        rail = QFrame()
+        rail.setObjectName("audioToolRail")
+        rail.setMinimumWidth(185)
+        rail.setMaximumWidth(230)
+        layout = QVBoxLayout(rail)
+        layout.setContentsMargins(8, 10, 8, 10)
+        layout.setSpacing(3)
+        self.tool_button_group = QButtonGroup(self)
+        self.tool_button_group.setExclusive(True)
+        self.tool_buttons = {}
+        by_key = {spec.key: spec for spec in TOOLS}
+        for group_title, keys in TOOL_GROUPS:
+            title = QLabel(group_title)
+            title.setStyleSheet(
+                "color:#64748B;font-size:11px;font-weight:700;padding:10px 7px 3px"
+            )
+            layout.addWidget(title)
+            for key in keys:
+                spec = by_key[key]
+                button = QPushButton(f"{spec.icon}  {spec.title}")
+                button.setObjectName("audioToolButton")
+                button.setCheckable(True)
+                button.setToolTip(spec.description)
+                button.clicked.connect(
+                    lambda _checked=False, target=key: self._open_tool(target)
+                )
+                self.tool_button_group.addButton(button)
+                self.tool_buttons[key] = button
+                layout.addWidget(button)
+        layout.addStretch()
+        return rail
+
+    def _build_preview_workspace(self):
+        frame = QFrame()
+        frame.setObjectName("audioPreviewArea")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(10)
+        heading = QLabel("素材与试听")
+        heading.setStyleSheet("font-size:15px;font-weight:700;color:#14213D")
+        layout.addWidget(heading)
+        self.preview_material = QLabel("请先从素材工作区选择音乐或视频")
+        self.preview_material.setWordWrap(True)
+        self.preview_material.setStyleSheet(
+            "background:#F7F9FC;color:#475569;padding:10px;border-radius:6px"
+        )
+        layout.addWidget(self.preview_material)
+
+        ruler = QHBoxLayout()
+        self.preview_start = QLabel("0:00")
+        self.preview_end = QLabel("0:00")
+        ruler.addWidget(self.preview_start)
+        ruler.addStretch()
+        ruler.addWidget(self.preview_end)
+        layout.addLayout(ruler)
+        self.waveform = WaveformView("#2F7DD1")
+        self.waveform.setMinimumHeight(190)
+        self.waveform.seek_requested.connect(self._seek_preview)
+        layout.addWidget(self.waveform, 1)
+        self.waveform_note = QLabel("WAV 素材会显示波形；其他格式仍可正常试听和处理。")
+        self.waveform_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.waveform_note.setStyleSheet("color:#7B8796;font-size:11px")
+        layout.addWidget(self.waveform_note)
+
+        controls = QHBoxLayout()
+        play = QPushButton("▶ 播放 / 暂停")
+        play.clicked.connect(self._toggle_preview_playback)
+        controls.addWidget(play)
+        stop = QPushButton("■ 停止")
+        stop.clicked.connect(self._player.stop)
+        controls.addWidget(stop)
+        self.preview_time = QLabel("0:00 / 0:00")
+        self.preview_time.setStyleSheet("font-weight:700;color:#334155")
+        controls.addWidget(self.preview_time)
+        controls.addStretch()
+        layout.addLayout(controls)
+
+        self.preview_result = QLabel("尚未生成编辑结果")
+        self.preview_result.setWordWrap(True)
+        self.preview_result.setStyleSheet(
+            "background:#F7F9FC;color:#667085;padding:10px;border-radius:6px"
+        )
+        layout.addWidget(self.preview_result)
+        self._player.positionChanged.connect(self._preview_position_changed)
+        self._player.durationChanged.connect(self._preview_duration_changed)
+        return frame
 
     def _build_file_page(self):
         page = QWidget()
@@ -638,6 +783,22 @@ class AudioEditorPanel(QWidget):
         self._song = dict(song)
         path = str(song["path"])
         self.current_label.setText(Path(path).name)
+        self.preview_material.setText(f"{Path(path).name}\n{Path(path).parent}")
+        if Path(path).suffix.lower() == ".wav":
+            self.waveform.load_wav(path)
+            self.waveform_note.setText("点击或拖动波形可以跳转试听位置。")
+        else:
+            self.waveform.samples = []
+            self.waveform.set_playhead(0)
+            self.waveform_note.setText(
+                "当前格式可正常试听和处理；生成 WAV 结果后会显示波形。"
+            )
+        try:
+            duration = float(get_audio_info(path).get("duration") or 0.0)
+        except (OSError, RuntimeError, ValueError):
+            duration = 0.0
+        self.preview_start.setText("0:00")
+        self.preview_end.setText(self._format_time(duration * 1000))
         self._refresh_file_info()
         for page in self.tool_pages.values():
             page.set_primary_input(path)
@@ -649,6 +810,9 @@ class AudioEditorPanel(QWidget):
             self.show_song(song)
 
     def _open_tool(self, key: str):
+        button = self.tool_buttons.get(key)
+        if button is not None:
+            button.setChecked(True)
         if key == "files":
             self._refresh_file_info()
             self.stack.setCurrentWidget(self.file_page)
@@ -708,6 +872,13 @@ class AudioEditorPanel(QWidget):
             item = self.output_list.item(self.output_list.count() - 1)
             item.setData(Qt.ItemDataRole.UserRole, output)
             self.output_created.emit(source_path, output, operation)
+        latest = result.outputs[-1]
+        self.preview_result.setText(
+            f"最近结果：{Path(latest).name}\n双击文件管理中的结果可打开。"
+        )
+        if Path(latest).suffix.lower() == ".wav":
+            self.waveform.load_wav(latest)
+            self.waveform_note.setText("当前波形显示最近生成的 WAV 结果。")
         QMessageBox.information(
             self,
             "音频编辑完成",
@@ -766,6 +937,39 @@ class AudioEditorPanel(QWidget):
             self._player.setSource(source)
         self._player.play()
         self.status_label.setText(f"正在试听：{candidate.name}")
+
+    def _toggle_preview_playback(self):
+        source = str(self._song.get("path", ""))
+        if not source:
+            QMessageBox.information(self, "试听", "请先从素材工作区选择文件。")
+            return
+        self._preview_audio(source)
+
+    def _seek_preview(self, ratio: float):
+        duration = self._player.duration()
+        if duration > 0:
+            self._player.setPosition(int(duration * ratio))
+
+    @staticmethod
+    def _format_time(milliseconds: float) -> str:
+        total_seconds = max(0, int(milliseconds / 1000))
+        minutes, seconds = divmod(total_seconds, 60)
+        return f"{minutes}:{seconds:02d}"
+
+    def _preview_position_changed(self, position: int):
+        duration = self._player.duration()
+        if duration > 0:
+            self.waveform.set_playhead(position / duration)
+        self.preview_time.setText(
+            f"{self._format_time(position)} / {self._format_time(duration)}"
+        )
+
+    def _preview_duration_changed(self, duration: int):
+        self.preview_end.setText(self._format_time(duration))
+        self.preview_time.setText(
+            f"{self._format_time(self._player.position())} / "
+            f"{self._format_time(duration)}"
+        )
 
     def _set_default_record_path(self, input_path: str):
         path = Path(input_path)

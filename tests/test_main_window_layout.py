@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from PyQt6.QtWidgets import QMessageBox
 
 from core.config import AppConfig
@@ -7,7 +9,7 @@ from ui.main_window import MainWindow
 from ui.online_lyrics_panel import CoverApplyAction, OnlineLyricsAction
 
 
-def test_main_window_has_audio_editor_tab_and_no_scattered_batch_buttons(monkeypatch):
+def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     ensure_app()
     monkeypatch.setattr("ui.main_window.config_manager.load", AppConfig)
     monkeypatch.setattr(
@@ -17,36 +19,57 @@ def test_main_window_has_audio_editor_tab_and_no_scattered_batch_buttons(monkeyp
 
     window = keep_widget(MainWindow())
 
-    assert [
-        window.right_tabs.tabText(index)
-        for index in range(window.right_tabs.count())
-    ] == [
-        "详情",
-        "素材库",
-        "在线匹配",
-        "人声分离",
-        "音频编辑",
-        "批量处理",
-        "手机传输",
+    assert [button.text() for button in window.navigation_buttons.values()] == [
+        "▣  素材",
+        "♫  歌词与标签",
+        "≋  音频编辑",
+        "⇄  导出与传输",
     ]
+    assert window.workspace_stack.currentWidget() is window.workspace_pages["materials"]
+    assert [window.lyrics_tabs.tabText(index) for index in range(2)] == [
+        "识别、编辑与翻译",
+        "在线歌词与封面",
+    ]
+    assert [window.audio_tabs.tabText(index) for index in range(2)] == [
+        "音频编辑",
+        "人声分离",
+    ]
+    assert [window.transfer_tabs.tabText(index) for index in range(2)] == [
+        "手机接收与回传",
+        "批量任务",
+    ]
+    assert window.outer_splitter.widget(1) is window.ai_chat_panel
+    assert window.ai_chat_panel.isHidden()
     assert window.model_library_action.text() == "模型库"
     assert window.model_library_action in window.menuBar().actions()
     assert not hasattr(window.song_list_panel, "btn_batch")
     assert not hasattr(window.detail_panel, "btn_batch_translate")
 
-    window.right_tabs.setCurrentWidget(window.online_lyrics_panel)
-    assert window.left_stack.currentWidget() is window.online_comparison_panel
+    window._switch_workspace("lyrics")
+    window.lyrics_tabs.setCurrentIndex(1)
+    assert window.workspace_stack.currentWidget() is window.workspace_pages["lyrics"]
     assert "本地识别歌词" in window.online_comparison_panel.local_editor.parent().title()
     assert "在线匹配歌词" in window.online_comparison_panel.online_editor.parent().title()
 
-    window.right_tabs.setCurrentWidget(window.detail_panel)
-    assert window.left_stack.currentWidget() is window.song_list_panel
-
-    window.right_tabs.setCurrentWidget(window.vocal_separation_panel)
-    assert window.left_stack.currentWidget() is window.song_list_panel
-    assert not window.vocal_lyrics_panel.isHidden()
+    window._switch_workspace("audio")
+    window.audio_tabs.setCurrentIndex(1)
+    assert window.workspace_stack.currentWidget() is window.workspace_pages["audio"]
     assert window.vocal_lyrics_panel.title_label.text() == "实时歌词"
-    assert window.content_splitter.count() == 3
+
+    monkeypatch.setattr(
+        "core.ai_assistant.settings_from_config",
+        lambda _config: SimpleNamespace(
+            requires_api_key=False,
+            api_key="",
+            base_url="http://127.0.0.1:11434/v1",
+            model="local-model",
+        ),
+    )
+    window._toggle_ai_mode()
+    assert not window.ai_chat_panel.isHidden()
+    assert window.outer_splitter.sizes()[1] > 0
+    window._toggle_ai_mode()
+    assert window.ai_chat_panel.isHidden()
 
 
 def test_main_window_applies_cross_merge_with_backup(monkeypatch, tmp_path):
