@@ -11,6 +11,14 @@
 
 ### Changed
 
+- Rebuilt Audio Editing around a real waveform timeline instead of a tool catalog.
+  FFmpeg now extracts filled min/max peaks from WAV, FLAC, MP3, video, and other
+  supported media; the editor provides a time ruler, playhead, drag selection,
+  precise start/end/duration controls, wheel and button zoom, scrolling, zoom to
+  selection, and selection-aware processing. Duplicate trim/edit and transport
+  controls were consolidated, while File Management, Recording, and More Features
+  were removed from this workspace. Tool parameters now stay in a dedicated effect
+  panel and completed results no longer replace the source waveform.
 - Added Fluent-inspired, interruptible shell motion: the navigation indicator now
   moves between task workspaces, workspace headings use an 83 ms reveal, and the AI
   drawer opens and closes over 167 ms. Heavy tables, cover grids, waveforms, and

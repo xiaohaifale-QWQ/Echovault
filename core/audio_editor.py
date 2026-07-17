@@ -91,6 +91,23 @@ def _media_duration(path: Path) -> float:
     return duration
 
 
+def _selection_input_args(path: Path, params: dict[str, Any]) -> list[str]:
+    """Build an FFmpeg input limited to the editor's active time selection."""
+    raw_start = params.get("selection_start")
+    raw_end = params.get("selection_end")
+    if raw_start is None or raw_end is None:
+        return ["-i", str(path)]
+    start = max(0.0, float(raw_start))
+    end = float(raw_end)
+    duration = _media_duration(path)
+    end = min(duration, end)
+    if end <= start:
+        raise ValueError("选区终点必须大于起点。")
+    if start >= duration:
+        raise ValueError("选区起点不能超过音频总时长。")
+    return ["-ss", f"{start:.3f}", "-i", str(path), "-t", f"{end - start:.3f}"]
+
+
 def _atomic_single_output(args: list[str], output_path: str) -> str:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -146,8 +163,11 @@ def process_audio(
         )
         outputs = [result]
     elif operation in {"trim", "edit"}:
-        start = max(0.0, float(params.get("start", 0.0)))
-        end = float(params.get("end", 0.0))
+        start = max(
+            0.0,
+            float(params.get("selection_start", params.get("start", 0.0))),
+        )
+        end = float(params.get("selection_end", params.get("end", 0.0)))
         if end and end <= start:
             raise ValueError("结束时间必须大于开始时间。")
         source_duration = _media_duration(paths[0])
@@ -217,7 +237,13 @@ def process_audio(
             )
         ]
     elif operation == "fade":
-        duration = _media_duration(paths[0])
+        selection_start = params.get("selection_start")
+        selection_end = params.get("selection_end")
+        duration = (
+            float(selection_end) - float(selection_start)
+            if selection_start is not None and selection_end is not None
+            else _media_duration(paths[0])
+        )
         fade_in = max(0.0, float(params.get("fade_in", 2.0)))
         fade_out = max(0.0, float(params.get("fade_out", 2.0)))
         filters = [
@@ -227,7 +253,12 @@ def process_audio(
         ]
         outputs = [
             _atomic_single_output(
-                ["-i", str(paths[0]), "-af", ",".join(filters), *_codec_args(output)],
+                [
+                    *_selection_input_args(paths[0], params),
+                    "-af",
+                    ",".join(filters),
+                    *_codec_args(output),
+                ],
                 str(output),
             )
         ]
@@ -243,7 +274,12 @@ def process_audio(
         ]
         outputs = [
             _atomic_single_output(
-                ["-i", str(paths[0]), "-af", ",".join(filters), *_codec_args(output)],
+                [
+                    *_selection_input_args(paths[0], params),
+                    "-af",
+                    ",".join(filters),
+                    *_codec_args(output),
+                ],
                 str(output),
             )
         ]
@@ -251,7 +287,12 @@ def process_audio(
         noise_floor = min(-20.0, max(-80.0, float(params.get("noise_floor", -25.0))))
         outputs = [
             _atomic_single_output(
-                ["-i", str(paths[0]), "-af", f"afftdn=nf={noise_floor:.1f}", *_codec_args(output)],
+                [
+                    *_selection_input_args(paths[0], params),
+                    "-af",
+                    f"afftdn=nf={noise_floor:.1f}",
+                    *_codec_args(output),
+                ],
                 str(output),
             )
         ]
@@ -261,7 +302,12 @@ def process_audio(
         loudnorm = f"loudnorm=I={target:.1f}:LRA=11:TP={peak:.1f}"
         outputs = [
             _atomic_single_output(
-                ["-i", str(paths[0]), "-af", loudnorm, *_codec_args(output)],
+                [
+                    *_selection_input_args(paths[0], params),
+                    "-af",
+                    loudnorm,
+                    *_codec_args(output),
+                ],
                 str(output),
             )
         ]
@@ -277,8 +323,7 @@ def process_audio(
             temp_pattern = Path(temp_dir) / f"{output.stem}_%03d{output.suffix}"
             _run_ffmpeg(
                 [
-                    "-i",
-                    str(paths[0]),
+                    *_selection_input_args(paths[0], params),
                     "-map",
                     "0:a:0",
                     *_codec_args(temp_pattern),
@@ -314,7 +359,12 @@ def process_audio(
         )
         outputs = [
             _atomic_single_output(
-                ["-i", str(paths[0]), "-af", filters, *_codec_args(output)],
+                [
+                    *_selection_input_args(paths[0], params),
+                    "-af",
+                    filters,
+                    *_codec_args(output),
+                ],
                 str(output),
             )
         ]
@@ -322,7 +372,12 @@ def process_audio(
         gain_db = min(30.0, max(-60.0, float(params.get("gain_db", 0.0))))
         outputs = [
             _atomic_single_output(
-                ["-i", str(paths[0]), "-af", f"volume={gain_db:.2f}dB", *_codec_args(output)],
+                [
+                    *_selection_input_args(paths[0], params),
+                    "-af",
+                    f"volume={gain_db:.2f}dB",
+                    *_codec_args(output),
+                ],
                 str(output),
             )
         ]
