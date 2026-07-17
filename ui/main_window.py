@@ -18,7 +18,7 @@ import sys
 from ctypes import wintypes
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QButtonGroup,
@@ -58,6 +58,7 @@ from ui.key_manager_dialog import KeyManagerDialog
 from ui.library_panel import LibraryPanel
 from ui.lyrics_preview_panel import LyricsPreviewPanel
 from ui.model_library_dialog import ModelLibraryDialog
+from ui.motion import MotionController
 from ui.online_lyrics_panel import (
     CoverApplyAction,
     LyricsCalibrationWorker,
@@ -86,6 +87,7 @@ class MainWindow(QMainWindow):
         self._selected_material_folder = ""
         self._online_catalog: list[dict] = []
         self._online_catalog_dirty = True
+        self._current_workspace_key = ""
 
         self._setup_ui()
         self._setup_menubar()
@@ -111,6 +113,10 @@ class MainWindow(QMainWindow):
         super().changeEvent(event)
         if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "title_bar"):
             self.title_bar.sync_window_state()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self._sync_navigation_indicator)
 
     def nativeEvent(self, event_type, message):
         """Restore native edge resizing while the Windows frame is hidden."""
@@ -220,6 +226,11 @@ class MainWindow(QMainWindow):
                 background: #F7F9FC;
                 border-right: 1px solid #DDE3EA;
             }
+            QFrame#navigationIndicator {
+                background: #2F7DD1;
+                border: none;
+                border-radius: 2px;
+            }
             QFrame#topHeader {
                 background: #FFFFFF;
                 border-bottom: 1px solid #E2E7EE;
@@ -328,7 +339,8 @@ class MainWindow(QMainWindow):
         self._ai_panel_width = 340
         self._ai_mode_enabled = False
         self.ai_chat_panel = AIChatPanel(self.config)
-        self.ai_chat_panel.setFixedWidth(self._ai_panel_width)
+        self.ai_chat_panel.setMinimumWidth(0)
+        self.ai_chat_panel.setMaximumWidth(self._ai_panel_width)
         self.ai_chat_panel.setVisible(False)
         self.outer_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.outer_splitter.addWidget(shell)
@@ -338,6 +350,7 @@ class MainWindow(QMainWindow):
         self.outer_splitter.setStretchFactor(1, 0)
         self.outer_splitter.setSizes([1440, 0])
         self.setCentralWidget(self.outer_splitter)
+        self.motion = MotionController(self)
         self._switch_workspace("materials")
 
     def _build_top_header(self):
@@ -448,6 +461,15 @@ class MainWindow(QMainWindow):
             self.navigation_group.addButton(button)
             self.navigation_buttons[key] = button
             layout.addWidget(button)
+
+        self.navigation_indicator = QFrame(navigation)
+        self.navigation_indicator.setObjectName("navigationIndicator")
+        self.navigation_indicator.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        self.navigation_indicator.setGeometry(3, 22, 3, 32)
+        self.navigation_indicator.hide()
+        self.navigation_indicator.raise_()
         layout.addStretch()
 
         self.navigation_status = QLabel("选择素材后，按任务继续处理。")
@@ -566,6 +588,7 @@ class MainWindow(QMainWindow):
         page = self.workspace_pages.get(key)
         if page is None:
             return
+        workspace_changed = key != self._current_workspace_key
         titles = {
             "materials": ("素材", "添加文件夹、浏览素材，并选择接下来要执行的任务。"),
             "lyrics": ("歌词与标签", "识别、编辑、翻译、在线匹配歌词和封面。"),
@@ -577,10 +600,37 @@ class MainWindow(QMainWindow):
         self.workspace_hint.setText(hint)
         self.workspace_stack.setCurrentWidget(page)
         self.navigation_buttons[key].setChecked(True)
+        self._current_workspace_key = key
+        self._move_navigation_indicator(self.navigation_buttons[key], workspace_changed)
+        if workspace_changed:
+            self.motion.fade_in(
+                "workspace-header", (self.workspace_title, self.workspace_hint)
+            )
         if key == "lyrics" and self.lyrics_tabs.currentIndex() == 1:
             self._refresh_online_catalog()
         if key == "transfer":
             self.sync_panel.refresh_transfer_results()
+
+    def _move_navigation_indicator(self, button: QPushButton, animate: bool) -> None:
+        if not self.isVisible():
+            self.navigation_indicator.hide()
+            return
+        height = button.height()
+        if height <= 0 or height > 100:
+            height = max(48, button.minimumHeight())
+        top = button.mapTo(self.navigation, QPoint(0, 0)).y()
+        target = QRect(3, top + 8, 3, max(20, height - 16))
+        if animate:
+            self.motion.animate_geometry("navigation-indicator", self.navigation_indicator, target)
+        else:
+            self.navigation_indicator.setGeometry(target)
+        self.navigation_indicator.show()
+        self.navigation_indicator.raise_()
+
+    def _sync_navigation_indicator(self) -> None:
+        button = self.navigation_buttons.get(self._current_workspace_key)
+        if button is not None:
+            self._move_navigation_indicator(button, animate=False)
 
     def _show_batch_workspace(self):
         self._switch_workspace("transfer")
@@ -1679,9 +1729,13 @@ class MainWindow(QMainWindow):
 
     def _toggle_ai_mode(self):
         if self._ai_mode_enabled:
-            self.ai_chat_panel.setVisible(False)
-            self.outer_splitter.setSizes([max(1, self.width()), 0])
             self._ai_mode_enabled = False
+            self.motion.animate_splitter_panel(
+                "ai-drawer",
+                self.outer_splitter,
+                self.ai_chat_panel,
+                0,
+            )
             return
         from core.ai_assistant import settings_from_config
 
@@ -1700,11 +1754,13 @@ class MainWindow(QMainWindow):
                 "请先在“设置 → 本地部署 AI”中填写接口地址和模型名称。",
             )
             return
-        self.ai_chat_panel.setVisible(True)
-        self.outer_splitter.setSizes(
-            [max(1, self.width() - self._ai_panel_width), self._ai_panel_width]
-        )
         self._ai_mode_enabled = True
+        self.motion.animate_splitter_panel(
+            "ai-drawer",
+            self.outer_splitter,
+            self.ai_chat_panel,
+            self._ai_panel_width,
+        )
 
     def _configure_voice_input_shortcut(self):
         self._voice_shortcut.setKey(QKeySequence(self.config.voice_input_shortcut))

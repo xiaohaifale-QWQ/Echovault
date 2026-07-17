@@ -4,6 +4,10 @@
 
 ### Changed
 
+- Added Fluent-inspired, interruptible shell motion: the navigation indicator now
+  moves between task workspaces, workspace headings use an 83 ms reveal, and the AI
+  drawer opens and closes over 167 ms. Heavy tables, cover grids, waveforms, and
+  scrolling content remain unanimated to avoid unnecessary repainting.
 - Replaced the mismatched dark Windows caption on the main window with an integrated
   light title bar inspired by Codex. Native move, edge resize, minimize, maximize,
   restore, double-click maximize, and close behavior remain available.
