@@ -13,7 +13,7 @@ from ui.theme import (
     apply_application_theme,
     polish_widget_tree,
 )
-from ui.title_bar import ApplicationTitleBar
+from ui.title_bar import ApplicationTitleBar, FramelessResizeHandles
 
 
 def test_theme_uses_rounded_light_controls_and_blue_primary_actions():
@@ -58,3 +58,35 @@ def test_application_title_bar_exposes_standard_window_controls():
     assert title_bar.minimize_button.toolTip() == "最小化"
     assert title_bar.maximize_button.toolTip() == "最大化"
     assert title_bar.close_button.toolTip() == "关闭"
+
+
+def test_frameless_resize_handles_cover_every_window_edge():
+    ensure_app()
+    window = keep_widget(QMainWindow())
+    window.resize(640, 480)
+    resize_handles = FramelessResizeHandles(window)
+    resize_handles.update_geometry()
+
+    border = resize_handles.BORDER
+    assert set(resize_handles.handles) == {
+        "left",
+        "right",
+        "top",
+        "bottom",
+        "top_left",
+        "top_right",
+        "bottom_left",
+        "bottom_right",
+    }
+    assert resize_handles.handles["left"].geometry().getRect() == (
+        0,
+        border,
+        border,
+        480 - 2 * border,
+    )
+    assert resize_handles.handles["bottom_right"].geometry().getRect() == (
+        640 - border,
+        480 - border,
+        border,
+        border,
+    )

@@ -2,8 +2,96 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtCore import QEvent, QObject, QSize, Qt
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QStyle, QWidget
+
+
+class _ResizeHandle(QWidget):
+    """Transparent edge that delegates resizing to the platform window."""
+
+    def __init__(self, window: QWidget, edges, cursor: Qt.CursorShape):
+        super().__init__(window)
+        self._window = window
+        self._edges = edges
+        self.setCursor(cursor)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and not self._window.isMaximized():
+            handle = self._window.windowHandle()
+            if handle is not None and handle.startSystemResize(self._edges):
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+
+class FramelessResizeHandles(QObject):
+    """Provide safe four-edge and four-corner resizing for a frameless window."""
+
+    BORDER = 7
+
+    def __init__(self, window: QWidget):
+        super().__init__(window)
+        self._window = window
+        left = Qt.Edge.LeftEdge
+        right = Qt.Edge.RightEdge
+        top = Qt.Edge.TopEdge
+        bottom = Qt.Edge.BottomEdge
+        self.handles = {
+            "left": _ResizeHandle(window, left, Qt.CursorShape.SizeHorCursor),
+            "right": _ResizeHandle(window, right, Qt.CursorShape.SizeHorCursor),
+            "top": _ResizeHandle(window, top, Qt.CursorShape.SizeVerCursor),
+            "bottom": _ResizeHandle(window, bottom, Qt.CursorShape.SizeVerCursor),
+            "top_left": _ResizeHandle(
+                window, top | left, Qt.CursorShape.SizeFDiagCursor
+            ),
+            "top_right": _ResizeHandle(
+                window, top | right, Qt.CursorShape.SizeBDiagCursor
+            ),
+            "bottom_left": _ResizeHandle(
+                window, bottom | left, Qt.CursorShape.SizeBDiagCursor
+            ),
+            "bottom_right": _ResizeHandle(
+                window, bottom | right, Qt.CursorShape.SizeFDiagCursor
+            ),
+        }
+        window.installEventFilter(self)
+        self.update_geometry()
+
+    def eventFilter(self, watched, event):
+        if watched is self._window and event.type() in {
+            QEvent.Type.Resize,
+            QEvent.Type.Show,
+            QEvent.Type.WindowStateChange,
+        }:
+            self.update_geometry()
+        return super().eventFilter(watched, event)
+
+    def update_geometry(self) -> None:
+        if self._window.isMaximized():
+            for handle in self.handles.values():
+                handle.hide()
+            return
+
+        border = self.BORDER
+        width = self._window.width()
+        height = self._window.height()
+        self.handles["left"].setGeometry(0, border, border, height - 2 * border)
+        self.handles["right"].setGeometry(
+            width - border, border, border, height - 2 * border
+        )
+        self.handles["top"].setGeometry(border, 0, width - 2 * border, border)
+        self.handles["bottom"].setGeometry(
+            border, height - border, width - 2 * border, border
+        )
+        self.handles["top_left"].setGeometry(0, 0, border, border)
+        self.handles["top_right"].setGeometry(width - border, 0, border, border)
+        self.handles["bottom_left"].setGeometry(0, height - border, border, border)
+        self.handles["bottom_right"].setGeometry(
+            width - border, height - border, border, border
+        )
+        for handle in self.handles.values():
+            handle.show()
+            handle.raise_()
 
 
 class ApplicationTitleBar(QWidget):

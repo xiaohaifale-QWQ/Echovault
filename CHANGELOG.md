@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+
+- Fixed a Windows startup crash in the frameless main window. The application no
+  longer interprets Qt native-event pointers through `ctypes`; safe Qt
+  `startSystemResize()` edge handles preserve four-edge and four-corner resizing
+  without triggering a `QtCore.pyd` access violation while the window is shown.
+
 ### Changed
 
 - Added Fluent-inspired, interruptible shell motion: the navigation indicator now
