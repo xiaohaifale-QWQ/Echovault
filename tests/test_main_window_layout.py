@@ -71,6 +71,11 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     assert window.transfer_tabs.currentWidget() is window.batch_operations_panel
 
     polish_widget_tree(window)
+    assert window.statusbar.minimumHeight() >= 30
+    assert window.btn_stop_transcribe.objectName() == "statusStopButton"
+    assert window.btn_stop_transcribe.minimumHeight() == 24
+    assert window.btn_stop_transcribe.maximumHeight() == 24
+    assert window.btn_stop_transcribe.property("buttonRole") == "danger"
     assert window.detail_panel.btn_transcribe.property("buttonRole") == "primary"
     assert (
         window.audio_editor_panel.tool_pages["trim"].run_button.property("buttonRole")

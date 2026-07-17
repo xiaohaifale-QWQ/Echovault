@@ -142,6 +142,27 @@ QStatusBar {
     color: #657184;
     border-top: 1px solid #E2E7EE;
 }
+QPushButton#statusStopButton {
+    background: #FFF7F7;
+    color: #B54747;
+    border: 1px solid #E7B8B8;
+    border-radius: 6px;
+    min-width: 58px;
+    min-height: 24px;
+    max-height: 24px;
+    padding: 0 10px;
+    font-size: 11px;
+}
+QPushButton#statusStopButton:hover {
+    background: #FCEAEA;
+    color: #9F3535;
+    border-color: #D99090;
+}
+QPushButton#statusStopButton:disabled {
+    background: #F4F5F7;
+    color: #A0A8B3;
+    border-color: #E0E4E9;
+}
 QFrame[frameShape="4"], QFrame[frameShape="5"] {
     color: #E1E6ED;
 }
@@ -420,6 +441,14 @@ def polish_widget_tree(root: QWidget) -> None:
     widgets = [root, *root.findChildren(QWidget)]
     for widget in widgets:
         if isinstance(widget, QPushButton):
+            if widget.objectName() == "statusStopButton":
+                widget.setProperty("buttonRole", "danger")
+                widget.setCursor(Qt.CursorShape.PointingHandCursor)
+                widget.setFixedHeight(24)
+                widget.setMinimumWidth(58)
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
+                continue
             if widget.objectName() not in {
                 "workspaceNavigationButton",
                 "audioToolButton",

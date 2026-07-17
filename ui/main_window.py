@@ -708,6 +708,7 @@ class MainWindow(QMainWindow):
     def _setup_statusbar(self):
         """状态栏"""
         self.statusbar = QStatusBar()
+        self.statusbar.setMinimumHeight(30)
         self.setStatusBar(self.statusbar)
 
         self.status_label = QLabel("就绪")
@@ -726,11 +727,9 @@ class MainWindow(QMainWindow):
         self.statusbar.addWidget(self.total_trans_progress)
 
         self.btn_stop_transcribe = QPushButton("停止")
-        self.btn_stop_transcribe.setMaximumHeight(18)
-        self.btn_stop_transcribe.setStyleSheet(
-            "QPushButton{color:#c0392b;font-size:11px;padding:0 6px;"
-            "margin-left:4px}QPushButton:hover{color:white;background:#c0392b}"
-        )
+        self.btn_stop_transcribe.setObjectName("statusStopButton")
+        self.btn_stop_transcribe.setFixedHeight(24)
+        self.btn_stop_transcribe.setMinimumWidth(58)
         self.btn_stop_transcribe.setVisible(False)
         self.btn_stop_transcribe.clicked.connect(self._on_stop_transcribe)
         self.statusbar.addWidget(self.btn_stop_transcribe)

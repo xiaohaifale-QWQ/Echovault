@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Fixed the transcription stop button being clipped below the status bar. It now
+  uses a dedicated 24 px compact style instead of inheriting the global 32 px
+  minimum button height inside an 18 px maximum-height constraint.
 - Fixed a Windows startup crash in the frameless main window. The application no
   longer interprets Qt native-event pointers through `ctypes`; safe Qt
   `startSystemResize()` edge handles preserve four-edge and four-corner resizing
