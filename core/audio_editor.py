@@ -108,6 +108,42 @@ def _selection_input_args(path: Path, params: dict[str, Any]) -> list[str]:
     return ["-ss", f"{start:.3f}", "-i", str(path), "-t", f"{end - start:.3f}"]
 
 
+def _edit_effect_filters(
+    path: Path, params: dict[str, Any], duration: float
+) -> list[str]:
+    """Build the combined effect chain used by the dedicated clip editor."""
+    filters: list[str] = []
+    gain_db = min(24.0, max(-24.0, float(params.get("gain_db", 0.0))))
+    speed = float(params.get("speed", 1.0))
+    semitones = float(params.get("semitones", 0.0))
+    delay = max(0.0, float(params.get("delay", 0.0)))
+    fade_in = max(0.0, float(params.get("fade_in", 0.0)))
+    fade_out = max(0.0, float(params.get("fade_out", 0.0)))
+    if abs(gain_db) > 0.001:
+        filters.append(f"volume={gain_db:.2f}dB")
+    if abs(speed - 1.0) > 0.0001 or abs(semitones) > 0.001:
+        sample_rate = int(get_audio_info(str(path)).get("sample_rate") or 44100)
+        pitch = 2 ** (semitones / 12.0)
+        filters.extend(
+            [
+                f"asetrate={sample_rate}*{pitch:.8f}",
+                f"aresample={sample_rate}",
+                _atempo_chain(speed / pitch),
+            ]
+        )
+    if delay > 0.001:
+        filters.append(f"adelay={int(round(delay * 1000))}:all=1")
+        duration += delay
+    if fade_in > 0.001:
+        filters.append(f"afade=t=in:st=0:d={min(fade_in, duration):.3f}")
+    if fade_out > 0.001:
+        filters.append(
+            f"afade=t=out:st={max(0.0, duration - fade_out):.3f}:"
+            f"d={min(fade_out, duration):.3f}"
+        )
+    return filters
+
+
 def _atomic_single_output(args: list[str], output_path: str) -> str:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -175,35 +211,76 @@ def process_audio(
             raise ValueError("开始时间不能超过音频总时长。")
         if end > source_duration:
             end = source_duration
-        filters: list[str] = []
-        fade_in = max(0.0, float(params.get("fade_in", 0.0)))
-        fade_out = max(0.0, float(params.get("fade_out", 0.0)))
-        duration = end - start if end else source_duration - start
-        if fade_in:
-            filters.append(f"afade=t=in:st=0:d={min(fade_in, duration):.3f}")
-        if fade_out:
-            filters.append(
-                f"afade=t=out:st={max(0.0, duration - fade_out):.3f}:"
-                f"d={min(fade_out, duration):.3f}"
-            )
-        args = ["-ss", f"{start:.3f}", "-i", str(paths[0])]
-        if end:
-            args.extend(["-t", f"{end - start:.3f}"])
-        if filters:
-            args.extend(["-af", ",".join(filters)])
-        outputs = [_atomic_single_output([*args, *_codec_args(output)], str(output))]
+        end = end or source_duration
+        crop_mode = str(params.get("crop_mode", "extract"))
+        if crop_mode == "delete":
+            remaining = source_duration - (end - start)
+            filters = _edit_effect_filters(paths[0], params, remaining)
+            if start <= 0.001:
+                graph = f"[0:a]atrim=start={end:.3f},asetpts=PTS-STARTPTS[base]"
+            elif end >= source_duration - 0.001:
+                graph = f"[0:a]atrim=end={start:.3f},asetpts=PTS-STARTPTS[base]"
+            else:
+                graph = (
+                    f"[0:a]atrim=end={start:.3f},asetpts=PTS-STARTPTS[a0];"
+                    f"[0:a]atrim=start={end:.3f},asetpts=PTS-STARTPTS[a1];"
+                    "[a0][a1]concat=n=2:v=0:a=1[base]"
+                )
+            if filters:
+                graph += f";[base]{','.join(filters)}[out]"
+                mapped = "[out]"
+            else:
+                mapped = "[base]"
+            outputs = [
+                _atomic_single_output(
+                    [
+                        "-i",
+                        str(paths[0]),
+                        "-filter_complex",
+                        graph,
+                        "-map",
+                        mapped,
+                        *_codec_args(output),
+                    ],
+                    str(output),
+                )
+            ]
+        else:
+            duration = end - start
+            filters = _edit_effect_filters(paths[0], params, duration)
+            args = [
+                "-ss",
+                f"{start:.3f}",
+                "-i",
+                str(paths[0]),
+                "-t",
+                f"{duration:.3f}",
+            ]
+            if filters:
+                args.extend(["-af", ",".join(filters)])
+            outputs = [_atomic_single_output([*args, *_codec_args(output)], str(output))]
     elif operation == "concat":
         args: list[str] = []
         chains: list[str] = []
+        volumes = params.get("volumes") or [1.0] * len(paths)
         for index, path in enumerate(paths):
             args.extend(["-i", str(path)])
+            volume = float(volumes[index]) if index < len(volumes) else 1.0
             chains.append(
                 f"[{index}:a]aresample=44100,"
-                "aformat=sample_fmts=fltp:channel_layouts=stereo"
+                "aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                f"volume={volume:.4f}"
                 f"[a{index}]"
             )
         joined = "".join(f"[a{index}]" for index in range(len(paths)))
-        filter_graph = ";".join(chains + [f"{joined}concat=n={len(paths)}:v=0:a=1[out]"])
+        master_gain = float(params.get("master_gain", 0.0))
+        filter_graph = ";".join(
+            chains
+            + [
+                f"{joined}concat=n={len(paths)}:v=0:a=1[joined]",
+                f"[joined]volume={master_gain:.2f}dB[out]",
+            ]
+        )
         outputs = [
             _atomic_single_output(
                 [*args, "-filter_complex", filter_graph, "-map", "[out]", *_codec_args(output)],
@@ -214,21 +291,33 @@ def process_audio(
         args = []
         chains = []
         volumes = params.get("volumes") or [1.0] * len(paths)
+        mix_mode = str(params.get("mix_mode", "mix"))
+        master_gain = float(params.get("master_gain", 0.0))
+        duration_mode = str(params.get("duration_mode", "longest"))
+        if duration_mode not in {"longest", "shortest", "first"}:
+            duration_mode = "longest"
         for index, path in enumerate(paths):
             args.extend(["-i", str(path)])
             volume = float(volumes[index]) if index < len(volumes) else 1.0
+            layout = "mono" if mix_mode == "stereo" and index < 2 else "stereo"
             chains.append(
                 f"[{index}:a]aresample=44100,"
-                "aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                f"aformat=sample_fmts=fltp:channel_layouts={layout},"
                 f"volume={volume:.4f}[a{index}]"
             )
-        joined = "".join(f"[a{index}]" for index in range(len(paths)))
+        if mix_mode == "stereo":
+            joined_filter = (
+                "[a0][a1]join=inputs=2:channel_layout=stereo:"
+                "map=0.0-FL|1.0-FR[joined]"
+            )
+        else:
+            joined = "".join(f"[a{index}]" for index in range(len(paths)))
+            joined_filter = (
+                f"{joined}amix=inputs={len(paths)}:duration={duration_mode}:"
+                "dropout_transition=2:normalize=0[joined]"
+            )
         filter_graph = ";".join(
-            chains
-            + [
-                f"{joined}amix=inputs={len(paths)}:duration=longest:"
-                "dropout_transition=2:normalize=0[out]"
-            ]
+            chains + [joined_filter, f"[joined]volume={master_gain:.2f}dB[out]"]
         )
         outputs = [
             _atomic_single_output(
@@ -284,13 +373,17 @@ def process_audio(
             )
         ]
     elif operation == "denoise":
-        noise_floor = min(-20.0, max(-80.0, float(params.get("noise_floor", -25.0))))
+        mode = min(2, max(0, int(params.get("denoise_mode", 1))))
+        strength = min(60.0, max(1.0, float(params.get("strength", 20.0))))
+        noise_floor = (-50.0, -40.0, -30.0)[mode]
+        output_gain = min(12.0, max(-12.0, float(params.get("output_gain", 0.0))))
         outputs = [
             _atomic_single_output(
                 [
                     *_selection_input_args(paths[0], params),
                     "-af",
-                    f"afftdn=nf={noise_floor:.1f}",
+                    f"afftdn=nr={strength:.1f}:nf={noise_floor:.1f},"
+                    f"volume={output_gain:.2f}dB",
                     *_codec_args(output),
                 ],
                 str(output),
@@ -349,14 +442,27 @@ def process_audio(
                 source.replace(destination)
                 outputs.append(str(destination))
     elif operation == "equalizer":
-        bass = float(params.get("bass", 0.0))
-        middle = float(params.get("middle", 0.0))
-        treble = float(params.get("treble", 0.0))
-        filters = (
-            f"bass=g={bass:.2f},"
-            f"equalizer=f=1000:t=q:w=1:g={middle:.2f},"
-            f"treble=g={treble:.2f}"
+        bands = list(params.get("bands") or [])
+        if not bands:
+            bands = [
+                float(params.get("bass", 0.0)),
+                0.0,
+                0.0,
+                float(params.get("middle", 0.0)),
+                0.0,
+                0.0,
+                0.0,
+                float(params.get("treble", 0.0)),
+            ]
+        bands = (bands + [0.0] * 8)[:8]
+        frequencies = (60, 150, 400, 1000, 2400, 6000, 12000, 16000)
+        filters = ",".join(
+            f"equalizer=f={frequency}:t=q:w=1:g={min(12.0, max(-12.0, float(gain))):.2f}"
+            for frequency, gain in zip(frequencies, bands, strict=True)
         )
+        balance = min(100.0, max(-100.0, float(params.get("balance", 0.0))))
+        if abs(balance) > 0.001:
+            filters += f",stereotools=balance_out={balance / 100.0:.3f}"
         outputs = [
             _atomic_single_output(
                 [
@@ -370,12 +476,15 @@ def process_audio(
         ]
     elif operation == "volume":
         gain_db = min(30.0, max(-60.0, float(params.get("gain_db", 0.0))))
+        volume_filters = [f"volume={gain_db:.2f}dB"]
+        if params.get("prevent_clipping", False):
+            volume_filters.append("alimiter=limit=0.98")
         outputs = [
             _atomic_single_output(
                 [
                     *_selection_input_args(paths[0], params),
                     "-af",
-                    f"volume={gain_db:.2f}dB",
+                    ",".join(volume_filters),
                     *_codec_args(output),
                 ],
                 str(output),

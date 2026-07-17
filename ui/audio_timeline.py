@@ -29,9 +29,25 @@ class AudioTimeline(QWidget):
         self.view_end = 1.0
         self._drag_anchor: float | None = None
         self._dragging = False
+        self.interaction_enabled = True
+        self.waveform_color = QColor("#4A90D9")
+        self.waveform_edge_color = QColor("#236FB5")
         self.setMinimumHeight(280)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.IBeamCursor)
+
+    def set_interaction_enabled(self, enabled: bool) -> None:
+        self.interaction_enabled = bool(enabled)
+        self.setCursor(
+            Qt.CursorShape.IBeamCursor
+            if self.interaction_enabled
+            else Qt.CursorShape.ArrowCursor
+        )
+
+    def set_waveform_color(self, color: str) -> None:
+        self.waveform_color = QColor(color)
+        self.waveform_edge_color = self.waveform_color.darker(125)
+        self.update()
 
     def set_audio(
         self,
@@ -128,6 +144,8 @@ class AudioTimeline(QWidget):
 
     def mousePressEvent(self, event) -> None:
         if (
+            self.interaction_enabled
+            and
             event.button() == Qt.MouseButton.LeftButton
             and event.position().y() >= self.RULER_HEIGHT
         ):
@@ -138,7 +156,11 @@ class AudioTimeline(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
-        if self._drag_anchor is not None and event.buttons() & Qt.MouseButton.LeftButton:
+        if (
+            self.interaction_enabled
+            and self._drag_anchor is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
             current = self._seconds_at_x(event.position().x())
             if abs(current - self._drag_anchor) > max(0.02, self.duration_seconds * 0.001):
                 self._dragging = True
@@ -148,7 +170,11 @@ class AudioTimeline(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self._drag_anchor is not None:
+        if (
+            self.interaction_enabled
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._drag_anchor is not None
+        ):
             current = self._seconds_at_x(event.position().x())
             if self._dragging:
                 self.set_selection_seconds(self._drag_anchor, current)
@@ -162,7 +188,7 @@ class AudioTimeline(QWidget):
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event) -> None:
-        if self.duration_seconds <= 0:
+        if not self.interaction_enabled or self.duration_seconds <= 0:
             return super().wheelEvent(event)
         center = self._seconds_at_x(event.position().x())
         self.zoom(0.8 if event.angleDelta().y() > 0 else 1.25, center)
@@ -244,9 +270,9 @@ class AudioTimeline(QWidget):
                 low = visible[index][0]
                 fill.lineTo(QPointF(x, center - min(0.0, low) * amplitude_height))
             fill.closeSubpath()
-            painter.fillPath(fill, QColor("#4A90D9"))
+            painter.fillPath(fill, self.waveform_color)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            painter.setPen(QPen(QColor("#236FB5"), 1))
+            painter.setPen(QPen(self.waveform_edge_color, 1))
             painter.drawPath(top_path)
             painter.drawPath(bottom_path)
         else:

@@ -127,6 +127,53 @@ def test_audio_editor_effects_and_waveform_follow_the_selected_range(tmp_path):
     )
     assert 0.45 <= get_audio_info(str(selected))["duration"] <= 0.55
 
+    deleted = tmp_path / "deleted.wav"
+    process_audio(
+        "edit",
+        [str(source)],
+        str(deleted),
+        {
+            "selection_start": 0.2,
+            "selection_end": 0.7,
+            "crop_mode": "delete",
+            "fade_in": 0.02,
+            "gain_db": -1,
+        },
+    )
+    assert 0.65 <= get_audio_info(str(deleted))["duration"] <= 0.75
+
+    equalized = tmp_path / "equalized.wav"
+    process_audio(
+        "equalizer",
+        [str(source)],
+        str(equalized),
+        {"bands": [2, 1, 0, -1, -2, 0, 1, 2], "balance": 10},
+    )
+    assert equalized.is_file()
+
+    denoised = tmp_path / "denoised.wav"
+    process_audio(
+        "denoise",
+        [str(source)],
+        str(denoised),
+        {"denoise_mode": 1, "strength": 18, "output_gain": 1.5},
+    )
+    assert denoised.is_file()
+
+    stereo = tmp_path / "stereo.wav"
+    process_audio(
+        "mix",
+        [str(source), str(source)],
+        str(stereo),
+        {
+            "mix_mode": "stereo",
+            "volumes": [0.8, 0.6],
+            "master_gain": -1,
+            "duration_mode": "longest",
+        },
+    )
+    assert get_audio_info(str(stereo))["channels"] == 2
+
 
 def test_audio_timeline_tracks_precise_selection_and_zoom():
     ensure_app()
@@ -156,14 +203,30 @@ def test_audio_editor_panel_exposes_detailed_pages_for_every_processing_tool(
     assert len(TOOLS) == 11
     assert set(panel.tool_pages) == {spec.key for spec in TOOLS}
     assert {"files", "record", "more", "edit", "fade"}.isdisjoint(panel.tool_pages)
+    trim_page = panel.tool_pages["trim"]
+    denoise_page = panel.tool_pages["denoise"]
     equalizer_page = panel.tool_pages["equalizer"]
-    assert set(equalizer_page.fields) == {"bass", "middle", "treble"}
+    mix_page = panel.tool_pages["mix"]
+    assert set(trim_page.fields) == {
+        "gain_db",
+        "speed",
+        "semitones",
+        "delay",
+        "fade_in",
+        "fade_out",
+    }
+    assert len(denoise_page.timelines) == 2
+    assert len(equalizer_page.eq_bands) == 8
+    assert set(equalizer_page.fields) == {"balance"}
+    assert mix_page.track_editor is not None
     assert equalizer_page.inputs() == [str(source)]
     assert "Echovault编辑输出" in equalizer_page.output_edit.text()
 
+    panel._open_tool("trim")
+    assert panel.stack.currentWidget() is trim_page
+    trim_page.timeline.set_selection_seconds(0.02, 0.08)
     panel._open_tool("equalizer")
-    assert panel.stack.currentWidget() is equalizer_page
-    panel.timeline.set_selection_seconds(0.02, 0.08)
     assert equalizer_page.params()["selection_start"] == pytest.approx(0.02)
     assert equalizer_page.params()["selection_end"] == pytest.approx(0.08)
+    assert equalizer_page.params()["bands"] == [0.0] * 8
     assert panel._waveform_worker.wait(5000)
