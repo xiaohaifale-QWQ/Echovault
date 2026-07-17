@@ -58,6 +58,48 @@ QWidget {
 QMainWindow, QDialog {
     background: #F6F8FB;
 }
+QWidget#applicationTitleBar {
+    background: #FFFFFF;
+    border-bottom: 1px solid #E2E7EE;
+}
+QLabel#titleBarAppMark {
+    background: #E8F2FD;
+    color: #246FB8;
+    border: 1px solid #BCD6F0;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 800;
+}
+QLabel#titleBarTitle {
+    color: #26354A;
+    font-size: 12px;
+    font-weight: 600;
+}
+QPushButton#titleBarMinimize,
+QPushButton#titleBarMaximize,
+QPushButton#titleBarClose {
+    background: transparent;
+    color: #354052;
+    border: none;
+    border-radius: 0;
+    min-height: 38px;
+    max-height: 38px;
+    padding: 0;
+    font-family: "Segoe UI Symbol", "Segoe UI";
+    font-size: 15px;
+    font-weight: 400;
+}
+QPushButton#titleBarMinimize:hover,
+QPushButton#titleBarMaximize:hover {
+    background: #EEF1F5;
+    color: #17233A;
+    border: none;
+}
+QPushButton#titleBarClose:hover {
+    background: #C42B1C;
+    color: #FFFFFF;
+    border: none;
+}
 QToolTip {
     background: #17233A;
     color: #FFFFFF;
@@ -381,7 +423,7 @@ def polish_widget_tree(root: QWidget) -> None:
             if widget.objectName() not in {
                 "workspaceNavigationButton",
                 "audioToolButton",
-            }:
+            } and not widget.objectName().startswith("titleBar"):
                 widget.setStyleSheet("")
                 widget.setProperty("buttonRole", _button_role(widget))
                 widget.setCursor(Qt.CursorShape.PointingHandCursor)

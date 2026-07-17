@@ -10,12 +10,15 @@
 状态栏：歌曲统计 + 上次同步时间
 """
 
+import ctypes
 import importlib.util
 import os
 import re
+import sys
+from ctypes import wintypes
 from pathlib import Path
 
-from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QButtonGroup,
@@ -65,6 +68,7 @@ from ui.settings_dialog import SettingsDialog
 from ui.song_list_panel import SongListPanel
 from ui.sync_panel import SyncPanel
 from ui.theme import polish_widget_tree
+from ui.title_bar import ApplicationTitleBar
 from ui.vocal_separation_panel import VocalSeparationPanel
 
 
@@ -103,9 +107,46 @@ class MainWindow(QMainWindow):
             self.status_label.setText("未检测到 ffmpeg，歌词识别暂不可用")
         polish_widget_tree(self)
 
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "title_bar"):
+            self.title_bar.sync_window_state()
+
+    def nativeEvent(self, event_type, message):
+        """Restore native edge resizing while the Windows frame is hidden."""
+        if sys.platform == "win32" and not self.isMaximized():
+            try:
+                msg = wintypes.MSG.from_address(int(message))
+                if msg.message == 0x0084:  # WM_NCHITTEST
+                    screen_x = ctypes.c_short(msg.lParam & 0xFFFF).value
+                    screen_y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+                    point = self.mapFromGlobal(QPoint(screen_x, screen_y))
+                    border = 7
+                    left = point.x() < border
+                    right = point.x() >= self.width() - border
+                    top = point.y() < border
+                    bottom = point.y() >= self.height() - border
+                    hit_tests = {
+                        (True, False, True, False): 13,   # HTTOPLEFT
+                        (False, True, True, False): 14,   # HTTOPRIGHT
+                        (True, False, False, True): 16,   # HTBOTTOMLEFT
+                        (False, True, False, True): 17,   # HTBOTTOMRIGHT
+                        (True, False, False, False): 10,  # HTLEFT
+                        (False, True, False, False): 11,  # HTRIGHT
+                        (False, False, True, False): 12,  # HTTOP
+                        (False, False, False, True): 15,  # HTBOTTOM
+                    }
+                    result = hit_tests.get((left, right, top, bottom))
+                    if result is not None:
+                        return True, result
+            except (AttributeError, TypeError, ValueError):
+                pass
+        return super().nativeEvent(event_type, message)
+
     def _setup_ui(self):
         """初始化 UI 布局"""
-        self.setWindowTitle("琳琅乐府 — AI 歌词识别")
+        self.setWindowTitle("琳琅乐府 Echovault")
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setMinimumSize(QSize(1180, 720))
         self.resize(QSize(1440, 860))
 
@@ -133,6 +174,8 @@ class MainWindow(QMainWindow):
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
 
+        self.title_bar = ApplicationTitleBar(self, self.windowTitle())
+        shell_layout.addWidget(self.title_bar)
         shell_layout.addWidget(self._build_top_header())
         body = QWidget()
         body_layout = QHBoxLayout(body)

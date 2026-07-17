@@ -1,13 +1,19 @@
 from PyQt6.QtWidgets import (
     QAbstractSpinBox,
     QDialog,
+    QMainWindow,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
 )
 
 from tests.qt_test_app import ensure_app, keep_widget
-from ui.theme import APP_STYLESHEET, apply_application_theme, polish_widget_tree
+from ui.theme import (
+    APP_STYLESHEET,
+    apply_application_theme,
+    polish_widget_tree,
+)
+from ui.title_bar import ApplicationTitleBar
 
 
 def test_theme_uses_rounded_light_controls_and_blue_primary_actions():
@@ -40,3 +46,15 @@ def test_theme_normalizes_inline_button_styles_and_assigns_roles():
     assert danger.property("buttonRole") == "danger"
     assert all(button.minimumHeight() >= 32 for button in (primary, secondary, danger))
     assert score.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
+
+
+def test_application_title_bar_exposes_standard_window_controls():
+    ensure_app()
+    window = keep_widget(QMainWindow())
+    title_bar = ApplicationTitleBar(window, "琳琅乐府 Echovault")
+
+    assert title_bar.height() == 38
+    assert title_bar.title_label.text() == "琳琅乐府 Echovault"
+    assert title_bar.minimize_button.toolTip() == "最小化"
+    assert title_bar.maximize_button.toolTip() == "最大化"
+    assert title_bar.close_button.toolTip() == "关闭"

@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Replaced the mismatched dark Windows caption on the main window with an integrated
+  light title bar inspired by Codex. Native move, edge resize, minimize, maximize,
+  restore, double-click maximize, and close behavior remain available.
 - Added the new product header with brand, global material/function search, Batch
   Tasks, Model Library, and Settings. The legacy menu bar remains available as
   shortcuts internally but no longer occupies visible space.
