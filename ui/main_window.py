@@ -1,4 +1,4 @@
-﻿"""
+"""
 琳琅乐府 主窗口
 
 工作区布局：
@@ -40,7 +40,7 @@ from core.ai_control import validate_cli_command
 from core.asr.router import get_router
 from core.config import config_manager
 from core.environment import build_environment_report
-from core.metadata import write_cover_art
+from core.metadata import write_cover_art, write_tags
 from core.resource_monitor import format_resource_usage, sample_resource_usage
 from core.transfer_session import register_artifact
 from core.video_aggregation import write_video_transcript_timeline
@@ -61,6 +61,7 @@ from ui.online_lyrics_panel import (
     LyricsCalibrationWorker,
     OnlineLyricsComparisonPane,
     OnlineLyricsPanel,
+    TagApplyAction,
 )
 from ui.settings_dialog import SettingsDialog
 from ui.song_list_panel import SongListPanel
@@ -134,9 +135,7 @@ class MainWindow(QMainWindow):
         self.online_lyrics_panel = OnlineLyricsPanel()
         self.online_lyrics_panel.bind_comparison_pane(self.online_comparison_panel)
         self.vocal_separation_panel = VocalSeparationPanel(self.config)
-        self.vocal_separation_panel.model_library_requested.connect(
-            self._on_model_library
-        )
+        self.vocal_separation_panel.model_library_requested.connect(self._on_model_library)
         self.audio_editor_panel = AudioEditorPanel()
         self.batch_operations_panel = BatchOperationsPanel(self.config)
         self.sync_panel = SyncPanel()
@@ -365,7 +364,7 @@ class MainWindow(QMainWindow):
         if not query:
             return
         routes = (
-            (("歌词", "封面", "标签", "翻译"), "lyrics"),
+            (("歌词", "封面", "标签", "翻译", "核对", "校准", "本地识别"), "lyrics"),
             (("音频", "剪辑", "裁剪", "降噪", "均衡", "人声", "混音"), "audio"),
             (("传输", "手机", "回传", "导出", "批量"), "transfer"),
             (("素材", "音乐", "视频", "文件"), "materials"),
@@ -373,6 +372,13 @@ class MainWindow(QMainWindow):
         for keywords, workspace in routes:
             if any(keyword in query for keyword in keywords):
                 self._switch_workspace(workspace)
+                if workspace == "lyrics":
+                    if any(word in query for word in ("核对", "校准", "对比")):
+                        self.lyrics_tabs.setCurrentIndex(2)
+                    elif any(word in query for word in ("本地", "识别", "编辑", "翻译")):
+                        self.lyrics_tabs.setCurrentIndex(1)
+                    else:
+                        self.lyrics_tabs.setCurrentIndex(0)
                 if workspace == "transfer" and "批量" in query:
                     self.transfer_tabs.setCurrentWidget(self.batch_operations_panel)
                 return
@@ -396,9 +402,7 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction("退出", self.close)
         menu.exec(
-            self.top_settings_button.mapToGlobal(
-                self.top_settings_button.rect().bottomLeft()
-            )
+            self.top_settings_button.mapToGlobal(self.top_settings_button.rect().bottomLeft())
         )
 
     def _build_navigation(self):
@@ -441,9 +445,7 @@ class MainWindow(QMainWindow):
 
         self.navigation_status = QLabel("选择素材后，按任务继续处理。")
         self.navigation_status.setWordWrap(True)
-        self.navigation_status.setStyleSheet(
-            "color:#768295;font-size:11px;padding:8px 10px"
-        )
+        self.navigation_status.setStyleSheet("color:#768295;font-size:11px;padding:8px 10px")
         layout.addWidget(self.navigation_status)
         return navigation
 
@@ -459,9 +461,7 @@ class MainWindow(QMainWindow):
         selected_layout.setContentsMargins(16, 12, 16, 12)
         text_layout = QVBoxLayout()
         self.selected_material_name = QLabel("尚未选择素材")
-        self.selected_material_name.setStyleSheet(
-            "font-size:17px;font-weight:700;color:#14213D"
-        )
+        self.selected_material_name.setStyleSheet("font-size:17px;font-weight:700;color:#14213D")
         self.selected_material_path = QLabel("从下方素材列表选择音乐或视频。")
         self.selected_material_path.setWordWrap(True)
         self.selected_material_path.setStyleSheet("color:#6B7686;font-size:11px")
@@ -500,6 +500,8 @@ class MainWindow(QMainWindow):
         self.lyrics_tabs = QTabWidget()
         self.lyrics_tabs.setDocumentMode(True)
 
+        self.lyrics_tabs.addTab(self.online_lyrics_panel, "在线歌词与封面")
+
         recognition_page = QWidget()
         recognition_layout = QHBoxLayout(recognition_page)
         recognition_layout.setContentsMargins(0, 0, 0, 0)
@@ -510,19 +512,19 @@ class MainWindow(QMainWindow):
         recognition_splitter.setStretchFactor(1, 1)
         recognition_splitter.setSizes([780, 440])
         recognition_layout.addWidget(recognition_splitter)
-        self.lyrics_tabs.addTab(recognition_page, "识别、编辑与翻译")
+        self.lyrics_tabs.addTab(recognition_page, "本地识别编辑")
 
-        online_page = QWidget()
-        online_layout = QHBoxLayout(online_page)
-        online_layout.setContentsMargins(0, 0, 0, 0)
-        online_splitter = QSplitter(Qt.Orientation.Horizontal)
-        online_splitter.addWidget(self.online_comparison_panel)
-        online_splitter.addWidget(self.online_lyrics_panel)
-        online_splitter.setStretchFactor(0, 3)
-        online_splitter.setStretchFactor(1, 2)
-        online_splitter.setSizes([750, 500])
-        online_layout.addWidget(online_splitter)
-        self.lyrics_tabs.addTab(online_page, "在线歌词与封面")
+        verification_page = QWidget()
+        verification_layout = QHBoxLayout(verification_page)
+        verification_layout.setContentsMargins(0, 0, 0, 0)
+        verification_splitter = QSplitter(Qt.Orientation.Horizontal)
+        verification_splitter.addWidget(self.online_comparison_panel)
+        verification_splitter.addWidget(self.online_lyrics_panel.verification_panel)
+        verification_splitter.setStretchFactor(0, 3)
+        verification_splitter.setStretchFactor(1, 1)
+        verification_splitter.setSizes([900, 340])
+        verification_layout.addWidget(verification_splitter)
+        self.lyrics_tabs.addTab(verification_page, "歌词核对")
         self.lyrics_tabs.currentChanged.connect(self._on_lyrics_tab_changed)
         return self.lyrics_tabs
 
@@ -558,7 +560,7 @@ class MainWindow(QMainWindow):
         workspace_changed = key != self._current_workspace_key
         titles = {
             "materials": ("素材", "添加文件夹、浏览素材，并选择接下来要执行的任务。"),
-            "lyrics": ("歌词与标签", "识别、编辑、翻译、在线匹配歌词和封面。"),
+            "lyrics": ("歌词与标签", "在线搜索、本地识别编辑、歌词核对和音频标签。"),
             "audio": ("音频编辑", "编辑声音、分离人声，并把结果保存为新文件。"),
             "transfer": ("导出与传输", "核对处理结果、执行批量任务并发送回手机。"),
         }
@@ -570,10 +572,8 @@ class MainWindow(QMainWindow):
         self._current_workspace_key = key
         self._move_navigation_indicator(self.navigation_buttons[key], workspace_changed)
         if workspace_changed:
-            self.motion.fade_in(
-                "workspace-header", (self.workspace_title, self.workspace_hint)
-            )
-        if key == "lyrics" and self.lyrics_tabs.currentIndex() == 1:
+            self.motion.fade_in("workspace-header", (self.workspace_title, self.workspace_hint))
+        if key == "lyrics" and self.lyrics_tabs.currentIndex() == 0:
             self._refresh_online_catalog()
         if key == "transfer":
             self.sync_panel.refresh_transfer_results()
@@ -609,11 +609,10 @@ class MainWindow(QMainWindow):
 
     def _show_cover_workspace(self):
         self._switch_workspace("lyrics")
-        self.lyrics_tabs.setCurrentIndex(1)
-        self.online_lyrics_panel._show_cover_results_mode()
+        self.lyrics_tabs.setCurrentIndex(0)
 
     def _on_lyrics_tab_changed(self, index: int):
-        if index == 1:
+        if index == 0:
             self._refresh_online_catalog()
 
     def _setup_menubar(self):
@@ -653,9 +652,7 @@ class MainWindow(QMainWindow):
 
         sync_goto_action = QAction("打开手机传输(&S)", self)
         sync_goto_action.setShortcut("Ctrl+D")
-        sync_goto_action.triggered.connect(
-            lambda: self._switch_workspace("transfer")
-        )
+        sync_goto_action.triggered.connect(lambda: self._switch_workspace("transfer"))
         sync_menu.addAction(sync_goto_action)
 
         # 设置菜单
@@ -663,9 +660,7 @@ class MainWindow(QMainWindow):
 
         recognition_settings_action = QAction("语音识别", self)
         recognition_settings_action.setShortcut("Ctrl+,")
-        recognition_settings_action.triggered.connect(
-            lambda: self._on_settings("recognition")
-        )
+        recognition_settings_action.triggered.connect(lambda: self._on_settings("recognition"))
         settings_menu.addAction(recognition_settings_action)
         lyrics_settings_action = QAction("歌词输出", self)
         lyrics_settings_action.triggered.connect(lambda: self._on_settings("lyrics"))
@@ -813,42 +808,47 @@ class MainWindow(QMainWindow):
         )
         self.lyrics_preview_panel.lyrics_saved.connect(self._on_preview_lyrics_saved)
         self.vocal_lyrics_panel.lyrics_saved.connect(self._on_preview_lyrics_saved)
-        self.vocal_lyrics_panel.editing_started.connect(
-            self.vocal_separation_panel.pause_playback
-        )
+        self.vocal_lyrics_panel.editing_started.connect(self.vocal_separation_panel.pause_playback)
         self.vocal_separation_panel.position_changed_ms.connect(
             lambda position: self.vocal_lyrics_panel.text.highlight_at(position / 1000)
         )
         self.online_comparison_panel.playback_started.connect(
             self.vocal_separation_panel.pause_playback
         )
+        self.online_comparison_panel.playback_started.connect(
+            self.online_lyrics_panel.pause_playback
+        )
+        self.online_lyrics_panel.playback_started.connect(
+            self.online_comparison_panel.pause_playback
+        )
+        self.online_lyrics_panel.playback_started.connect(
+            self.vocal_separation_panel.pause_playback
+        )
         self.vocal_separation_panel.playback_started.connect(
             self.online_comparison_panel.pause_playback
         )
-        self.ai_chat_panel.command_requested.connect(self._on_ai_command_requested)
-        self.audio_editor_panel.output_created.connect(
-            self._on_audio_editor_output_created
+        self.vocal_separation_panel.playback_started.connect(
+            self.online_lyrics_panel.pause_playback
         )
+        self.ai_chat_panel.command_requested.connect(self._on_ai_command_requested)
+        self.audio_editor_panel.output_created.connect(self._on_audio_editor_output_created)
 
         # 详情面板 → 请求识别
         self.detail_panel.transcribe_clicked.connect(self._on_transcribe_single)
         self.detail_panel.edit_lyrics_clicked.connect(self._on_edit_lyrics)
         self.detail_panel.translate_requested.connect(self._on_translate_lyrics)
         self.online_lyrics_panel.action_requested.connect(self._on_online_lyrics_action)
-        self.batch_operations_panel.batch_transcribe_requested.connect(
-            self._on_transcribe_all
-        )
+        self.batch_operations_panel.batch_transcribe_requested.connect(self._on_transcribe_all)
         self.batch_operations_panel.batch_translate_requested.connect(
             self._on_batch_translate_lyrics
         )
-        self.batch_operations_panel.batch_online_requested.connect(
-            self._on_batch_online_lyrics
-        )
+        self.batch_operations_panel.batch_online_requested.connect(self._on_batch_online_lyrics)
 
         # 刷新计数
         self.song_list_panel.model_updated.connect(self._refresh_statusbar)
 
         self._refresh_statusbar()
+
     # ─── 事件处理 ─────────────────────────────
 
     def _on_open_folder(self):
@@ -958,9 +958,7 @@ class MainWindow(QMainWindow):
         self.selected_material_path.setText(f"{path.parent}  ·  {status}")
         for button in self.material_action_buttons:
             button.setEnabled(True)
-        self.navigation_status.setText(
-            f"当前素材：{path.name}\n可继续处理、试听或导出。"
-        )
+        self.navigation_status.setText(f"当前素材：{path.name}\n可继续处理、试听或导出。")
 
     def _on_audio_editor_output_created(
         self,
@@ -978,14 +976,35 @@ class MainWindow(QMainWindow):
         if action == "transcribe_local":
             self._on_transcribe_single(media_path)
             return
+        if action == "apply_tags":
+            if not isinstance(payload, TagApplyAction):
+                return
+            reply = QMessageBox.question(
+                self,
+                "保存音频标签",
+                f"将更新当前音频的标题、歌手、专辑、年份和轨道号：\n"
+                f"{media_path}\n\n音频内容不会重新编码，是否继续？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                write_tags(media_path, payload.values)
+            except (OSError, ValueError, RuntimeError) as exc:
+                QMessageBox.warning(self, "保存标签失败", str(exc))
+                return
+            self.online_lyrics_panel.reload_tags()
+            self.online_lyrics_panel.tag_status_label.setText("音频标签已保存；音轨没有重新编码。")
+            self._online_catalog_dirty = True
+            QMessageBox.information(self, "标签已保存", f"音频标签已更新：\n{media_path}")
+            return
         if action == "apply_cover":
             if not isinstance(payload, CoverApplyAction):
                 return
             reply = QMessageBox.question(
                 self,
                 "写入音频封面",
-                f"将把当前封面写入音频标签：\n{media_path}\n\n"
-                "音频内容不会重新编码，是否继续？",
+                f"将把当前封面写入音频标签：\n{media_path}\n\n音频内容不会重新编码，是否继续？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
@@ -1041,13 +1060,9 @@ class MainWindow(QMainWindow):
 
             try:
                 if action == "use_local":
-                    output, backup = apply_lyrics_content(
-                        lrc_path, payload.local_content
-                    )
+                    output, backup = apply_lyrics_content(lrc_path, payload.local_content)
                 elif action == "use_online":
-                    output, backup = apply_lyrics_content(
-                        lrc_path, payload.online_content
-                    )
+                    output, backup = apply_lyrics_content(lrc_path, payload.online_content)
                 elif action == "merge_local_timeline":
                     output, backup = merge_and_apply_lyrics(
                         lrc_path, payload.local_content, payload.online_content
@@ -1061,9 +1076,7 @@ class MainWindow(QMainWindow):
                 return
             self._refresh_after_online_lyrics_write(media_path, str(output))
             backup_message = f"\n备份：{backup}" if backup else ""
-            QMessageBox.information(
-                self, action_name, f"歌词已写入：{output}{backup_message}"
-            )
+            QMessageBox.information(self, action_name, f"歌词已写入：{output}{backup_message}")
             return
 
         match = payload.match
@@ -1094,16 +1107,12 @@ class MainWindow(QMainWindow):
             str(lrc_path), match, ai_settings, payload.local_content, self
         )
         self.online_calibration_worker.completed.connect(
-            lambda output, backup: self._on_online_calibration_finished(
-                media_path, output, backup
-            )
+            lambda output, backup: self._on_online_calibration_finished(media_path, output, backup)
         )
         self.online_calibration_worker.failed.connect(self._on_online_calibration_failed)
         self.online_calibration_worker.start()
 
-    def _on_online_calibration_finished(
-        self, media_path: str, output_path: str, backup_path: str
-    ):
+    def _on_online_calibration_finished(self, media_path: str, output_path: str, backup_path: str):
         self._refresh_after_online_lyrics_write(media_path, output_path)
         QMessageBox.information(
             self,
@@ -1176,9 +1185,7 @@ class MainWindow(QMainWindow):
         self._online_catalog_dirty = False
         self.online_lyrics_panel.set_songs(self._online_catalog)
         if failures:
-            self.online_lyrics_panel.status_label.setText(
-                f"部分素材目录无法读取：{failures[0]}"
-            )
+            self.online_lyrics_panel.status_label.setText(f"部分素材目录无法读取：{failures[0]}")
 
     def _on_video_calibration_changed(self, folder_path: str, source, target):
         key = str(Path(folder_path).resolve())
@@ -1240,9 +1247,7 @@ class MainWindow(QMainWindow):
     ):
         self._run_translation([lrc_path], engine, source_language, target_language)
 
-    def _on_batch_translate_lyrics(
-        self, engine: str, source_language: str, target_language: str
-    ):
+    def _on_batch_translate_lyrics(self, engine: str, source_language: str, target_language: str):
         lrc_paths = [
             str(Path(song["path"]).with_suffix(".lrc"))
             for song in self.song_list_panel.get_all_songs()
@@ -1263,14 +1268,10 @@ class MainWindow(QMainWindow):
 
     def _on_batch_online_lyrics(self, apply_best: bool, minimum_score: float):
         songs = [
-            song
-            for song in self.song_list_panel.get_all_songs()
-            if not song.get("instrumental")
+            song for song in self.song_list_panel.get_all_songs() if not song.get("instrumental")
         ]
         if not songs:
-            QMessageBox.information(
-                self, "批量在线匹配", "当前列表没有可在线匹配的素材。"
-            )
+            QMessageBox.information(self, "批量在线匹配", "当前列表没有可在线匹配的素材。")
             return
         if apply_best:
             reply = QMessageBox.question(
@@ -1291,12 +1292,8 @@ class MainWindow(QMainWindow):
             minimum_score=minimum_score,
             parent=self,
         )
-        self.batch_online_worker.progress.connect(
-            self.batch_operations_panel.show_online_progress
-        )
-        self.batch_online_worker.completed.connect(
-            self._on_batch_online_lyrics_finished
-        )
+        self.batch_online_worker.progress.connect(self.batch_operations_panel.show_online_progress)
+        self.batch_online_worker.completed.connect(self._on_batch_online_lyrics_finished)
         self.batch_online_worker.start()
 
     def _on_batch_online_lyrics_finished(self, results: list[dict]):
@@ -1347,9 +1344,7 @@ class MainWindow(QMainWindow):
         )
         self._translation_is_batch = len(lrc_paths) > 1
         if self._translation_is_batch:
-            self.batch_operations_panel.begin_task(
-                "translation", "批量翻译", len(lrc_paths)
-            )
+            self.batch_operations_panel.begin_task("translation", "批量翻译", len(lrc_paths))
         self.translation_worker.stage.connect(self._on_translation_stage)
         self.translation_worker.finished.connect(self._on_translation_finished)
         self.translation_worker.start()
@@ -1381,9 +1376,7 @@ class MainWindow(QMainWindow):
         ]
         for source_path, translated_path in successes:
             self.detail_panel.translation_completed(source_path, translated_path)
-        self.status_label.setText(
-            f"翻译完成：成功 {len(successes)}，失败 {len(failures)}"
-        )
+        self.status_label.setText(f"翻译完成：成功 {len(successes)}，失败 {len(failures)}")
         if getattr(self, "_translation_is_batch", False):
             self.batch_operations_panel.finish_task(
                 f"批量翻译完成：成功 {len(successes)} 个，失败 {len(failures)} 个。"
@@ -1419,7 +1412,9 @@ class MainWindow(QMainWindow):
             return
 
         reply = QMessageBox.question(
-            self, "确认", f"将为 {len(files)} 个素材识别音轨，是否继续？",
+            self,
+            "确认",
+            f"将为 {len(files)} 个素材识别音轨，是否继续？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -1472,9 +1467,7 @@ class MainWindow(QMainWindow):
         self._transcription_total = len(files)
         self._batch_completed = 0
         if len(files) > 1:
-            self.batch_operations_panel.begin_task(
-                "recognition", "批量识别", len(files)
-            )
+            self.batch_operations_panel.begin_task("recognition", "批量识别", len(files))
         self.status_label.setText(f"识别中... 0/{len(files)}")
         if provider_name == "local":
             self._start_resource_monitor()
@@ -1507,7 +1500,7 @@ class MainWindow(QMainWindow):
         self.status_label.setText(msg)
 
     def _on_stop_transcribe(self):
-        if hasattr(self, 'worker') and self.worker.isRunning():
+        if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.requestInterruption()
             self.btn_stop_transcribe.setEnabled(False)
             self.status_label.setText("正在停止...")
@@ -1541,12 +1534,7 @@ class MainWindow(QMainWindow):
             if self.online_lyrics_panel._song.get("path") == file_path:
                 self.online_lyrics_panel.reload_local_lyrics()
         # 自动检测纯音乐：歌词太短（<20字）可能是纯音乐
-        if (
-            self.library_panel.mode == "music"
-            and success
-            and lrc_path
-            and os.path.exists(lrc_path)
-        ):
+        if self.library_panel.mode == "music" and success and lrc_path and os.path.exists(lrc_path):
             try:
                 text = Path(lrc_path).read_text(encoding="utf-8")
                 # 提取所有歌词文本（去掉时间戳和元数据）
@@ -1588,7 +1576,7 @@ class MainWindow(QMainWindow):
                         errors.append(err)
             err_detail = "\n".join(errors[:3])  # 最多显示 3 条
             if len(errors) > 3:
-                err_detail += f"\n... 还有 {len(errors)-3} 条"
+                err_detail += f"\n... 还有 {len(errors) - 3} 条"
 
             provider_name = self.config.asr.provider
             if provider_name == "local":
@@ -1604,8 +1592,7 @@ class MainWindow(QMainWindow):
                 hint = "请检查相关配置。"
 
             QMessageBox.warning(
-                self, "识别完成",
-                f"成功: {success} 首\n失败: {failed} 首\n\n{err_detail}\n\n{hint}"
+                self, "识别完成", f"成功: {success} 首\n失败: {failed} 首\n\n{err_detail}\n\n{hint}"
             )
 
     def _on_edit_lyrics(self, file_path: str):
@@ -1628,6 +1615,7 @@ class MainWindow(QMainWindow):
         if result == 42:
             # GPU 安装完成，重启应用
             import logging
+
             logging.getLogger("linlangyuefu").info("GPU 安装完成，准备重启...")
             self._do_restart()
         elif result == SettingsDialog.OPEN_MODEL_LIBRARY:
@@ -1764,18 +1752,20 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logging.getLogger("linlangyuefu").error(f"重启失败: {e}")
         from PyQt6.QtWidgets import QApplication
+
         QApplication.quit()
 
     def _on_about(self):
         """关于对话框"""
         QMessageBox.about(
-            self, "关于 琳琅乐府",
+            self,
+            "关于 琳琅乐府",
             "<h3>琳琅乐府</h3>"
             "<p>AI 歌词识别 + 文件同步</p>"
             "<p>版本: 0.6.0-dev</p>"
             "<hr>"
             "<p>技术栈: Python + PyQt6 + Whisper</p>"
-            "<p>ASR: Groq Whisper / OpenAI Whisper</p>"
+            "<p>ASR: Groq Whisper / OpenAI Whisper</p>",
         )
 
     def _on_help_guide(self):

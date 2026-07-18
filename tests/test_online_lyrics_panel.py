@@ -4,14 +4,16 @@ from pathlib import Path
 from core.online_lyrics import LyricsMatch, MediaSearchMetadata
 from tests.qt_test_app import ensure_app, keep_widget
 from ui.online_lyrics_panel import (
+    _LYRICS_SEARCH_CACHE,
     CoverApplyAction,
+    LRCLIBSearchWorker,
     OnlineLyricsComparisonPane,
     OnlineLyricsPanel,
+    TagApplyAction,
 )
 
 PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
-    "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
 
 
@@ -29,9 +31,7 @@ def _match():
     )
 
 
-def test_online_panel_selects_songs_and_compares_two_editable_timelines(
-    monkeypatch, tmp_path
-):
+def test_online_panel_selects_songs_and_compares_two_editable_timelines(monkeypatch, tmp_path):
     ensure_app()
     monkeypatch.setattr(
         "ui.online_lyrics_panel.media_search_metadata",
@@ -39,9 +39,7 @@ def test_online_panel_selects_songs_and_compares_two_editable_timelines(
     )
     media_path = tmp_path / "Selected Song.mp3"
     lrc_path = media_path.with_suffix(".lrc")
-    lrc_path.write_text(
-        "[00:01.00]local one\n[00:13.00]local two\n", encoding="utf-8"
-    )
+    lrc_path.write_text("[00:01.00]local one\n[00:13.00]local two\n", encoding="utf-8")
     panel = keep_widget(OnlineLyricsPanel())
     comparison = keep_widget(OnlineLyricsComparisonPane())
     panel.bind_comparison_pane(comparison)
@@ -60,6 +58,8 @@ def test_online_panel_selects_songs_and_compares_two_editable_timelines(
     assert panel.results_table.rowCount() == 1
     assert "local two" in comparison.local_editor.toPlainText()
     assert "online two" in comparison.online_editor.toPlainText()
+    assert "online two" in panel.online_result_pane.editor.toPlainText()
+    assert panel.online_result_pane.editor.highlight_at(15.0) == 1
     assert comparison.local_editor.highlight_at(13.0) == 1
     assert comparison.online_editor.highlight_at(13.0) == 0
     assert not hasattr(comparison, "audio_device_combo")
@@ -76,9 +76,7 @@ def test_online_panel_emits_explicit_cross_merge_choice(monkeypatch, tmp_path):
         lambda _path: MediaSearchMetadata("Song", "Artist", "", 10.0),
     )
     media_path = tmp_path / "Song.mp3"
-    Path(media_path.with_suffix(".lrc")).write_text(
-        "[00:01.00]local\n", encoding="utf-8"
-    )
+    Path(media_path.with_suffix(".lrc")).write_text("[00:01.00]local\n", encoding="utf-8")
     panel = keep_widget(OnlineLyricsPanel())
     comparison = keep_widget(OnlineLyricsComparisonPane())
     panel.bind_comparison_pane(comparison)
@@ -97,9 +95,7 @@ def test_online_panel_emits_explicit_cross_merge_choice(monkeypatch, tmp_path):
     assert "[00:15.00]online two" in captured[0][1].online_content
 
 
-def test_online_panel_offers_local_recognition_without_local_lrc(
-    monkeypatch, tmp_path
-):
+def test_online_panel_offers_local_recognition_without_local_lrc(monkeypatch, tmp_path):
     ensure_app()
     monkeypatch.setattr(
         "ui.online_lyrics_panel.media_search_metadata",
@@ -201,20 +197,12 @@ def test_online_panel_supports_online_and_local_cover_actions(monkeypatch, tmp_p
         lambda path, payload, action: captured.append((path, payload, action))
     )
 
-    assert panel.search_button.text() == "搜索歌词"
-    assert panel.search_cover_button.text() == "搜索封面"
-    assert panel.local_cover_button.text() == "本地封面"
+    assert panel.search_button.text() == "一键搜索歌词与封面"
+    assert panel.search_cover_button.text() == "刷新封面"
+    assert panel.local_cover_button.text() == "选择本地封面"
     assert not hasattr(panel, "apply_cover_button")
-
-    panel._show_cover_results_mode()
-    assert panel.result_stack.currentWidget() is panel.cover_results_page
-    assert panel.comparison_label.isHidden()
-    assert panel.lyrics_action_group.isHidden()
-
-    panel._show_lyrics_results_mode()
-    assert panel.result_stack.currentWidget() is panel.lyrics_results_page
-    assert not panel.comparison_label.isHidden()
-    assert not panel.lyrics_action_group.isHidden()
+    assert panel.online_result_pane is not None
+    assert panel.verification_panel is not None
 
     cover_path = tmp_path / "cover.png"
     cover_path.write_bytes(PNG)
@@ -228,5 +216,86 @@ def test_online_panel_supports_online_and_local_cover_actions(monkeypatch, tmp_p
     assert captured[0][2] == "apply_cover"
     assert isinstance(captured[0][1], CoverApplyAction)
     assert captured[0][1].image_data == PNG
-    assert panel.result_stack.currentWidget() is panel.cover_results_page
     assert panel.cover_list.count() == 1
+
+
+def test_online_panel_emits_audio_tag_update(monkeypatch, tmp_path):
+    ensure_app()
+    monkeypatch.setattr(
+        "ui.online_lyrics_panel.media_search_metadata",
+        lambda _path: MediaSearchMetadata("Song", "Singer", "Album", 10.0),
+    )
+    monkeypatch.setattr("ui.online_lyrics_panel.read_cover_art", lambda _path: None)
+    monkeypatch.setattr(
+        "ui.online_lyrics_panel.read_tags",
+        lambda _path: {
+            "title": "Old",
+            "artist": "Singer",
+            "album": "Album",
+            "year": "2025",
+            "track": "1",
+        },
+    )
+    media_path = tmp_path / "Song.flac"
+    media_path.write_bytes(b"audio")
+    panel = keep_widget(OnlineLyricsPanel())
+    panel.show_song({"name": media_path.name, "path": str(media_path)})
+    assert panel.tag_fields["title"].text() == "Old"
+    panel._fill_tags_from_search()
+    panel.tag_fields["year"].setText("2026")
+    captured = []
+    panel.action_requested.connect(
+        lambda path, payload, action: captured.append((path, payload, action))
+    )
+
+    panel._request_tag_save()
+
+    assert captured[0][0] == str(media_path)
+    assert captured[0][2] == "apply_tags"
+    assert isinstance(captured[0][1], TagApplyAction)
+    assert captured[0][1].values["title"] == "Song"
+    assert captured[0][1].values["year"] == "2026"
+
+
+def test_one_click_search_starts_lyrics_and_cover_together(monkeypatch, tmp_path):
+    ensure_app()
+    monkeypatch.setattr(
+        "ui.online_lyrics_panel.media_search_metadata",
+        lambda _path: MediaSearchMetadata("Song", "Singer", "Album", 10.0),
+    )
+    monkeypatch.setattr("ui.online_lyrics_panel.read_cover_art", lambda _path: None)
+    media_path = tmp_path / "Song.mp3"
+    media_path.write_bytes(b"audio")
+    panel = keep_widget(OnlineLyricsPanel())
+    panel.show_song({"name": media_path.name, "path": str(media_path)})
+    started = []
+    monkeypatch.setattr(panel, "_start_search", lambda: started.append("lyrics"))
+    monkeypatch.setattr(panel, "_start_cover_search", lambda: started.append("cover"))
+
+    panel._start_combined_search()
+
+    assert started == ["lyrics", "cover"]
+
+
+def test_repeated_lyrics_search_uses_ten_minute_cache(monkeypatch):
+    ensure_app()
+    _LYRICS_SEARCH_CACHE.clear()
+    calls = []
+
+    def fake_search(*args, **kwargs):
+        calls.append((args, kwargs))
+        return [_match()]
+
+    monkeypatch.setattr("ui.online_lyrics_panel.search_lrclib", fake_search)
+    first_results = []
+    first = LRCLIBSearchWorker("Song", "Singer", "Album", 30.0)
+    first.completed.connect(first_results.append)
+    first.run()
+    second_results = []
+    second = LRCLIBSearchWorker(" song ", "singer", "album", 30.2)
+    second.completed.connect(second_results.append)
+    second.run()
+
+    assert len(calls) == 1
+    assert first_results == second_results == [[_match()]]
+    assert calls[0][1]["timeout"] == 10.0

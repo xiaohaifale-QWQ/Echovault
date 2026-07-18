@@ -14,6 +14,12 @@
 
 ### Changed
 
+- Split Lyrics & Tags into three dedicated workflows: Online Lyrics & Cover first,
+  Local Recognition Editing second, and a separate Lyrics Verification page.
+  Online search now runs lyrics and cover requests in parallel, keeps both result
+  areas visible, adds a synchronized scrolling lyrics player, caches repeated
+  queries for ten minutes, loads cover thumbnails concurrently, and includes the
+  common audio-tag editor beside the cover results.
 - Replaced Audio Editing's shared waveform/effect-panel template with eleven
   task-specific workspaces. Clip editing now combines precise extract/delete,
   gain, speed, pitch, delay, and fades; denoise compares original and processed

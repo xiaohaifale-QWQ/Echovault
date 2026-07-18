@@ -6,7 +6,7 @@ from core.config import AppConfig
 from core.online_lyrics import LyricsMatch
 from tests.qt_test_app import ensure_app, keep_widget
 from ui.main_window import MainWindow
-from ui.online_lyrics_panel import CoverApplyAction, OnlineLyricsAction
+from ui.online_lyrics_panel import CoverApplyAction, OnlineLyricsAction, TagApplyAction
 from ui.theme import polish_widget_tree
 
 
@@ -27,9 +27,10 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
         "导出与传输",
     ]
     assert window.workspace_stack.currentWidget() is window.workspace_pages["materials"]
-    assert [window.lyrics_tabs.tabText(index) for index in range(2)] == [
-        "识别、编辑与翻译",
+    assert [window.lyrics_tabs.tabText(index) for index in range(3)] == [
         "在线歌词与封面",
+        "本地识别编辑",
+        "歌词核对",
     ]
     assert [window.audio_tabs.tabText(index) for index in range(2)] == [
         "音频编辑",
@@ -52,7 +53,7 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     assert not hasattr(window.detail_panel, "btn_batch_translate")
 
     window._switch_workspace("lyrics")
-    window.lyrics_tabs.setCurrentIndex(1)
+    window.lyrics_tabs.setCurrentIndex(2)
     assert window.workspace_stack.currentWidget() is window.workspace_pages["lyrics"]
     assert "本地识别歌词" in window.online_comparison_panel.local_editor.parent().title()
     assert "在线匹配歌词" in window.online_comparison_panel.online_editor.parent().title()
@@ -69,6 +70,15 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     window._submit_global_search()
     assert window.workspace_stack.currentWidget() is window.workspace_pages["transfer"]
     assert window.transfer_tabs.currentWidget() is window.batch_operations_panel
+    window.global_search.setText("歌词核对")
+    window._submit_global_search()
+    assert window.lyrics_tabs.currentIndex() == 2
+    window.global_search.setText("本地识别")
+    window._submit_global_search()
+    assert window.lyrics_tabs.currentIndex() == 1
+    window.global_search.setText("在线封面")
+    window._submit_global_search()
+    assert window.lyrics_tabs.currentIndex() == 0
 
     polish_widget_tree(window)
     assert window.statusbar.minimumHeight() >= 30
@@ -78,8 +88,7 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     assert window.btn_stop_transcribe.property("buttonRole") == "danger"
     assert window.detail_panel.btn_transcribe.property("buttonRole") == "primary"
     assert (
-        window.audio_editor_panel.tool_pages["trim"].run_button.property("buttonRole")
-        == "primary"
+        window.audio_editor_panel.tool_pages["trim"].run_button.property("buttonRole") == "primary"
     )
     assert window.sync_panel.send_button.property("buttonRole") == "primary"
     window._on_song_selected({"path": "C:/music/song.mp3", "has_lrc": False})
@@ -129,13 +138,9 @@ def test_main_window_applies_cross_merge_with_backup(monkeypatch, tmp_path):
     match = LyricsMatch(1, "song", "", "", 30, False, "", online, 95)
     payload = OnlineLyricsAction(match, local, online)
 
-    window._on_online_lyrics_action(
-        str(media_path), payload, "merge_local_timeline"
-    )
+    window._on_online_lyrics_action(str(media_path), payload, "merge_local_timeline")
 
-    assert lrc_path.read_text(encoding="utf-8") == (
-        "[00:01.230]online one\n[00:04.50]online two\n"
-    )
+    assert lrc_path.read_text(encoding="utf-8") == ("[00:01.230]online one\n[00:04.50]online two\n")
     assert lrc_path.with_suffix(".lrc.bak").read_text(encoding="utf-8") == local
 
 
@@ -165,9 +170,7 @@ def test_online_catalog_includes_music_and_video(monkeypatch, tmp_path):
     assert window.online_lyrics_panel.song_selector.count() == 2
 
 
-def test_main_window_writes_selected_cover_and_refreshes_thumbnail(
-    monkeypatch, tmp_path
-):
+def test_main_window_writes_selected_cover_and_refreshes_thumbnail(monkeypatch, tmp_path):
     ensure_app()
     monkeypatch.setattr("ui.main_window.config_manager.load", AppConfig)
     monkeypatch.setattr(
@@ -203,3 +206,41 @@ def test_main_window_writes_selected_cover_and_refreshes_thumbnail(
 
     assert written == [(media_path, b"\xff\xd8\xffcover", "image/jpeg")]
     assert refreshed == [media_path]
+
+
+def test_main_window_writes_audio_tags_from_online_workspace(monkeypatch, tmp_path):
+    ensure_app()
+    monkeypatch.setattr("ui.main_window.config_manager.load", AppConfig)
+    monkeypatch.setattr(
+        "ui.main_window.build_environment_report",
+        lambda _config: {"ffmpeg": {"available": True}},
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(QMessageBox, "information", lambda *_args, **_kwargs: None)
+    written = []
+    monkeypatch.setattr(
+        "ui.main_window.write_tags",
+        lambda *args: written.append(args),
+    )
+    window = keep_widget(MainWindow())
+    monkeypatch.setattr(window.online_lyrics_panel, "reload_tags", lambda: None)
+    media_path = str(tmp_path / "song.flac")
+    values = {
+        "title": "Song",
+        "artist": "Singer",
+        "album": "Album",
+        "year": "2026",
+        "track": "3",
+    }
+
+    window._on_online_lyrics_action(
+        media_path,
+        TagApplyAction(values),
+        "apply_tags",
+    )
+
+    assert written == [(media_path, values)]
