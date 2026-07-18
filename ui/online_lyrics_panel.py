@@ -37,6 +37,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -770,22 +771,22 @@ class OnlineLyricsPanel(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
 
-        heading_row = QHBoxLayout()
-        heading = QLabel("在线歌词与封面")
-        heading.setStyleSheet("font-weight:700;font-size:16px;color:#14213D")
-        heading_row.addWidget(heading)
-        heading_row.addStretch()
         self.search_button = QPushButton("一键搜索歌词与封面")
         self.search_button.setObjectName("primaryAction")
+        self.search_button.setMinimumWidth(190)
+        self.search_button.setMinimumHeight(42)
         self.search_button.clicked.connect(self._start_combined_search)
-        heading_row.addWidget(self.search_button)
-        layout.addLayout(heading_row)
 
-        search_card = QGroupBox("搜索素材")
+        search_card = QGroupBox("歌曲与搜索条件")
+        search_card.setObjectName("onlineSearchCard")
+        self.search_card = search_card
         search_grid = QGridLayout(search_card)
+        search_grid.setContentsMargins(12, 10, 12, 10)
+        search_grid.setHorizontalSpacing(8)
+        search_grid.setVerticalSpacing(7)
         self.source_filter = QComboBox()
         self.source_filter.addItem("全部素材", "all")
         self.source_filter.addItem("音乐库", "music")
@@ -808,21 +809,36 @@ class OnlineLyricsPanel(QWidget):
         search_grid.addWidget(self.artist_input, 1, 3)
         search_grid.addWidget(QLabel("专辑"), 1, 4)
         search_grid.addWidget(self.album_input, 1, 5)
+        search_grid.addWidget(
+            self.search_button,
+            0,
+            6,
+            2,
+            1,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        search_grid.setColumnStretch(1, 2)
+        search_grid.setColumnStretch(3, 3)
+        search_grid.setColumnStretch(5, 2)
         self.current_file_label = QLabel("请先选择歌曲")
-        self.current_file_label.setWordWrap(True)
         self.current_file_label.setStyleSheet("font-size:11px;color:#667085")
-        search_grid.addWidget(self.current_file_label, 2, 0, 1, 6)
+        search_grid.addWidget(self.current_file_label, 2, 0, 1, 7)
         layout.addWidget(search_card)
 
         result_splitter = QSplitter(Qt.Orientation.Horizontal)
-        lyrics_group = QGroupBox("左：在线歌词")
+        self.result_splitter = result_splitter
+        result_splitter.setHandleWidth(8)
+        lyrics_group = QGroupBox("在线歌词")
         lyrics_layout = QVBoxLayout(lyrics_group)
+        lyrics_layout.setContentsMargins(10, 10, 10, 8)
+        lyrics_layout.setSpacing(7)
         self.results_table = QTableWidget(0, 5)
         self.results_table.setHorizontalHeaderLabels(["匹配", "歌名", "歌手", "时长", "同步"])
         self.results_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.results_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.results_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.results_table.setMaximumHeight(165)
+        self.results_table.setMinimumHeight(118)
+        self.results_table.setMaximumHeight(145)
         self.results_table.currentCellChanged.connect(self._on_result_selected)
         header = self.results_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -832,6 +848,7 @@ class OnlineLyricsPanel(QWidget):
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         lyrics_layout.addWidget(self.results_table)
         self.online_result_pane = OnlineLyricsResultPane()
+        self.online_result_pane.editor.setMinimumHeight(190)
         self.online_result_pane.content_changed.connect(self._online_result_edited)
         self.online_result_pane.playback_started.connect(self.playback_started)
         lyrics_layout.addWidget(self.online_result_pane, 1)
@@ -841,8 +858,15 @@ class OnlineLyricsPanel(QWidget):
         lyrics_layout.addWidget(self.lyrics_status_label)
         result_splitter.addWidget(lyrics_group)
 
-        cover_group = QGroupBox("右：封面候选")
-        cover_layout = QVBoxLayout(cover_group)
+        self.online_side_tabs = QTabWidget()
+        self.online_side_tabs.setDocumentMode(True)
+        self.online_side_tabs.setMinimumWidth(410)
+
+        cover_page = QWidget()
+        self.cover_page = cover_page
+        cover_layout = QVBoxLayout(cover_page)
+        cover_layout.setContentsMargins(10, 10, 10, 8)
+        cover_layout.setSpacing(8)
         cover_actions = QHBoxLayout()
         self.search_cover_button = QPushButton("刷新封面")
         self.search_cover_button.clicked.connect(self._start_cover_search)
@@ -858,8 +882,8 @@ class OnlineLyricsPanel(QWidget):
         self.cover_list.setMovement(QListView.Movement.Static)
         self.cover_list.setWrapping(True)
         self.cover_list.setWordWrap(True)
-        self.cover_list.setIconSize(QSize(120, 120))
-        self.cover_list.setGridSize(QSize(165, 170))
+        self.cover_list.setIconSize(QSize(138, 138))
+        self.cover_list.setGridSize(QSize(180, 190))
         self.cover_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.cover_list.itemClicked.connect(self._on_cover_item_clicked)
         cover_layout.addWidget(self.cover_list, 1)
@@ -867,9 +891,20 @@ class OnlineLyricsPanel(QWidget):
         self.cover_status_label.setWordWrap(True)
         self.cover_status_label.setStyleSheet("font-size:11px;color:#667085")
         cover_layout.addWidget(self.cover_status_label)
+        self.online_side_tabs.addTab(cover_page, "封面候选")
 
-        tag_group = QGroupBox("音频标签")
+        tag_page = QWidget()
+        self.tag_page = tag_page
+        tag_layout = QVBoxLayout(tag_page)
+        tag_layout.setContentsMargins(12, 12, 12, 10)
+        tag_layout.setSpacing(10)
+        tag_intro = QLabel("编辑当前音频的常用音乐信息")
+        tag_intro.setStyleSheet("font-weight:700;color:#26354A")
+        tag_layout.addWidget(tag_intro)
+        tag_group = QGroupBox("音乐信息")
         tag_grid = QGridLayout(tag_group)
+        tag_grid.setHorizontalSpacing(10)
+        tag_grid.setVerticalSpacing(8)
         self.tag_fields: dict[str, QLineEdit] = {}
         for row, (key, label) in enumerate(
             (
@@ -884,6 +919,13 @@ class OnlineLyricsPanel(QWidget):
             self.tag_fields[key] = field
             tag_grid.addWidget(QLabel(label), row, 0)
             tag_grid.addWidget(field, row, 1)
+        tag_grid.setColumnStretch(1, 1)
+        tag_layout.addWidget(tag_group)
+        tag_layout.addStretch()
+        self.tag_status_label = QLabel("保存只修改标签，不会重新编码音轨。")
+        self.tag_status_label.setWordWrap(True)
+        self.tag_status_label.setStyleSheet("font-size:11px;color:#667085")
+        tag_layout.addWidget(self.tag_status_label)
         tag_actions = QHBoxLayout()
         self.fill_tags_button = QPushButton("用搜索信息填入")
         self.fill_tags_button.clicked.connect(self._fill_tags_from_search)
@@ -892,21 +934,17 @@ class OnlineLyricsPanel(QWidget):
         self.save_tags_button.setObjectName("primaryAction")
         self.save_tags_button.clicked.connect(self._request_tag_save)
         tag_actions.addWidget(self.save_tags_button)
-        tag_grid.addLayout(tag_actions, 5, 0, 1, 2)
-        self.tag_status_label = QLabel("直接写入当前音频，不会重新编码音轨。")
-        self.tag_status_label.setWordWrap(True)
-        self.tag_status_label.setStyleSheet("font-size:11px;color:#667085")
-        tag_grid.addWidget(self.tag_status_label, 6, 0, 1, 2)
-        cover_layout.addWidget(tag_group)
-        result_splitter.addWidget(cover_group)
+        tag_layout.addLayout(tag_actions)
+        self.online_side_tabs.addTab(tag_page, "音频标签")
+
+        result_splitter.addWidget(self.online_side_tabs)
         result_splitter.setChildrenCollapsible(False)
-        result_splitter.setStretchFactor(0, 3)
-        result_splitter.setStretchFactor(1, 2)
-        result_splitter.setSizes([760, 480])
+        result_splitter.setStretchFactor(0, 7)
+        result_splitter.setStretchFactor(1, 4)
+        result_splitter.setSizes([900, 520])
         layout.addWidget(result_splitter, 1)
 
         self.status_label = QLabel("歌词与封面会并行搜索；最近结果会缓存 10 分钟。")
-        self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("font-size:11px;color:#667085")
         layout.addWidget(self.status_label)
 
@@ -1059,7 +1097,8 @@ class OnlineLyricsPanel(QWidget):
         """Compatibility shim for older callers; both result types stay visible."""
 
     def _show_cover_results_mode(self):
-        """Compatibility shim for older callers; both result types stay visible."""
+        """Show the cover side tab while keeping lyrics visible."""
+        self.online_side_tabs.setCurrentIndex(0)
 
     def reload_tags(self):
         media_path = self._song.get("path", "")
@@ -1160,6 +1199,7 @@ class OnlineLyricsPanel(QWidget):
         self.search_button.setEnabled(has_track and not self._lyrics_busy and not self._cover_busy)
 
     def _start_cover_search(self):
+        self.online_side_tabs.setCurrentIndex(0)
         if not self._is_cover_editable_song():
             self.cover_status_label.setText("当前素材格式不支持写入封面，请选择音乐文件。")
             return
@@ -1279,6 +1319,7 @@ class OnlineLyricsPanel(QWidget):
         self._refresh_cover_state()
 
     def _choose_local_cover(self):
+        self.online_side_tabs.setCurrentIndex(0)
         if not self._is_cover_editable_song():
             return
         file_path, _selected_filter = QFileDialog.getOpenFileName(
@@ -1353,6 +1394,7 @@ class OnlineLyricsPanel(QWidget):
         if not self.track_input.text().strip():
             self.status_label.setText("请先选择歌曲或填写搜索歌名。")
             return
+        self.online_side_tabs.setCurrentIndex(0)
         self._combined_started_at = monotonic()
         self.status_label.setText("正在并行搜索歌词与封面…")
         self._start_search()

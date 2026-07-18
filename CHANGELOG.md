@@ -14,6 +14,12 @@
 
 ### Changed
 
+- Reworked the Online Lyrics & Cover page to preserve usable editing space at
+  normal desktop heights. The one-click action now belongs to a compact two-row
+  search card; lyrics candidates, text, and player keep the full left workflow.
+  The right side now switches between dedicated Cover Candidates and Audio Tags
+  tabs, so five metadata fields and both tag actions remain visible instead of
+  being clipped below the cover grid.
 - Optimized Audio Editing interaction performance. Waveform decoding and media
   probing now stay off the UI thread and reuse an eight-file signature cache;
   hidden tool pages load their source and peaks only when first opened. Playback

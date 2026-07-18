@@ -299,3 +299,27 @@ def test_repeated_lyrics_search_uses_ten_minute_cache(monkeypatch):
     assert len(calls) == 1
     assert first_results == second_results == [[_match()]]
     assert calls[0][1]["timeout"] == 10.0
+
+
+def test_online_workspace_keeps_lyrics_and_tag_actions_visible():
+    app = ensure_app()
+    panel = keep_widget(OnlineLyricsPanel())
+    panel.resize(1400, 700)
+    panel.show()
+    app.processEvents()
+
+    assert panel.search_button.parentWidget() is panel.search_card
+    assert [panel.online_side_tabs.tabText(index) for index in range(2)] == [
+        "封面候选",
+        "音频标签",
+    ]
+    assert panel.results_table.maximumHeight() == 145
+    assert panel.online_result_pane.editor.minimumHeight() >= 190
+    panel.online_side_tabs.setCurrentWidget(panel.tag_page)
+    app.processEvents()
+    assert panel.save_tags_button.isVisibleTo(panel)
+    assert all(field.isVisibleTo(panel) for field in panel.tag_fields.values())
+    assert (
+        panel.save_tags_button.mapTo(panel.tag_page, panel.save_tags_button.rect().bottomLeft()).y()
+        <= panel.tag_page.contentsRect().bottom()
+    )
