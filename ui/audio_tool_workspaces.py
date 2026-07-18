@@ -82,9 +82,7 @@ class ValueSlider(QWidget):
         layout.addWidget(self.spin)
         minus.clicked.connect(lambda: self.spin.setValue(self.spin.value() - self._step))
         plus.clicked.connect(lambda: self.spin.setValue(self.spin.value() + self._step))
-        self.slider.valueChanged.connect(
-            lambda raw: self.spin.setValue(float(raw) * self._step)
-        )
+        self.slider.valueChanged.connect(lambda raw: self.spin.setValue(float(raw) * self._step))
         self.spin.valueChanged.connect(self._spin_changed)
 
     def _spin_changed(self, value: float):
@@ -135,21 +133,21 @@ class MiniWaveform(QWidget):
     def __init__(self, path: str, parent=None):
         super().__init__(parent)
         self.seed = sum(ord(character) for character in path) % 31 + 5
+        self._cached_path: QPainterPath | None = None
+        self._cached_size = None
         self.setMinimumHeight(46)
         self.setMinimumWidth(240)
 
-    def paintEvent(self, _event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.fillRect(self.rect(), QColor("#E8F4F2"))
+    def _waveform_path(self) -> QPainterPath:
+        if self._cached_path is not None and self._cached_size == self.size():
+            return self._cached_path
         center = self.height() / 2
         path = QPainterPath()
         points: list[QPointF] = []
         for index in range(100):
             x = index * self.width() / 99
             wave = abs(
-                math.sin((index + self.seed) * 0.31)
-                + 0.45 * math.sin((index + self.seed) * 0.83)
+                math.sin((index + self.seed) * 0.31) + 0.45 * math.sin((index + self.seed) * 0.83)
             )
             amplitude = min(1.0, 0.18 + wave * 0.55) * (self.height() / 2 - 5)
             points.append(QPointF(x, center - amplitude))
@@ -161,6 +159,15 @@ class MiniWaveform(QWidget):
             top = points[index].y()
             path.lineTo(QPointF(x, center + (center - top)))
         path.closeSubpath()
+        self._cached_path = path
+        self._cached_size = self.size()
+        return path
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.fillRect(self.rect(), QColor("#E8F4F2"))
+        path = self._waveform_path()
         painter.fillPath(path, QColor("#42AFA1"))
 
 
@@ -270,10 +277,7 @@ class TrackEditor(QWidget):
 
     def volumes(self) -> list[float]:
         soloed = [row for row in self.rows if row.solo.isChecked()]
-        return [
-            row.effective_volume() if not soloed or row in soloed else 0.0
-            for row in self.rows
-        ]
+        return [row.effective_volume() if not soloed or row in soloed else 0.0 for row in self.rows]
 
 
 class AudioToolWorkspace(QWidget):
@@ -477,9 +481,7 @@ class AudioToolWorkspace(QWidget):
         comparison_layout.addWidget(original_title, 0, 0)
         comparison_layout.addWidget(processed_title, 0, 1)
         self.timeline = self._new_timeline(height=155, color="#4A90D9")
-        self.processed_timeline = self._new_timeline(
-            height=155, interactive=False, color="#35A99C"
-        )
+        self.processed_timeline = self._new_timeline(height=155, interactive=False, color="#35A99C")
         comparison_layout.addWidget(self.timeline, 1, 0)
         comparison_layout.addWidget(self.processed_timeline, 1, 1)
         self.body.addWidget(comparison)
@@ -760,8 +762,12 @@ class AudioToolWorkspace(QWidget):
 
     def set_audio(self, peaks: list[tuple[float, float]], duration: float):
         self._duration = max(0.0, duration)
-        for timeline in self.timelines:
-            timeline.set_audio(peaks, duration)
+        self._building_selection = True
+        try:
+            for timeline in self.timelines:
+                timeline.set_audio(peaks, duration)
+        finally:
+            self._building_selection = False
         if hasattr(self, "selection_start"):
             self.selection_start.setMaximum(duration)
             self.selection_end.setMaximum(duration)
@@ -773,9 +779,13 @@ class AudioToolWorkspace(QWidget):
 
     def set_loading(self, duration: float):
         self._duration = max(0.0, duration)
-        for timeline in self.timelines:
-            timeline.set_audio([], duration)
-            timeline.set_loading()
+        self._building_selection = True
+        try:
+            for timeline in self.timelines:
+                timeline.set_audio([], duration)
+                timeline.set_loading()
+        finally:
+            self._building_selection = False
 
     def set_processed_audio(self, peaks: list[tuple[float, float]], duration: float):
         if hasattr(self, "processed_timeline"):
@@ -813,9 +823,7 @@ class AudioToolWorkspace(QWidget):
             self.selection_end.setValue(end)
         self._building_selection = False
         if hasattr(self, "selection_label"):
-            self.selection_label.setText(
-                f"已选  {self._format_time(max(0.0, end - start))}"
-            )
+            self.selection_label.setText(f"已选  {self._format_time(max(0.0, end - start))}")
 
     def has_selection(self) -> bool:
         return self._selection[1] - self._selection[0] > 0.001
@@ -876,9 +884,7 @@ class AudioToolWorkspace(QWidget):
     def _selection_fields_changed(self):
         if self._building_selection:
             return
-        self.selection_requested.emit(
-            self.selection_start.value(), self.selection_end.value()
-        )
+        self.selection_requested.emit(self.selection_start.value(), self.selection_end.value())
 
     def _set_speed_preset(self, speed: float, pitch: float):
         self.fields["speed"].setValue(speed)

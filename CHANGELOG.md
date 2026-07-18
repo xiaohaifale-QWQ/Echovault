@@ -14,6 +14,12 @@
 
 ### Changed
 
+- Optimized Audio Editing interaction performance. Waveform decoding and media
+  probing now stay off the UI thread and reuse an eight-file signature cache;
+  hidden tool pages load their source and peaks only when first opened. Playback
+  and selection updates target only the visible workspace, while timelines cache
+  their static ruler and 4,000-point waveform layer instead of rebuilding it for
+  every playhead frame. Multitrack mini-waveforms also reuse their painter paths.
 - Split Lyrics & Tags into three dedicated workflows: Online Lyrics & Cover first,
   Local Recognition Editing second, and a separate Lyrics Verification page.
   Online search now runs lyrics and cover requests in parallel, keeps both result

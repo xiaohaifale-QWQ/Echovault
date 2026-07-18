@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import QWidget
 
 
@@ -32,6 +32,8 @@ class AudioTimeline(QWidget):
         self.interaction_enabled = True
         self.waveform_color = QColor("#4A90D9")
         self.waveform_edge_color = QColor("#236FB5")
+        self._loading = False
+        self._static_layer: QPixmap | None = None
         self.setMinimumHeight(280)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.IBeamCursor)
@@ -39,14 +41,13 @@ class AudioTimeline(QWidget):
     def set_interaction_enabled(self, enabled: bool) -> None:
         self.interaction_enabled = bool(enabled)
         self.setCursor(
-            Qt.CursorShape.IBeamCursor
-            if self.interaction_enabled
-            else Qt.CursorShape.ArrowCursor
+            Qt.CursorShape.IBeamCursor if self.interaction_enabled else Qt.CursorShape.ArrowCursor
         )
 
     def set_waveform_color(self, color: str) -> None:
         self.waveform_color = QColor(color)
         self.waveform_edge_color = self.waveform_color.darker(125)
+        self._invalidate_static_layer()
         self.update()
 
     def set_audio(
@@ -55,6 +56,7 @@ class AudioTimeline(QWidget):
         duration_seconds: float,
     ) -> None:
         self.peaks = list(peaks)
+        self._loading = False
         self.duration_seconds = max(0.0, float(duration_seconds))
         self.playhead_seconds = 0.0
         self.selection_start = 0.0
@@ -63,14 +65,20 @@ class AudioTimeline(QWidget):
         self.view_end = 1.0
         self.selection_changed.emit(0.0, 0.0)
         self.view_changed.emit(self.view_start, self.view_end)
+        self._invalidate_static_layer()
         self.update()
 
     def set_loading(self) -> None:
         self.peaks = []
+        self._loading = True
+        self._invalidate_static_layer()
         self.update()
 
     def set_playhead_seconds(self, seconds: float) -> None:
-        self.playhead_seconds = max(0.0, min(self.duration_seconds, float(seconds)))
+        value = max(0.0, min(self.duration_seconds, float(seconds)))
+        if abs(value - self.playhead_seconds) < 0.0005:
+            return
+        self.playhead_seconds = value
         self.update()
 
     def set_selection_seconds(self, start: float, end: float, *, emit=True) -> None:
@@ -96,9 +104,19 @@ class AudioTimeline(QWidget):
         if end > 1.0:
             start = max(0.0, start - (end - 1.0))
             end = 1.0
+        if abs(start - self.view_start) < 1e-9 and abs(end - self.view_end) < 1e-9:
+            return
         self.view_start, self.view_end = start, end
         self.view_changed.emit(start, end)
+        self._invalidate_static_layer()
         self.update()
+
+    def resizeEvent(self, event) -> None:
+        self._invalidate_static_layer()
+        super().resizeEvent(event)
+
+    def _invalidate_static_layer(self) -> None:
+        self._static_layer = None
 
     def zoom(self, factor: float, center_seconds: float | None = None) -> None:
         if self.duration_seconds <= 0:
@@ -145,8 +163,7 @@ class AudioTimeline(QWidget):
     def mousePressEvent(self, event) -> None:
         if (
             self.interaction_enabled
-            and
-            event.button() == Qt.MouseButton.LeftButton
+            and event.button() == Qt.MouseButton.LeftButton
             and event.position().y() >= self.RULER_HEIGHT
         ):
             self._drag_anchor = self._seconds_at_x(event.position().x())
@@ -211,8 +228,9 @@ class AudioTimeline(QWidget):
         secs, millis = divmod(remainder, 1000)
         return f"{minutes}:{secs:02d}.{millis:03d}" if millis else f"{minutes}:{secs:02d}"
 
-    def paintEvent(self, _event) -> None:
-        painter = QPainter(self)
+    def _render_static_layer(self) -> QPixmap:
+        layer = QPixmap(self.size())
+        painter = QPainter(layer)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.fillRect(self.rect(), QColor("#FFFFFF"))
         wave_rect = self._wave_rect()
@@ -234,15 +252,6 @@ class AudioTimeline(QWidget):
             tick += step
         painter.setPen(QPen(QColor("#CBD5E1"), 1))
         painter.drawLine(0, self.RULER_HEIGHT - 1, self.width(), self.RULER_HEIGHT - 1)
-
-        if self.has_selection():
-            left = self._x_at_seconds(self.selection_start)
-            right = self._x_at_seconds(self.selection_end)
-            selection = QRectF(left, wave_rect.top(), right - left, wave_rect.height())
-            painter.fillRect(selection, QColor(47, 125, 209, 42))
-            painter.setPen(QPen(QColor("#2F7DD1"), 1))
-            painter.drawLine(int(left), int(wave_rect.top()), int(left), self.height())
-            painter.drawLine(int(right), int(wave_rect.top()), int(right), self.height())
 
         center = wave_rect.center().y()
         painter.setPen(QPen(QColor("#C7D2E0"), 1))
@@ -277,12 +286,33 @@ class AudioTimeline(QWidget):
             painter.drawPath(bottom_path)
         else:
             painter.setPen(QColor("#7B8796"))
-            message = "正在生成波形…" if self.duration_seconds else "请选择音频或视频素材"
+            message = (
+                "正在生成波形…"
+                if self._loading or self.duration_seconds
+                else "请选择音频或视频素材"
+            )
             width = metrics.horizontalAdvance(message)
             painter.drawText(int((self.width() - width) / 2), int(center), message)
 
+        painter.end()
+        return layer
+
+    def paintEvent(self, _event) -> None:
+        if self._static_layer is None or self._static_layer.size() != self.size():
+            self._static_layer = self._render_static_layer()
+        painter = QPainter(self)
+        painter.drawPixmap(0, 0, self._static_layer)
+
+        wave_rect = self._wave_rect()
+        if self.has_selection():
+            left = self._x_at_seconds(self.selection_start)
+            right = self._x_at_seconds(self.selection_end)
+            selection = QRectF(left, wave_rect.top(), right - left, wave_rect.height())
+            painter.fillRect(selection, QColor(47, 125, 209, 42))
+            painter.setPen(QPen(QColor("#2F7DD1"), 1))
+            painter.drawLine(int(left), int(wave_rect.top()), int(left), self.height())
+            painter.drawLine(int(right), int(wave_rect.top()), int(right), self.height())
+
         playhead_x = self._x_at_seconds(self.playhead_seconds)
         painter.setPen(QPen(QColor("#D64545"), 2))
-        painter.drawLine(
-            int(playhead_x), self.RULER_HEIGHT, int(playhead_x), self.height()
-        )
+        painter.drawLine(int(playhead_x), self.RULER_HEIGHT, int(playhead_x), self.height())

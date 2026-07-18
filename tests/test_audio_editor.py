@@ -10,7 +10,12 @@ from core.audio_utils import find_ffmpeg, find_ffprobe, get_audio_info
 from core.audio_waveform import extract_waveform_peaks
 from core.metadata import read_tags, write_tags
 from tests.qt_test_app import ensure_app, keep_widget
-from ui.audio_editor_panel import TOOLS, AudioEditorPanel
+from ui.audio_editor_panel import (
+    _WAVEFORM_CACHE,
+    TOOLS,
+    AudioEditorPanel,
+    WaveformLoadWorker,
+)
 from ui.audio_timeline import AudioTimeline
 
 
@@ -190,6 +195,80 @@ def test_audio_timeline_tracks_precise_selection_and_zoom():
     assert 0.5 < timeline.view_end < 1.0
 
 
+def test_audio_timeline_reuses_static_waveform_while_playhead_moves():
+    app = ensure_app()
+    timeline = keep_widget(AudioTimeline())
+    timeline.resize(800, 280)
+    timeline.set_audio([(-0.5, 0.5)] * 4000, 120.0)
+    timeline.show()
+    app.processEvents()
+    timeline.grab()
+    initial_key = timeline._static_layer.cacheKey()
+
+    timeline.set_playhead_seconds(20.0)
+    timeline.set_selection_seconds(10.0, 30.0)
+    app.processEvents()
+    timeline.grab()
+
+    assert timeline._static_layer.cacheKey() == initial_key
+    timeline.zoom(0.5)
+    app.processEvents()
+    timeline.grab()
+    assert timeline._static_layer.cacheKey() != initial_key
+
+
+def test_waveform_worker_reuses_file_signature_cache(monkeypatch, tmp_path):
+    ensure_app()
+    _WAVEFORM_CACHE.clear()
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"audio")
+    calls = []
+    monkeypatch.setattr(
+        "ui.audio_editor_panel.get_audio_info",
+        lambda _path: {"duration": 12.5},
+    )
+    monkeypatch.setattr(
+        "ui.audio_editor_panel.extract_waveform_peaks",
+        lambda _path: calls.append(_path) or [(-0.5, 0.5)],
+    )
+    results = []
+    first = WaveformLoadWorker(str(source))
+    first.completed.connect(lambda *args: results.append(args))
+    first.run()
+    second = WaveformLoadWorker(str(source))
+    second.completed.connect(lambda *args: results.append(args))
+    second.run()
+
+    assert calls == [str(source)]
+    assert results[0][2:] == (12.5, False)
+    assert results[1][2:] == (12.5, True)
+
+
+def test_audio_editor_only_updates_the_visible_workspace(monkeypatch, tmp_path):
+    ensure_app()
+    panel = keep_widget(AudioEditorPanel())
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"audio")
+    monkeypatch.setattr(panel, "_start_waveform_load", lambda _path: None)
+    panel.show_song({"name": source.name, "path": str(source)})
+    trim_page = panel.tool_pages["trim"]
+    volume_page = panel.tool_pages["volume"]
+
+    panel._waveform_loaded(str(source), [(-0.4, 0.4)] * 50, 10.0, False)
+
+    assert trim_page.timeline.peaks
+    assert volume_page.inputs() == []
+    assert not volume_page.timeline.peaks
+    panel._open_tool("volume")
+    assert volume_page.inputs() == [str(source)]
+    assert volume_page.timeline.peaks
+    trim_page.timeline.playhead_seconds = 0.0
+    panel._playing_path = str(source)
+    panel._preview_position_changed(5000)
+    assert volume_page.timeline.playhead_seconds == 5.0
+    assert trim_page.timeline.playhead_seconds == 0.0
+
+
 def test_audio_editor_panel_exposes_detailed_pages_for_every_processing_tool(
     tmp_path,
 ):
@@ -219,14 +298,17 @@ def test_audio_editor_panel_exposes_detailed_pages_for_every_processing_tool(
     assert len(equalizer_page.eq_bands) == 8
     assert set(equalizer_page.fields) == {"balance"}
     assert mix_page.track_editor is not None
+    assert equalizer_page.inputs() == []
+    panel._open_tool("equalizer")
     assert equalizer_page.inputs() == [str(source)]
     assert "Echovault编辑输出" in equalizer_page.output_edit.text()
 
     panel._open_tool("trim")
     assert panel.stack.currentWidget() is trim_page
+    assert panel._waveform_worker.wait(5000)
+    ensure_app().processEvents()
     trim_page.timeline.set_selection_seconds(0.02, 0.08)
     panel._open_tool("equalizer")
     assert equalizer_page.params()["selection_start"] == pytest.approx(0.02)
     assert equalizer_page.params()["selection_end"] == pytest.approx(0.08)
     assert equalizer_page.params()["bands"] == [0.0] * 8
-    assert panel._waveform_worker.wait(5000)

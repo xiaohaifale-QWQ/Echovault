@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 
 from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -26,6 +28,32 @@ from core.audio_editor import AudioEditResult, process_audio
 from core.audio_utils import get_audio_info
 from core.audio_waveform import extract_waveform_peaks
 from ui.audio_tool_workspaces import AudioToolWorkspace
+
+WAVEFORM_CACHE_MAX_ITEMS = 8
+_WAVEFORM_CACHE: OrderedDict[tuple[str, int, int], tuple[object, float]] = OrderedDict()
+_WAVEFORM_CACHE_LOCK = Lock()
+
+
+def _source_signature(file_path: str) -> tuple[str, int, int]:
+    path = Path(file_path).resolve()
+    stat = path.stat()
+    return str(path), int(stat.st_size), int(stat.st_mtime_ns)
+
+
+def _cached_waveform(signature: tuple[str, int, int]):
+    with _WAVEFORM_CACHE_LOCK:
+        cached = _WAVEFORM_CACHE.get(signature)
+        if cached is not None:
+            _WAVEFORM_CACHE.move_to_end(signature)
+        return cached
+
+
+def _store_waveform(signature, peaks, duration: float) -> None:
+    with _WAVEFORM_CACHE_LOCK:
+        _WAVEFORM_CACHE[signature] = (tuple(peaks), float(duration))
+        _WAVEFORM_CACHE.move_to_end(signature)
+        while len(_WAVEFORM_CACHE) > WAVEFORM_CACHE_MAX_ITEMS:
+            _WAVEFORM_CACHE.popitem(last=False)
 
 
 @dataclass(frozen=True)
@@ -187,7 +215,7 @@ class AudioEditorWorker(QThread):
 
 
 class WaveformLoadWorker(QThread):
-    completed = pyqtSignal(str, object)
+    completed = pyqtSignal(str, object, float, bool)
     failed = pyqtSignal(str, str)
 
     def __init__(self, file_path: str, parent=None):
@@ -196,7 +224,19 @@ class WaveformLoadWorker(QThread):
 
     def run(self):
         try:
-            self.completed.emit(self.file_path, extract_waveform_peaks(self.file_path))
+            signature = _source_signature(self.file_path)
+            cached = _cached_waveform(signature)
+            if cached is not None:
+                peaks, duration = cached
+                self.completed.emit(self.file_path, peaks, duration, True)
+                return
+            try:
+                duration = float(get_audio_info(self.file_path).get("duration") or 0.0)
+            except (OSError, RuntimeError, ValueError):
+                duration = 0.0
+            peaks = extract_waveform_peaks(self.file_path)
+            _store_waveform(signature, peaks, duration)
+            self.completed.emit(self.file_path, peaks, duration, False)
         except (OSError, RuntimeError) as exc:
             self.failed.emit(self.file_path, str(exc))
 
@@ -215,6 +255,12 @@ class AudioEditorPanel(QWidget):
         self._worker: AudioEditorWorker | None = None
         self._waveform_worker: WaveformLoadWorker | None = None
         self._result_waveform_workers: list[WaveformLoadWorker] = []
+        self._waveform_peaks: object = ()
+        self._waveform_path = ""
+        self._source_key: tuple[str, int, int] | None = None
+        self._prepared_page_paths: dict[str, str] = {}
+        self._waveform_page_paths: dict[str, str] = {}
+        self._loading_page_paths: dict[str, str] = {}
         self._last_output = ""
         self._playing_path = ""
         self._audio_output = QAudioOutput(self)
@@ -238,9 +284,7 @@ class AudioEditorPanel(QWidget):
             page.result_play_requested.connect(
                 lambda target=page: self._toggle_result_playback(target)
             )
-            page.result_open_requested.connect(
-                lambda target=page: self._open_result_folder(target)
-            )
+            page.result_open_requested.connect(lambda target=page: self._open_result_folder(target))
             page.seek_requested.connect(self._seek_preview_seconds)
             page.selection_requested.connect(self._selection_changed)
             self.tool_pages[spec.key] = page
@@ -314,9 +358,7 @@ class AudioEditorPanel(QWidget):
                 button.setObjectName("audioToolButton")
                 button.setCheckable(True)
                 button.setToolTip(spec.description)
-                button.clicked.connect(
-                    lambda _checked=False, target=key: self._open_tool(target)
-                )
+                button.clicked.connect(lambda _checked=False, target=key: self._open_tool(target))
                 self.tool_button_group.addButton(button)
                 self.tool_buttons[key] = button
                 rail_layout.addWidget(button)
@@ -331,21 +373,30 @@ class AudioEditorPanel(QWidget):
     def show_song(self, song: dict):
         if not song or not song.get("path"):
             return
-        self._song = dict(song)
         path = str(song["path"])
         try:
-            info = get_audio_info(path)
-            self._duration = float(info.get("duration") or 0.0)
-        except (OSError, RuntimeError, ValueError) as exc:
-            self._duration = 0.0
-            self.status_label.setText(f"无法读取音频信息：{exc}")
+            source_key = _source_signature(path)
+        except OSError:
+            source_key = None
+        if source_key is not None and source_key == self._source_key:
+            self._song = dict(song)
+            self._prepare_page(self.stack.currentWidget())
+            self.status_label.setText(
+                "当前素材已加载，无需重新分析波形。"
+                if self._waveform_path == path
+                else "当前素材正在分析波形，请稍候。"
+            )
+            return
+        self._song = dict(song)
+        self._source_key = source_key
+        self._duration = 0.0
         self._selection = (0.0, 0.0)
-        for page in self.tool_pages.values():
-            if page.track_editor is not None:
-                page.track_editor.set_paths([path])
-            page.set_primary_input(path)
-            page.set_loading(self._duration)
-            page.set_selection(0.0, 0.0, self._duration)
+        self._waveform_peaks = ()
+        self._waveform_path = ""
+        self._prepared_page_paths.clear()
+        self._waveform_page_paths.clear()
+        self._loading_page_paths.clear()
+        self._prepare_page(self.stack.currentWidget())
         self._start_waveform_load(path)
         self._player.stop()
         self._player.setSource(QUrl.fromLocalFile(str(Path(path).resolve())))
@@ -365,13 +416,22 @@ class AudioEditorPanel(QWidget):
         self._waveform_worker = worker
         worker.start()
 
-    def _waveform_loaded(self, path: str, peaks: list[tuple[float, float]]):
+    def _waveform_loaded(
+        self,
+        path: str,
+        peaks: list[tuple[float, float]],
+        duration: float,
+        from_cache: bool,
+    ):
         if path != str(self._song.get("path", "")):
             return
-        for page in self.tool_pages.values():
-            page.set_audio(peaks, self._duration)
-            page.set_selection(*self._selection, self._duration)
-        self.status_label.setText("波形已就绪；请选择工具并按该工作台的流程处理。")
+        self._duration = max(0.0, float(duration))
+        self._waveform_peaks = peaks
+        self._waveform_path = path
+        self._loading_page_paths.clear()
+        self._prepare_page(self.stack.currentWidget())
+        source = "缓存" if from_cache else "分析"
+        self.status_label.setText(f"波形已从{source}就绪；其他工具会在首次打开时按需载入。")
 
     def _waveform_failed(self, path: str, message: str):
         if path == str(self._song.get("path", "")):
@@ -382,7 +442,8 @@ class AudioEditorPanel(QWidget):
         end = max(0.0, min(self._duration, end))
         start, end = sorted((start, end))
         self._selection = (start, end)
-        for page in self.tool_pages.values():
+        page = self.stack.currentWidget()
+        if page is not None and page._selection != (start, end):
             page.set_selection(start, end, self._duration)
         if end - start > 0.001:
             self.status_label.setText(
@@ -407,12 +468,41 @@ class AudioEditorPanel(QWidget):
             return
         self.tool_buttons[key].setChecked(True)
         page = self.tool_pages[key]
-        if self._song.get("path"):
-            page.set_primary_input(str(self._song["path"]))
-            page.set_selection(*self._selection, self._duration)
         self.stack.setCurrentWidget(page)
+        if self._song.get("path"):
+            self._prepare_page(page)
+        page.set_playhead(self._player.position() / 1000.0)
+        playing = self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+        page.set_playing(playing and self._playing_path == self._song.get("path"))
+        page.set_result_playing(playing and self._playing_path == page._result_path)
         self.timeline = getattr(page, "timeline", None)
         self.status_label.setText(f"已进入“{page.spec.title}”独立工作台。")
+
+    def _prepare_page(self, page: AudioToolWorkspace | None) -> None:
+        if page is None:
+            return
+        path = str(self._song.get("path", ""))
+        if not path:
+            return
+        key = page.spec.key
+        page.setUpdatesEnabled(False)
+        try:
+            if self._prepared_page_paths.get(key) != path:
+                if page.track_editor is not None:
+                    page.track_editor.set_paths([path])
+                page.set_primary_input(path)
+                self._prepared_page_paths[key] = path
+            if self._waveform_path == path:
+                if self._waveform_page_paths.get(key) != path:
+                    page.set_audio(self._waveform_peaks, self._duration)
+                    self._waveform_page_paths[key] = path
+            elif self._loading_page_paths.get(key) != path:
+                page.set_loading(self._duration)
+                self._loading_page_paths[key] = path
+            page.set_selection(*self._selection, self._duration)
+        finally:
+            page.setUpdatesEnabled(True)
+            page.update()
 
     def _run_tool(self, page: AudioToolWorkspace):
         if self._worker is not None and self._worker.isRunning():
@@ -474,27 +564,28 @@ class AudioEditorPanel(QWidget):
         worker = WaveformLoadWorker(path, self)
         self._result_waveform_workers.append(worker)
         worker.completed.connect(
-            lambda output, peaks, target=page: self._processed_waveform_loaded(
-                target, output, peaks
+            lambda output, peaks, duration, _cached, target=page: self._processed_waveform_loaded(
+                target, output, peaks, duration
             )
         )
         worker.finished.connect(
-            lambda current=worker: self._result_waveform_workers.remove(current)
-            if current in self._result_waveform_workers
-            else None
+            lambda current=worker: (
+                self._result_waveform_workers.remove(current)
+                if current in self._result_waveform_workers
+                else None
+            )
         )
         worker.finished.connect(worker.deleteLater)
         worker.start()
 
     @staticmethod
     def _processed_waveform_loaded(
-        page: AudioToolWorkspace, path: str, peaks: list[tuple[float, float]]
+        page: AudioToolWorkspace,
+        _path: str,
+        peaks: list[tuple[float, float]],
+        duration: float,
     ):
-        try:
-            duration = float(get_audio_info(path).get("duration") or 0.0)
-        except (OSError, RuntimeError, ValueError):
-            duration = page._duration
-        page.set_processed_audio(peaks, duration)
+        page.set_processed_audio(peaks, duration or page._duration)
 
     def _on_process_failed(self, page: AudioToolWorkspace, message: str):
         page.run_button.setEnabled(True)
@@ -557,7 +648,8 @@ class AudioEditorPanel(QWidget):
         source = str(self._song.get("path", ""))
         seconds = position / 1000.0
         if self._playing_path == source:
-            for page in self.tool_pages.values():
+            page = self.stack.currentWidget()
+            if page is not None:
                 page.set_playhead(seconds)
             if (
                 self._selection[1] - self._selection[0] > 0.001
@@ -570,11 +662,10 @@ class AudioEditorPanel(QWidget):
     def _playback_state_changed(self, state):
         playing = state == QMediaPlayer.PlaybackState.PlayingState
         source = str(self._song.get("path", ""))
-        for page in self.tool_pages.values():
+        page = self.stack.currentWidget()
+        if page is not None:
             page.set_playing(playing and self._playing_path == source)
-            page.set_result_playing(
-                playing and self._playing_path == page._result_path
-            )
+            page.set_result_playing(playing and self._playing_path == page._result_path)
 
     @staticmethod
     def _format_time(seconds: float) -> str:
