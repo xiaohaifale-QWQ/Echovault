@@ -14,6 +14,12 @@
 
 ### Changed
 
+- Accelerated Online Lyrics & Cover search. LRCLIB exact lookup and the broader
+  candidate search now race each other so an exact lyric can render first. Cover
+  discovery uses Apple's one-request catalog artwork path before falling back to
+  MusicBrainz/Cover Art Archive; candidates render immediately and thumbnail
+  validation continues in the background. Cover loading no longer keeps the main
+  search action disabled.
 - Reworked the Online Lyrics & Cover page to preserve usable editing space at
   normal desktop heights. The one-click action now belongs to a compact two-row
   search card; lyrics candidates, text, and player keep the full left workflow.

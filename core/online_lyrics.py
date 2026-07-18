@@ -9,10 +9,11 @@ import shutil
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from opencc import OpenCC
 
@@ -135,6 +136,7 @@ def search_lrclib(
     duration: float = 0.0,
     timeout: float = 20.0,
     opener=None,
+    quick_callback: Callable[[list[LyricsMatch]], None] | None = None,
 ) -> list[LyricsMatch]:
     if not track_name.strip():
         raise ValueError("搜索歌名不能为空。")
@@ -143,11 +145,62 @@ def search_lrclib(
         query["artist_name"] = artist_name.strip()
     if album_name.strip():
         query["album_name"] = album_name.strip()
-    payload = _request_json(
-        f"{LRCLIB_API_BASE}/search?{urllib.parse.urlencode(query)}",
-        timeout=timeout,
-        opener=opener,
-    )
+    search_url = f"{LRCLIB_API_BASE}/search?{urllib.parse.urlencode(query)}"
+    quick_match = None
+    payload = None
+    if quick_callback is not None and artist_name.strip():
+        exact_query = {
+            "track_name": track_name.strip(),
+            "artist_name": artist_name.strip(),
+        }
+        if album_name.strip():
+            exact_query["album_name"] = album_name.strip()
+        if duration > 0:
+            exact_query["duration"] = str(round(duration, 2))
+        exact_url = f"{LRCLIB_API_BASE}/get?{urllib.parse.urlencode(exact_query)}"
+        executor = ThreadPoolExecutor(max_workers=2)
+        exact_future = executor.submit(
+            _request_json,
+            exact_url,
+            timeout=min(timeout, 6.0),
+            opener=opener,
+        )
+        search_future = executor.submit(
+            _request_json,
+            search_url,
+            timeout=timeout,
+            opener=opener,
+        )
+        done, _pending = wait(
+            (exact_future, search_future), return_when=FIRST_COMPLETED
+        )
+        if exact_future in done:
+            try:
+                quick_match = _record_from_payload(exact_future.result())
+            except RuntimeError:
+                quick_match = None
+            if quick_match is not None:
+                quick_match = replace(
+                    quick_match,
+                    score=_match_score(
+                        quick_match,
+                        track_name=track_name,
+                        artist_name=artist_name,
+                        duration=duration,
+                    ),
+                )
+                quick_callback([quick_match])
+        try:
+            payload = search_future.result()
+        except RuntimeError:
+            if quick_match is None:
+                raise
+            payload = []
+        finally:
+            exact_future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+    else:
+        payload = _request_json(search_url, timeout=timeout, opener=opener)
     if not isinstance(payload, list):
         return []
     matches = []
@@ -166,6 +219,10 @@ def search_lrclib(
                 ),
             )
         )
+    if quick_match is not None and all(
+        item.record_id != quick_match.record_id for item in matches
+    ):
+        matches.append(quick_match)
     return sorted(matches, key=lambda item: item.score, reverse=True)
 
 

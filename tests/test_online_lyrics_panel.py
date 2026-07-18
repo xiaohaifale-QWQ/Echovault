@@ -323,3 +323,15 @@ def test_online_workspace_keeps_lyrics_and_tag_actions_visible():
         panel.save_tags_button.mapTo(panel.tag_page, panel.save_tags_button.rect().bottomLeft()).y()
         <= panel.tag_page.contentsRect().bottom()
     )
+
+
+def test_cover_loading_does_not_keep_main_search_button_disabled():
+    ensure_app()
+    panel = keep_widget(OnlineLyricsPanel())
+    panel.track_input.setText("Song")
+    panel._lyrics_busy = False
+    panel._cover_busy = True
+
+    panel._update_search_state()
+
+    assert panel.search_button.isEnabled()

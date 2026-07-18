@@ -47,7 +47,7 @@ from core.cover_art import (
     CoverArtMatch,
     download_cover_art,
     image_mime_type,
-    search_cover_art,
+    search_cover_art_fast,
 )
 from core.metadata import COVER_EDITABLE_FORMATS, read_cover_art, read_tags
 from core.online_lyrics import (
@@ -110,6 +110,7 @@ class TagApplyAction:
 
 
 class LRCLIBSearchWorker(QThread):
+    quick_result = pyqtSignal(list)
     completed = pyqtSignal(list)
     failed = pyqtSignal(str)
 
@@ -136,6 +137,7 @@ class LRCLIBSearchWorker(QThread):
                     album_name=self.album_name,
                     duration=self.duration,
                     timeout=10.0,
+                    quick_callback=self.quick_result.emit,
                 )
                 _store_result(_LYRICS_SEARCH_CACHE, key, results)
             self.completed.emit(results)
@@ -162,11 +164,11 @@ class CoverSearchWorker(QThread):
             )
             results = _cached_result(_COVER_SEARCH_CACHE, key)
             if results is None:
-                results = search_cover_art(
+                results = search_cover_art_fast(
                     self.track_name,
                     artist_name=self.artist_name,
                     album_name=self.album_name,
-                    timeout=10.0,
+                    timeout=6.0,
                 )
                 _store_result(_COVER_SEARCH_CACHE, key, results)
             self.completed.emit(results)
@@ -192,6 +194,7 @@ class CoverDownloadWorker(QThread):
 
 class CoverThumbnailWorker(QThread):
     thumbnail_ready = pyqtSignal(int, object, bytes, str)
+    thumbnail_failed = pyqtSignal(object)
 
     def __init__(self, matches: list[CoverArtMatch], parent=None):
         super().__init__(parent)
@@ -206,7 +209,7 @@ class CoverThumbnailWorker(QThread):
             try:
                 data, mime_type = download_cover_art(match.thumbnail_url)
             except Exception:
-                return None
+                return index, match, None, None
             if len(_THUMBNAIL_CACHE) >= 64:
                 _THUMBNAIL_CACHE.pop(next(iter(_THUMBNAIL_CACHE)), None)
             _THUMBNAIL_CACHE[match.thumbnail_url] = (data, mime_type)
@@ -218,8 +221,13 @@ class CoverThumbnailWorker(QThread):
             futures = [executor.submit(download, item) for item in enumerate(self.matches)]
             for future in as_completed(futures):
                 result = future.result()
-                if result is not None:
-                    self.thumbnail_ready.emit(*result)
+                if result is None:
+                    continue
+                index, match, data, mime_type = result
+                if data is None:
+                    self.thumbnail_failed.emit(match)
+                else:
+                    self.thumbnail_ready.emit(index, match, data, mime_type)
 
 
 class LyricsCalibrationWorker(QThread):
@@ -1196,7 +1204,7 @@ class OnlineLyricsPanel(QWidget):
 
     def _update_search_state(self):
         has_track = bool(self.track_input.text().strip())
-        self.search_button.setEnabled(has_track and not self._lyrics_busy and not self._cover_busy)
+        self.search_button.setEnabled(has_track and not self._lyrics_busy)
 
     def _start_cover_search(self):
         self.online_side_tabs.setCurrentIndex(0)
@@ -1213,7 +1221,7 @@ class OnlineLyricsPanel(QWidget):
         self._cover_items.clear()
         self.cover_list.clear()
         self._refresh_cover_state()
-        self.cover_status_label.setText("正在搜索 MusicBrainz 与 Cover Art Archive…")
+        self.cover_status_label.setText("正在快速搜索在线封面…")
         self._cover_search_worker = CoverSearchWorker(
             track_name,
             self.artist_input.text().strip(),
@@ -1234,7 +1242,12 @@ class OnlineLyricsPanel(QWidget):
             artist = match.artist_name or "未知歌手"
             item = QListWidgetItem(f"{match.title}\n{artist}{date}\n匹配 {match.score:.0f}%")
             item.setData(Qt.ItemDataRole.UserRole, match)
-            item.setToolTip("点击后下载大图并确认写入音频标签")
+            item.setToolTip("正在验证缩略图，载入后可点击")
+            item.setFlags(
+                item.flags()
+                & ~Qt.ItemFlag.ItemIsEnabled
+                & ~Qt.ItemFlag.ItemIsSelectable
+            )
             self.cover_list.addItem(item)
             self._cover_items[match.release_group_id] = item
         if self._cover_matches:
@@ -1244,6 +1257,7 @@ class OnlineLyricsPanel(QWidget):
             worker = CoverThumbnailWorker(self._cover_matches, self)
             self._cover_thumbnail_workers.append(worker)
             worker.thumbnail_ready.connect(self._cover_thumbnail_ready)
+            worker.thumbnail_failed.connect(self._cover_thumbnail_failed)
             worker.finished.connect(
                 lambda target=worker: self._cover_thumbnail_worker_finished(target)
             )
@@ -1264,13 +1278,36 @@ class OnlineLyricsPanel(QWidget):
         item = self._cover_items.get(match.release_group_id)
         if item is not None:
             item.setIcon(self._cover_icon(image_data))
+            item.setFlags(
+                item.flags()
+                | Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+            )
+            item.setToolTip(f"来源：{match.source}；点击后下载大图并确认写入音频标签")
+
+    def _cover_thumbnail_failed(self, match: CoverArtMatch):
+        item = self._cover_items.pop(match.release_group_id, None)
+        if item is None:
+            return
+        row = self.cover_list.row(item)
+        if row >= 0:
+            self.cover_list.takeItem(row)
+        self._cover_matches = [
+            candidate
+            for candidate in self._cover_matches
+            if candidate.release_group_id != match.release_group_id
+        ]
 
     def _cover_thumbnail_worker_finished(self, worker: CoverThumbnailWorker):
         if worker in self._cover_thumbnail_workers:
             self._cover_thumbnail_workers.remove(worker)
-        if self._cover_matches:
+        if self.cover_list.count():
             self.cover_status_label.setText(
-                f"找到 {len(self._cover_matches)} 张封面；点击一张即可确认使用。"
+                f"找到 {self.cover_list.count()} 张封面；点击一张即可确认使用。"
+            )
+        else:
+            self.cover_status_label.setText(
+                "候选均没有可用图片，可刷新重试或选择本地封面。"
             )
 
     def _show_cover_error(self, message: str):
@@ -1416,12 +1453,12 @@ class OnlineLyricsPanel(QWidget):
             self._duration,
             self,
         )
+        self._search_worker.quick_result.connect(self._show_quick_result)
         self._search_worker.completed.connect(self._show_results)
         self._search_worker.failed.connect(self._show_search_error)
         self._search_worker.start()
 
-    def _show_results(self, matches: list):
-        self._lyrics_busy = False
+    def _populate_lyrics_results(self, matches: list):
         self._matches = list(matches)
         self.results_table.setRowCount(len(self._matches))
         for row, match in enumerate(self._matches):
@@ -1436,6 +1473,23 @@ class OnlineLyricsPanel(QWidget):
                 self.results_table.setItem(row, column, QTableWidgetItem(value))
         if self._matches:
             self.results_table.setCurrentCell(0, 0)
+
+    def _show_quick_result(self, matches: list):
+        if not matches:
+            return
+        self._populate_lyrics_results(matches)
+        elapsed = monotonic() - self._combined_started_at if self._combined_started_at else 0
+        suffix = f"，用时 {elapsed:.1f} 秒" if elapsed else ""
+        self.lyrics_status_label.setText(
+            f"精确匹配已显示{suffix}；更多候选仍在后台补充。"
+        )
+        self.status_label.setText("歌词已先显示，封面和更多候选仍在后台加载。")
+        self._refresh_action_state()
+
+    def _show_results(self, matches: list):
+        self._lyrics_busy = False
+        self._populate_lyrics_results(matches)
+        if self._matches:
             elapsed = monotonic() - self._combined_started_at if self._combined_started_at else 0
             suffix = f"，用时 {elapsed:.1f} 秒" if elapsed else ""
             self.lyrics_status_label.setText(
@@ -1448,6 +1502,8 @@ class OnlineLyricsPanel(QWidget):
             self.lyrics_status_label.setText("没有找到匹配结果，请调整歌名或歌手。")
         if not self._cover_busy:
             self.status_label.setText("搜索完成；歌词、封面和标签可在同一页处理。")
+        else:
+            self.status_label.setText("歌词已就绪，封面仍在后台加载。")
         self._refresh_action_state()
 
     def _show_search_error(self, message: str):

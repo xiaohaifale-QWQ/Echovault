@@ -4,7 +4,11 @@ from email.message import Message
 
 from mutagen.id3 import ID3
 
-from core.cover_art import download_cover_art, search_cover_art
+from core.cover_art import (
+    download_cover_art,
+    search_cover_art,
+    search_cover_art_fast,
+)
 from core.metadata import read_cover_art, write_cover_art
 
 JPEG = b"\xff\xd8\xff\xe0" + b"cover"
@@ -76,6 +80,41 @@ def test_cover_search_uses_musicbrainz_and_cover_art_archive():
     assert matches[0].thumbnail_url == "https://img/500.jpg"
     assert "releasegroup%3A%22Album%22" in captured[0][0]
     assert captured[0][1].startswith("Echovault/")
+
+
+def test_fast_cover_search_uses_single_round_trip_when_apple_has_artwork():
+    captured = []
+
+    def opener(request, timeout):
+        captured.append(request.full_url)
+        return _Response(
+            {
+                "resultCount": 1,
+                "results": [
+                    {
+                        "collectionId": 10,
+                        "trackName": "Song",
+                        "artistName": "Singer",
+                        "collectionName": "Album",
+                        "releaseDate": "2024-01-01T00:00:00Z",
+                        "artworkUrl100": "https://img/100x100bb.jpg",
+                    }
+                ],
+            }
+        )
+
+    matches = search_cover_art_fast(
+        "Song",
+        artist_name="Singer",
+        album_name="Album",
+        opener=opener,
+    )
+
+    assert len(captured) == 1
+    assert "itunes.apple.com/search" in captured[0]
+    assert matches[0].image_url == "https://img/1200x1200bb.jpg"
+    assert matches[0].thumbnail_url == "https://img/100x100bb.jpg"
+    assert matches[0].source == "Apple iTunes Search"
 
 
 def test_download_cover_validates_image_type():

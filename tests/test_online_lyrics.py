@@ -91,6 +91,50 @@ def test_lrclib_search_uses_user_agent_and_sorts_best_match_first():
     assert captured["timeout"] == 20.0
 
 
+def test_lrclib_progressive_search_emits_exact_match_before_full_results():
+    quick_results = []
+    requested_urls = []
+
+    def opener(request, timeout):
+        requested_urls.append(request.full_url)
+        if "/get?" in request.full_url:
+            return _Response(
+                {
+                    "id": 1,
+                    "trackName": "Hello",
+                    "artistName": "Artist",
+                    "albumName": "Album",
+                    "duration": 120,
+                    "syncedLyrics": "[00:01.00]Hello",
+                }
+            )
+        return _Response(
+            [
+                {
+                    "id": 1,
+                    "trackName": "Hello",
+                    "artistName": "Artist",
+                    "albumName": "Album",
+                    "duration": 120,
+                    "syncedLyrics": "[00:01.00]Hello",
+                }
+            ]
+        )
+
+    results = search_lrclib(
+        "Hello",
+        artist_name="Artist",
+        album_name="Album",
+        duration=120,
+        opener=opener,
+        quick_callback=quick_results.append,
+    )
+
+    assert len(requested_urls) == 2
+    assert quick_results[0][0].record_id == 1
+    assert results[0].record_id == 1
+
+
 def test_media_metadata_falls_back_to_artist_title_filename(tmp_path):
     path = tmp_path / "Artist - Song.mp3"
 
