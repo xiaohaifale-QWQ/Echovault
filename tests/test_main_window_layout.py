@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 from PyQt6.QtWidgets import QMessageBox
@@ -10,7 +11,9 @@ from ui.online_lyrics_panel import CoverApplyAction, OnlineLyricsAction, TagAppl
 from ui.theme import polish_widget_tree
 
 
-def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
+def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(
+    monkeypatch, tmp_path
+):
     ensure_app()
     monkeypatch.setattr("ui.main_window.config_manager.load", AppConfig)
     monkeypatch.setattr(
@@ -58,6 +61,8 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     assert window.menuBar().isHidden()
     assert window.global_search.placeholderText() == "搜索素材、歌词、标签或功能"
     assert window.top_settings_button.text() == "设置"
+    assert window.navigation_lyrics_card.height() == 224
+    assert window.navigation.isAncestorOf(window.navigation_lyrics_card)
     assert not hasattr(window, "batch_shortcut_button")
     assert all(not button.isEnabled() for button in window.material_action_buttons)
     assert window.model_library_action.text() == "模型库"
@@ -116,6 +121,21 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     window._on_song_selected({"path": "C:/music/song.mp3", "has_lrc": False})
     assert all(button.isEnabled() for button in window.material_action_buttons)
 
+    media_path = tmp_path / "current-song.mp3"
+    lrc_path = media_path.with_suffix(".lrc")
+    lrc_path.write_text("[00:01.00]第一句\n[00:03.00]第二句\n", encoding="utf-8")
+    window._on_song_selected(
+        {
+            "name": media_path.name,
+            "path": str(media_path),
+            "lrc_path": str(lrc_path),
+            "has_lrc": True,
+        }
+    )
+    window.audio_editor_panel._player.positionChanged.emit(3500)
+    assert window.navigation_lyrics_card.song_label.text() == "current-song"
+    assert window.navigation_lyrics_card.current_lyric_index == 1
+
     monkeypatch.setattr(
         "core.ai_assistant.settings_from_config",
         lambda _config: SimpleNamespace(
@@ -130,6 +150,55 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     assert window.outer_splitter.sizes()[1] > 0
     window._toggle_ai_mode()
     assert window.ai_chat_panel.isHidden()
+
+
+def test_main_window_merges_materials_from_selected_folders(monkeypatch, tmp_path):
+    ensure_app()
+    monkeypatch.setattr("ui.main_window.config_manager.load", AppConfig)
+    monkeypatch.setattr(
+        "ui.main_window.build_environment_report",
+        lambda _config: {"ffmpeg": {"available": True}},
+    )
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+
+    def fake_scan_audio(directory):
+        directory = Path(directory)
+        path = directory / f"{directory.name}.mp3"
+        common = tmp_path / "common.mp3"
+        return [
+            {
+                "name": path.name,
+                "path": str(path),
+                "lrc_path": str(path.with_suffix(".lrc")),
+                "has_lrc": False,
+                "size": 0,
+                "folder": str(directory),
+            },
+            {
+                "name": common.name,
+                "path": str(common),
+                "lrc_path": str(common.with_suffix(".lrc")),
+                "has_lrc": False,
+                "size": 0,
+                "folder": str(tmp_path),
+            },
+        ]
+
+    monkeypatch.setattr("ui.main_window.scan_audio", fake_scan_audio)
+    window = keep_widget(MainWindow())
+
+    window._on_folders_selected([str(first), str(second)])
+
+    assert [song["name"] for song in window.song_list_panel.get_all_songs()] == [
+        "first.mp3",
+        "common.mp3",
+        "second.mp3",
+    ]
+    assert window._selected_material_folder == str(second)
+    assert window.sync_panel.folder_sync_panel.dir_a_input.text() == str(second)
 
 
 def test_main_window_applies_cross_merge_with_backup(monkeypatch, tmp_path):

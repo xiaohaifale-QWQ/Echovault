@@ -1,4 +1,4 @@
-"""Two-mode material-library folder tree and inline video-time calibration."""
+"""Two-mode material-library explorer and inline video-time calibration."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDateTimeEdit,
     QFileDialog,
@@ -148,9 +147,9 @@ class TimeOffsetDash(QLabel):
 
 class LibraryPanel(QWidget):
     folder_selected = pyqtSignal(str)
+    folders_selected = pyqtSignal(object)
     material_selected = pyqtSignal(str)
     mode_changed = pyqtSignal(str)
-    select_all_changed = pyqtSignal(str, bool)
     directories_changed = pyqtSignal(str, object)
     calibration_changed = pyqtSignal(str, object, object)
     aggregate_requested = pyqtSignal(str)
@@ -160,7 +159,6 @@ class LibraryPanel(QWidget):
         super().__init__(parent)
         self._mode = "music"
         self._directories = {"music": [], "video": []}
-        self._select_all = {"music": False, "video": False}
         self._calibration_folder = ""
         self._videos = []
         self._current_offset = 0
@@ -173,13 +171,10 @@ class LibraryPanel(QWidget):
 
     @property
     def select_all(self) -> bool:
-        return self._select_all[self._mode]
+        return len(self.folder_browser.selected_folders) > 1
 
     def set_select_all_modes(self, music_selected: bool, video_selected: bool):
-        self._select_all = {"music": bool(music_selected), "video": bool(video_selected)}
-        self.select_all_check.blockSignals(True)
-        self.select_all_check.setChecked(self._select_all[self._mode])
-        self.select_all_check.blockSignals(False)
+        """Retained for configuration compatibility; selection now lives in the tree."""
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -188,7 +183,7 @@ class LibraryPanel(QWidget):
         header = QHBoxLayout()
         header.setSpacing(8)
         self.folder_header = header
-        self.title = QLabel("音乐素材文件夹")
+        self.title = QLabel("素材文件夹")
         self.title.setStyleSheet("font-weight:700;font-size:14px;padding:2px 0")
         header.addWidget(self.title)
         self.mode_switch = MaterialModeSwitch()
@@ -196,17 +191,17 @@ class LibraryPanel(QWidget):
         self.mode_switch.toggled.connect(self._switch_mode)
         header.addWidget(self.mode_switch)
         header.addStretch()
-        self.select_all_check = QCheckBox("全选")
-        self.select_all_check.setToolTip("勾选后，详情页显示当前模式下所有素材文件夹的内容")
-        self.select_all_check.toggled.connect(self._on_select_all_toggled)
-        header.addWidget(self.select_all_check)
-        self.btn_add = QPushButton("添加文件夹")
+        self.btn_add = QPushButton("＋")
+        self.btn_add.setObjectName("addMaterialFolderButton")
+        self.btn_add.setFixedSize(36, 36)
+        self.btn_add.setToolTip("添加素材文件夹")
         self.btn_add.clicked.connect(self._add_directory)
         header.addWidget(self.btn_add)
         layout.addLayout(header)
 
         self.folder_browser = FolderColumnsBrowser()
         self.folder_browser.folder_selected.connect(self.folder_selected)
+        self.folder_browser.folders_selected.connect(self.folders_selected)
         self.folder_browser.material_selected.connect(self.material_selected)
         self.folder_browser.root_removal_requested.connect(self._remove_directory)
         layout.addWidget(self.folder_browser, 1)
@@ -302,22 +297,15 @@ class LibraryPanel(QWidget):
         if self._mode == mode:
             return
         self._mode = mode
-        self.select_all_check.blockSignals(True)
-        self.select_all_check.setChecked(self._select_all[mode])
-        self.select_all_check.blockSignals(False)
         self._refresh_folders()
         self.mode_changed.emit(mode)
         if self._directories[mode]:
-            self.folder_selected.emit(self._directories[mode][0])
-
-    def _on_select_all_toggled(self, checked: bool):
-        self._select_all[self._mode] = checked
-        self.select_all_changed.emit(self._mode, checked)
+            self.folders_selected.emit([self._directories[mode][0]])
 
     def _refresh_folders(self):
         is_video = self._mode == "video"
         self.title.setText(f"{'视频' if is_video else '音乐'}素材文件夹")
-        self.btn_add.setText(f"添加{'视频' if is_video else '音乐'}文件夹")
+        self.btn_add.setToolTip(f"添加{'视频' if is_video else '音乐'}素材文件夹")
         self.video_controls.setVisible(is_video)
         self.folder_browser.set_roots(self._directories[self._mode])
 
@@ -331,7 +319,7 @@ class LibraryPanel(QWidget):
             self._directories[self._mode].append(resolved)
             self.directories_changed.emit(self._mode, list(self._directories[self._mode]))
         self._refresh_folders()
-        self.folder_selected.emit(resolved)
+        self.folders_selected.emit([resolved])
 
     def _remove_directory(self, folder_path: str):
         """Remove only an added root; it never touches the user's source files."""
@@ -341,7 +329,7 @@ class LibraryPanel(QWidget):
         directories.remove(folder_path)
         self.directories_changed.emit(self._mode, list(directories))
         self._refresh_folders()
-        self.folder_selected.emit(directories[0] if directories else "")
+        self.folders_selected.emit([directories[0]] if directories else [])
 
     def _on_reference_changed(self):
         video = self.reference_combo.currentData(Qt.ItemDataRole.UserRole)

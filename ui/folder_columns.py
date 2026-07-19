@@ -1,188 +1,191 @@
-"""A Finder-style, horizontally scrollable folder browser for the material library."""
+"""Windows Explorer-style folder browser for the material library."""
 
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QFileInfo, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QListWidget,
-    QListWidgetItem,
+    QAbstractItemView,
+    QFileIconProvider,
+    QHeaderView,
     QMenu,
-    QScrollArea,
-    QSizePolicy,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 
 class FolderColumnsBrowser(QWidget):
-    """Show each opened folder in its own column.
-
-    A double click opens a folder in the column to its right.  Columns deliberately
-    keep a minimum readable width; the scroll area supplies a horizontal scrollbar
-    on narrow windows instead of compressing the folder names into an unusable tree.
-    """
+    """Show added roots and their subfolders in one multi-select tree."""
 
     folder_selected = pyqtSignal(str)
+    folders_selected = pyqtSignal(object)
     material_selected = pyqtSignal(str)
     root_removal_requested = pyqtSignal(str)
 
+    PATH_ROLE = Qt.ItemDataRole.UserRole
+    ROOT_ROLE = Qt.ItemDataRole.UserRole + 1
+    LOADED_ROLE = Qt.ItemDataRole.UserRole + 2
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._columns: list[tuple[str | None, QListWidget]] = []
         self._current_folder = ""
+        self._last_emitted_paths: list[str] = []
+        self._icon_provider = QFileIconProvider()
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        self._scroll = QScrollArea()
-        # Let the content take the viewport height. Its minimum width still keeps
-        # every column readable and causes a horizontal bar when needed.
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self._content = QWidget()
-        self._content_layout = QHBoxLayout(self._content)
-        self._content_layout.setContentsMargins(0, 0, 0, 0)
-        self._content_layout.setSpacing(6)
-        self._scroll.setWidget(self._content)
-        outer.addWidget(self._scroll)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.tree = QTreeWidget()
+        self.tree.setObjectName("materialFolderTree")
+        self.tree.setColumnCount(3)
+        self.tree.setHeaderLabels(["名称", "修改日期", "类型"])
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setAnimated(True)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setIndentation(18)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.itemExpanded.connect(self._populate_item)
+        self.tree.itemDoubleClicked.connect(self._open_item)
+        self.tree.itemSelectionChanged.connect(self._selection_changed)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
+        header = self.tree.header()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.setStyleSheet(
+            """
+            QTreeWidget#materialFolderTree {
+                background:#FFFFFF; alternate-background-color:#FAFBFD;
+                border:1px solid #DCE3EB; border-radius:9px; outline:none;
+            }
+            QTreeWidget#materialFolderTree::item {
+                min-height:30px; padding:3px 5px; border-radius:5px;
+            }
+            QTreeWidget#materialFolderTree::item:selected {
+                background:#DDECFB; color:#1F6FBB;
+            }
+            QTreeWidget#materialFolderTree::item:hover:!selected {
+                background:#F0F5FA;
+            }
+            """
+        )
+        layout.addWidget(self.tree)
 
     @property
     def current_folder(self) -> str:
         return self._current_folder
 
+    @property
+    def selected_folders(self) -> list[str]:
+        return self._ordered_selected_paths()
+
     def set_roots(self, directories: list[str]) -> None:
-        self._clear_columns()
-        roots = [path for path in directories if os.path.isdir(path)]
-        self._add_column("素材文件夹", roots, roots=True)
-        self._current_folder = roots[0] if roots else ""
-        # Show the first added folder's contents immediately in the right column.
-        if roots:
-            first_root = roots[0]
-            self._add_column(
-                os.path.basename(first_root) or first_root, self._entries_for(first_root)
-            )
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        self._last_emitted_paths = []
+        roots = [os.path.abspath(path) for path in directories if os.path.isdir(path)]
+        for path in roots:
+            self.tree.addTopLevelItem(self._folder_item(path, root=True))
+        if self.tree.topLevelItemCount():
+            first = self.tree.topLevelItem(0)
+            self.tree.setCurrentItem(first)
+            first.setSelected(True)
+            self._current_folder = str(first.data(0, self.PATH_ROLE) or "")
+        else:
+            self._current_folder = ""
+        self.tree.blockSignals(False)
 
-    def _clear_columns(self) -> None:
-        self._columns.clear()
-        while self._content_layout.count():
-            item = self._content_layout.takeAt(0)
-            if item and item.widget():
-                item.widget().deleteLater()
-        self._update_content_minimum_width()
+    def _folder_item(self, path: str, *, root: bool = False) -> QTreeWidgetItem:
+        name = os.path.basename(path.rstrip("\\/")) or path
+        item = QTreeWidgetItem([name, self._modified_text(path), "文件夹"])
+        item.setData(0, self.PATH_ROLE, path)
+        item.setData(0, self.ROOT_ROLE, root)
+        item.setData(0, self.LOADED_ROLE, False)
+        item.setToolTip(0, path)
+        item.setIcon(0, self._icon_provider.icon(QFileInfo(path)))
+        placeholder = QTreeWidgetItem([""])
+        placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+        item.addChild(placeholder)
+        return item
 
-    def _update_content_minimum_width(self) -> None:
-        self._content.setMinimumWidth(max(216, len(self._columns) * 216))
-
-    def _entries_for(self, folder: str) -> list[str]:
+    @staticmethod
+    def _modified_text(path: str) -> str:
         try:
-            entries = [entry.path for entry in os.scandir(folder) if not entry.name.startswith(".")]
+            return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y/%m/%d %H:%M")
+        except OSError:
+            return ""
+
+    @staticmethod
+    def _subfolders(path: str) -> list[str]:
+        try:
+            folders = [
+                entry.path
+                for entry in os.scandir(path)
+                if entry.is_dir(follow_symlinks=False) and not entry.name.startswith(".")
+            ]
         except OSError:
             return []
-        return sorted(
-            entries,
-            key=lambda path: (not os.path.isdir(path), os.path.basename(path).lower()),
-        )
+        return sorted(folders, key=lambda value: os.path.basename(value).casefold())
 
-    def _add_column(self, title: str, paths: list[str], *, roots: bool = False) -> None:
-        column = QFrame()
-        column.setObjectName("materialFolderColumn")
-        column.setMinimumWidth(210)
-        column.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Expanding,
-        )
-        column.setStyleSheet(
-            "QFrame#materialFolderColumn{background:#FFFFFF;border:1px solid #DCE3EB;"
-            "border-radius:9px;}"
-            "QLabel#materialFolderColumnTitle{padding:8px 10px;background:#F3F6FA;"
-            "color:#526073;font-weight:600;border-top-left-radius:8px;"
-            "border-top-right-radius:8px;}"
-            "QListWidget{border:0;background:#FFFFFF;border-bottom-left-radius:8px;"
-            "border-bottom-right-radius:8px;}"
-            "QListWidget::item{padding:7px 9px;border-radius:6px;margin:1px 4px;}"
-            "QListWidget::item:selected{background:#E7F1FC;color:#1F6FBB;}"
-        )
-        layout = QVBoxLayout(column)
-        layout.setContentsMargins(0, 0, 0, 0)
-        label = QLabel(title)
-        label.setObjectName("materialFolderColumnTitle")
-        layout.addWidget(label)
-        listing = QListWidget()
-        listing.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        if not paths:
-            empty = QListWidgetItem(
-                "尚未添加文件夹" if roots else "此文件夹没有可显示内容"
-            )
-            empty.setFlags(Qt.ItemFlag.NoItemFlags)
-            listing.addItem(empty)
-        for path in paths:
-            item = QListWidgetItem(
-                ("文件夹  " if os.path.isdir(path) else "文件  ")
-                + (os.path.basename(path) or path)
-            )
-            item.setData(Qt.ItemDataRole.UserRole, path)
-            item.setData(Qt.ItemDataRole.UserRole + 1, roots)
-            item.setToolTip(path)
-            listing.addItem(item)
-        listing.itemClicked.connect(self._select_item)
-        listing.itemDoubleClicked.connect(self._open_item)
-        listing.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        listing.customContextMenuRequested.connect(
-            lambda position, target=listing: self._show_context_menu(target, position)
-        )
-        layout.addWidget(listing)
-        self._content_layout.addWidget(column, 1)
-        self._columns.append((None if roots else title, listing))
-        self._update_content_minimum_width()
+    def _populate_item(self, item: QTreeWidgetItem) -> None:
+        if bool(item.data(0, self.LOADED_ROLE)):
+            return
+        path = str(item.data(0, self.PATH_ROLE) or "")
+        item.takeChildren()
+        for folder in self._subfolders(path):
+            item.addChild(self._folder_item(folder))
+        item.setData(0, self.LOADED_ROLE, True)
 
-    def _select_item(self, item: QListWidgetItem) -> None:
-        path = str(item.data(Qt.ItemDataRole.UserRole) or "")
-        if os.path.isdir(path):
-            self._current_folder = path
-            self.folder_selected.emit(path)
-        elif os.path.isfile(path):
-            self.material_selected.emit(path)
-
-    def _open_item(self, item: QListWidgetItem) -> None:
-        path = str(item.data(Qt.ItemDataRole.UserRole) or "")
+    def _open_item(self, item: QTreeWidgetItem, _column: int = 0) -> None:
+        path = str(item.data(0, self.PATH_ROLE) or "")
         if not os.path.isdir(path):
             return
-        listing = item.listWidget()
-        column_index = next(
-            (i for i, (_, widget) in enumerate(self._columns) if widget is listing), -1
-        )
-        if column_index < 0:
-            return
-        while len(self._columns) > column_index + 1:
-            _title, old_listing = self._columns.pop()
-            old_column = old_listing.parentWidget()
-            self._content_layout.removeWidget(old_column)
-            old_column.deleteLater()
-        self._update_content_minimum_width()
-        self._current_folder = path
-        self.folder_selected.emit(path)
-        self._add_column(os.path.basename(path) or path, self._entries_for(path))
-        QTimer.singleShot(
-            0,
-            lambda: self._scroll.horizontalScrollBar().setValue(
-                self._scroll.horizontalScrollBar().maximum()
-            ),
-        )
+        self._populate_item(item)
+        item.setExpanded(True)
+        self.tree.setCurrentItem(item)
+        if not item.isSelected():
+            self.tree.clearSelection()
+            item.setSelected(True)
+        self._selection_changed()
 
-    def _show_context_menu(self, listing: QListWidget, position) -> None:
-        item = listing.itemAt(position)
-        if not item or not item.data(Qt.ItemDataRole.UserRole + 1):
+    def _ordered_selected_paths(self) -> list[str]:
+        selected = [
+            str(item.data(0, self.PATH_ROLE) or "")
+            for item in self.tree.selectedItems()
+            if os.path.isdir(str(item.data(0, self.PATH_ROLE) or ""))
+        ]
+        current = self.tree.currentItem()
+        current_path = str(current.data(0, self.PATH_ROLE) or "") if current else ""
+        selected = list(dict.fromkeys(selected))
+        if current_path in selected:
+            selected.remove(current_path)
+            selected.append(current_path)
+        return selected
+
+    def _selection_changed(self) -> None:
+        paths = self._ordered_selected_paths()
+        self._current_folder = paths[-1] if paths else ""
+        if paths == self._last_emitted_paths:
             return
-        folder_path = str(item.data(Qt.ItemDataRole.UserRole) or "")
-        if not folder_path:
+        self._last_emitted_paths = list(paths)
+        self.folders_selected.emit(paths)
+        self.folder_selected.emit(self._current_folder)
+
+    def _show_context_menu(self, position) -> None:
+        item = self.tree.itemAt(position)
+        if item is None or not bool(item.data(0, self.ROOT_ROLE)):
+            return
+        path = str(item.data(0, self.PATH_ROLE) or "")
+        if not path:
             return
         menu = QMenu(self)
-        remove_action = menu.addAction("取消添加此文件夹")
+        remove_action = menu.addAction("从素材库移除此文件夹")
         remove_action.triggered.connect(
-            lambda _checked=False, path=folder_path: self.root_removal_requested.emit(path)
+            lambda _checked=False, target=path: self.root_removal_requested.emit(target)
         )
-        menu.exec(listing.mapToGlobal(position))
+        menu.exec(self.tree.viewport().mapToGlobal(position))

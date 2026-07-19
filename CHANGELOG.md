@@ -14,6 +14,15 @@
 
 ### Changed
 
+- Replaced the material library's multi-column browser and global Select All
+  checkbox with one Windows Explorer-style folder tree. Added roots appear at the
+  top level, the compact plus button adds another root, double-click expands a
+  folder, and Ctrl/Shift multi-selection merges media from every selected folder
+  into the material list without repeating unchanged scans.
+- Added a compact synchronized-lyrics card to the bottom of the main navigation.
+  It shows the current song and time, follows playback from Online Lyrics, Lyrics
+  Verification, Audio Editing, and Vocal Separation, and smoothly centers the
+  active LRC line without taking space from the current task workspace.
 - Added an application-wide playback coordinator. Online lyrics, lyrics
   verification, Audio Editing, and Vocal Separation now share one logical audio
   focus: starting playback in one workspace pauses the previous workspace. The

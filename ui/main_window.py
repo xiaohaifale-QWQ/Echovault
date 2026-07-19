@@ -56,6 +56,7 @@ from ui.library_panel import LibraryPanel
 from ui.lyrics_preview_panel import LyricsPreviewPanel
 from ui.model_library_dialog import ModelLibraryDialog
 from ui.motion import MotionController
+from ui.navigation_lyrics_card import NavigationLyricsCard
 from ui.online_lyrics_panel import (
     CoverApplyAction,
     LyricsCalibrationWorker,
@@ -96,9 +97,6 @@ class MainWindow(QMainWindow):
         self._configure_voice_input_shortcut()
 
         self.library_panel.set_directories(self.config.music_dirs, self.config.video_dirs)
-        self.library_panel.set_select_all_modes(
-            self.config.music_select_all, self.config.video_select_all
-        )
         if self.config.music_dirs:
             self._on_folder_selected(self.config.music_dirs[0])
 
@@ -455,10 +453,8 @@ class MainWindow(QMainWindow):
         self.navigation_indicator.raise_()
         layout.addStretch()
 
-        self.navigation_status = QLabel("选择素材后，按任务继续处理。")
-        self.navigation_status.setWordWrap(True)
-        self.navigation_status.setStyleSheet("color:#768295;font-size:11px;padding:8px 10px")
-        layout.addWidget(self.navigation_status)
+        self.navigation_lyrics_card = NavigationLyricsCard(navigation)
+        layout.addWidget(self.navigation_lyrics_card)
         return navigation
 
     def _build_materials_workspace(self):
@@ -803,10 +799,9 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         """连接信号"""
         # 文件夹树 → 歌曲列表
-        self.library_panel.folder_selected.connect(self._on_folder_selected)
+        self.library_panel.folders_selected.connect(self._on_folders_selected)
         self.library_panel.material_selected.connect(self._on_material_selected)
         self.library_panel.mode_changed.connect(self._on_material_mode_changed)
-        self.library_panel.select_all_changed.connect(self._on_material_select_all_changed)
         self.library_panel.directories_changed.connect(self._on_material_directories_changed)
         self.library_panel.calibration_changed.connect(self._on_video_calibration_changed)
         self.library_panel.aggregate_requested.connect(self._on_video_aggregate)
@@ -827,6 +822,18 @@ class MainWindow(QMainWindow):
         self.vocal_lyrics_panel.editing_started.connect(self.vocal_separation_panel.pause_playback)
         self.vocal_separation_panel.position_changed_ms.connect(
             lambda position: self.vocal_lyrics_panel.text.highlight_at(position / 1000)
+        )
+        self.vocal_separation_panel.position_changed_ms.connect(
+            self.navigation_lyrics_card.set_position_ms
+        )
+        self.online_comparison_panel.player.positionChanged.connect(
+            self.navigation_lyrics_card.set_position_ms
+        )
+        self.online_lyrics_panel.online_result_pane.player.positionChanged.connect(
+            self.navigation_lyrics_card.set_position_ms
+        )
+        self.audio_editor_panel._player.positionChanged.connect(
+            self.navigation_lyrics_card.set_position_ms
         )
         self.online_comparison_panel.playback_started.connect(
             self.vocal_separation_panel.pause_playback
@@ -872,46 +879,61 @@ class MainWindow(QMainWindow):
         self.library_panel.open_directory_picker()
 
     def _on_folder_selected(self, folder_path: str):
-        """文件夹被选中 → 扫描当前模式的素材"""
-        self._selected_material_folder = folder_path
-        if not folder_path:
+        """Compatibility entry point for callers that select one folder."""
+        self._on_folders_selected([folder_path] if folder_path else [])
+
+    def _on_folders_selected(self, folder_paths: list[str]):
+        """Merge media from every selected Explorer-style folder into the right pane."""
+        selected = list(
+            dict.fromkeys(
+                os.path.abspath(path)
+                for path in folder_paths
+                if path and os.path.isdir(path)
+            )
+        )
+        self._selected_material_folder = selected[-1] if selected else ""
+        if not selected:
             self.song_list_panel.load_songs([], root_dir="")
             self.library_panel.clear_video_materials()
             self._refresh_statusbar()
-            self.status_label.setText("已取消添加素材文件夹")
+            self.status_label.setText("请选择一个或多个素材文件夹")
             return
-        self.status_label.setText(f"扫描中: {folder_path}...")
-        directories = (
-            self.config.video_dirs if self.library_panel.mode == "video" else self.config.music_dirs
-        )
-        scan_directories = directories if self.library_panel.select_all else [folder_path]
+        primary = selected[-1]
+        self.status_label.setText(f"正在扫描 {len(selected)} 个文件夹…")
         if self.library_panel.mode == "video":
-            offset = self.config.video_time_offsets.get(str(Path(folder_path).resolve()), 0)
+            offset = self.config.video_time_offsets.get(str(Path(primary).resolve()), 0)
             materials = []
             selected_materials = []
-            for directory in scan_directories:
+            for directory in selected:
                 directory_offset = self.config.video_time_offsets.get(
                     str(Path(directory).resolve()), 0
                 )
                 scanned = scan_videos(directory, offset_seconds=directory_offset)
                 materials.extend(scanned)
-                if directory == folder_path:
+                if directory == primary:
                     selected_materials = scanned
-            self.library_panel.set_video_materials(folder_path, selected_materials, offset)
+            self.library_panel.set_video_materials(primary, selected_materials, offset)
         else:
             materials = []
-            for directory in scan_directories:
+            for directory in selected:
                 materials.extend(scan_audio(directory))
             self.library_panel.clear_video_materials()
+        unique_materials = {}
+        for material in materials:
+            material_path = str(material.get("path", ""))
+            key = os.path.normcase(os.path.abspath(material_path)) if material_path else ""
+            if key and key not in unique_materials:
+                unique_materials[key] = material
+        materials = list(unique_materials.values())
         self.song_list_panel.load_songs(
-            materials, root_dir="" if self.library_panel.select_all else folder_path
+            materials, root_dir="" if len(selected) > 1 else primary
         )
         self._refresh_statusbar()
 
         if self.library_panel.mode == "music":
-            self.sync_panel.set_dir_a(folder_path)
+            self.sync_panel.set_dir_a(primary)
 
-        self.status_label.setText("就绪")
+        self.status_label.setText(f"已显示 {len(selected)} 个文件夹中的素材")
 
     def _start_resource_monitor(self):
         """Show live machine usage only while the local ASR engine is working."""
@@ -930,20 +952,6 @@ class MainWindow(QMainWindow):
     def _on_material_mode_changed(self, mode: str):
         self.song_list_panel.set_material_mode(mode)
         self._refresh_statusbar()
-
-    def _on_material_select_all_changed(self, mode: str, selected: bool):
-        if mode == "video":
-            self.config.video_select_all = selected
-            directories = self.config.video_dirs
-        else:
-            self.config.music_select_all = selected
-            directories = self.config.music_dirs
-        config_manager.save()
-        folder = self._selected_material_folder
-        if folder not in directories:
-            folder = directories[0] if directories else ""
-        if folder:
-            self._on_folder_selected(folder)
 
     def _on_material_selected(self, material_path: str):
         """Propagate a file selected directly from the folder browser."""
@@ -974,7 +982,7 @@ class MainWindow(QMainWindow):
         self.selected_material_path.setText(f"{path.parent}  ·  {status}")
         for button in self.material_action_buttons:
             button.setEnabled(True)
-        self.navigation_status.setText(f"当前素材：{path.name}\n可继续处理、试听或导出。")
+        self.navigation_lyrics_card.set_song(song)
 
     def _on_audio_editor_output_created(
         self,
@@ -1149,6 +1157,7 @@ class MainWindow(QMainWindow):
         self.vocal_lyrics_panel.show_song(song)
         self.online_lyrics_panel._song = song
         self.online_lyrics_panel.reload_local_lyrics()
+        self.navigation_lyrics_card.set_song(song)
         self.online_lyrics_panel.status_label.setText("本地歌词已更新，音频文件未修改。")
         self._refresh_statusbar()
 
@@ -1159,6 +1168,7 @@ class MainWindow(QMainWindow):
                 self.song_list_panel.update_song_status(song["path"], True)
                 break
         self.status_label.setText("歌词已保存")
+        self.navigation_lyrics_card.reload_lyrics(lrc_path)
         self._refresh_statusbar()
 
     def _on_material_directories_changed(self, mode: str, directories: list[str]):
@@ -1542,6 +1552,7 @@ class MainWindow(QMainWindow):
             )
         # 识别成功后立即刷新右侧详情面板
         if success:
+            self.navigation_lyrics_card.reload_lyrics(lrc_path)
             songs = self.song_list_panel.get_all_songs()
             for s in songs:
                 if s["path"] == file_path:
