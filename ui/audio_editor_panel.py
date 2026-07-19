@@ -28,6 +28,7 @@ from core.audio_editor import AudioEditResult, process_audio
 from core.audio_utils import get_audio_info
 from core.audio_waveform import extract_waveform_peaks
 from ui.audio_tool_workspaces import AudioToolWorkspace
+from ui.playback_coordinator import PlaybackSession
 
 WAVEFORM_CACHE_MAX_ITEMS = 8
 _WAVEFORM_CACHE: OrderedDict[tuple[str, int, int], tuple[object, float]] = OrderedDict()
@@ -169,28 +170,13 @@ TOOLS = (
         output_suffix=".mp3",
         selection_aware=False,
     ),
-    ToolSpec(
-        "tags",
-        "音频标签",
-        "在专属音乐信息面板编辑标题、歌手、专辑、年份和轨道号。",
-        "tags",
-        (
-            FieldSpec("title", "标题", "text", ""),
-            FieldSpec("artist", "歌手", "text", ""),
-            FieldSpec("album", "专辑", "text", ""),
-            FieldSpec("year", "年份", "text", ""),
-            FieldSpec("track", "轨道号", "text", ""),
-        ),
-        output_suffix=".mp3",
-        selection_aware=False,
-    ),
 )
 
 
 TOOL_GROUPS = (
-    ("编辑", ("trim", "split", "volume")),
+    ("编辑工具", ("trim", "split", "volume")),
     ("修复与音色", ("denoise", "normalize", "equalizer", "speed_pitch")),
-    ("合成与输出", ("concat", "mix", "extract", "tags")),
+    ("合成与输出", ("concat", "mix", "extract")),
 )
 
 
@@ -266,6 +252,7 @@ class AudioEditorPanel(QWidget):
         self._audio_output = QAudioOutput(self)
         self._player = QMediaPlayer(self)
         self._player.setAudioOutput(self._audio_output)
+        self._playback_session = PlaybackSession(self._player)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -321,6 +308,11 @@ class AudioEditorPanel(QWidget):
                 background:#E7F1FC; border-color:#B7D1EC;
                 color:#1F6FBB; font-weight:700;
             }
+            QLabel#audioToolGroupLabel {
+                background:#F1F5F9; border-left:3px solid #8CB3D9;
+                border-radius:4px; color:#526073; font-size:11px;
+                font-weight:700; min-height:24px; padding:3px 8px;
+            }
             QLabel#audioEditorStatus { color:#667085; font-size:11px; }
             """
         )
@@ -347,10 +339,14 @@ class AudioEditorPanel(QWidget):
         self.tool_button_group = QButtonGroup(self)
         self.tool_button_group.setExclusive(True)
         self.tool_buttons: dict[str, QPushButton] = {}
+        self.tool_group_labels: list[QLabel] = []
         by_key = {spec.key: spec for spec in TOOLS}
-        for group_title, keys in TOOL_GROUPS:
+        for group_index, (group_title, keys) in enumerate(TOOL_GROUPS):
+            if group_index:
+                rail_layout.addSpacing(7)
             group = QLabel(group_title)
-            group.setStyleSheet("color:#64748B;font-size:11px;font-weight:700;padding:9px 7px 3px")
+            group.setObjectName("audioToolGroupLabel")
+            self.tool_group_labels.append(group)
             rail_layout.addWidget(group)
             for key in keys:
                 spec = by_key[key]
@@ -613,7 +609,7 @@ class AudioEditorPanel(QWidget):
             current = self._player.position() / 1000.0
             if not self._selection[0] <= current < self._selection[1]:
                 self._player.setPosition(int(self._selection[0] * 1000))
-        self._player.play()
+        self._playback_session.play(self._player)
 
     def _toggle_result_playback(self, page: AudioToolWorkspace):
         result_path = page._result_path
@@ -627,7 +623,7 @@ class AudioEditorPanel(QWidget):
             return
         self._playing_path = result_path
         self._player.setSource(QUrl.fromLocalFile(str(Path(result_path).resolve())))
-        self._player.play()
+        self._playback_session.play(self._player)
 
     @staticmethod
     def _open_result_folder(page: AudioToolWorkspace):

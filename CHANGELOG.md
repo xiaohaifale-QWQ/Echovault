@@ -14,6 +14,15 @@
 
 ### Changed
 
+- Added an application-wide playback coordinator. Online lyrics, lyrics
+  verification, Audio Editing, and Vocal Separation now share one logical audio
+  focus: starting playback in one workspace pauses the previous workspace. The
+  synchronized vocal/accompaniment pair remains one playback session.
+- Clarified Audio Editing navigation with distinct section cards for editing,
+  restoration/tone, and composition/output. Removed the duplicate Audio Tags
+  tool; metadata is now maintained only in Lyrics & Tags. Model Library action
+  buttons now have independent row spacing and fitted table rows instead of
+  merging into a clipped vertical button strip.
 - Made every Qt slider track directly interactive: a left click anywhere on the
   unfilled groove now jumps to that absolute value for playback, volume, effects,
   denoise, balance, and vertical equalizer controls. Vertical sliders now share
@@ -51,13 +60,14 @@
   areas visible, adds a synchronized scrolling lyrics player, caches repeated
   queries for ten minutes, loads cover thumbnails concurrently, and includes the
   common audio-tag editor beside the cover results.
-- Replaced Audio Editing's shared waveform/effect-panel template with eleven
+- Replaced Audio Editing's shared waveform/effect-panel template with ten
   task-specific workspaces. Clip editing now combines precise extract/delete,
   gain, speed, pitch, delay, and fades; denoise compares original and processed
   waveforms; equalization uses eight vertical bands; multitrack tools provide
   track lanes, mute, solo, per-track volume, master gain, and stereo-channel
-  assembly. Split, volume, normalization, extraction, and tags also have distinct
-  workflows instead of generic parameter forms.
+  assembly. Split, volume, normalization, and extraction also have distinct
+  workflows instead of generic parameter forms; tags are maintained centrally in
+  Lyrics & Tags.
 - Rebuilt Audio Editing around a real waveform timeline instead of a tool catalog.
   FFmpeg now extracts filled min/max peaks from WAV, FLAC, MP3, video, and other
   supported media; the editor provides a time ruler, playhead, drag selection,

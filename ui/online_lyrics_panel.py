@@ -60,6 +60,7 @@ from core.online_lyrics import (
     simplify_lyrics_content,
     timed_text_entries,
 )
+from ui.playback_coordinator import PlaybackSession
 from ui.system_audio import apply_system_default_audio
 
 SEARCH_CACHE_TTL_SECONDS = 600.0
@@ -364,6 +365,7 @@ class OnlineLyricsComparisonPane(QWidget):
         self.audio_output.setVolume(0.8)
         self.player = QMediaPlayer(self)
         self.player.setAudioOutput(self.audio_output)
+        self._playback_session = PlaybackSession(self.player)
         self.player.positionChanged.connect(self._on_position_changed)
         self.player.durationChanged.connect(self._on_duration_changed)
         self.player.playbackStateChanged.connect(self._on_playback_state_changed)
@@ -446,7 +448,7 @@ class OnlineLyricsComparisonPane(QWidget):
                 return
             self.audio_output.setVolume(0.8)
             self.status_label.setText("正在通过 Windows 系统默认输出播放本地素材。")
-            self.player.play()
+            self._playback_session.play(self.player)
             self.playback_started.emit()
 
     def pause_playback(self):
@@ -534,6 +536,7 @@ class OnlineLyricsResultPane(QWidget):
         self.audio_output.setVolume(0.8)
         self.player = QMediaPlayer(self)
         self.player.setAudioOutput(self.audio_output)
+        self._playback_session = PlaybackSession(self.player)
         self.player.positionChanged.connect(self._on_position_changed)
         self.player.durationChanged.connect(self._on_duration_changed)
         self.player.playbackStateChanged.connect(self._on_playback_state_changed)
@@ -589,7 +592,7 @@ class OnlineLyricsResultPane(QWidget):
             return
         self.editor.setReadOnly(True)
         if self._apply_system_audio_output():
-            self.player.play()
+            self._playback_session.play(self.player)
             self.playback_started.emit()
 
     def _on_playback_state_changed(self, state):

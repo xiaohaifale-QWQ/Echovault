@@ -278,6 +278,7 @@ class ModelLibraryDialog(QDialog):
         table.setAlternatingRowColors(True)
         table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         table.setMinimumHeight(145)
+        table.verticalHeader().setDefaultSectionSize(44)
         header = table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -317,9 +318,7 @@ class ModelLibraryDialog(QDialog):
         table.verticalHeader().setVisible(False)
         table.setAlternatingRowColors(True)
         table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        table.setMinimumHeight(145)
-        if category == "separation":
-            table.setMinimumHeight(235)
+        table.verticalHeader().setDefaultSectionSize(44)
         header = table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -371,6 +370,13 @@ class ModelLibraryDialog(QDialog):
         self._fill_table(self.asr_table, "asr")
         self._fill_table(self.separation_table, "separation")
 
+    @staticmethod
+    def _fit_table_height(table: QTableWidget) -> None:
+        row_height = table.verticalHeader().defaultSectionSize()
+        header_height = table.horizontalHeader().sizeHint().height()
+        height = header_height + max(1, table.rowCount()) * row_height + 4
+        table.setFixedHeight(height)
+
     def _fill_online_table(self):
         query = self.search_input.text().strip().lower()
         models = [
@@ -395,6 +401,7 @@ class ModelLibraryDialog(QDialog):
                 status = "已配置" if configured else "缺少密钥"
             self.online_table.setItem(row, 3, QTableWidgetItem(status))
             button = QPushButton()
+            button.setObjectName("modelActionButton")
             button.setProperty("provider", model.key)
             if not configured:
                 button.setText("配置密钥")
@@ -404,6 +411,7 @@ class ModelLibraryDialog(QDialog):
                 button.setEnabled(not active)
                 button.clicked.connect(self._select_online_model)
             self.online_table.setCellWidget(row, 4, button)
+        self._fit_table_height(self.online_table)
 
     def _online_model_configured(self, provider: str) -> bool:
         if provider == "groq":
@@ -453,9 +461,11 @@ class ModelLibraryDialog(QDialog):
                 button = QPushButton("重新下载" if installed else "下载")
                 button.setEnabled(self._worker is None)
                 button.clicked.connect(self._install_clicked)
+            button.setObjectName("modelActionButton")
             button.setProperty("category", model.category)
             button.setProperty("model", model.key)
             table.setCellWidget(row, 6, button)
+        self._fit_table_height(table)
 
     def _select_online_model(self):
         provider = self.sender().property("provider")

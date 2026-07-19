@@ -279,9 +279,17 @@ def test_audio_editor_panel_exposes_detailed_pages_for_every_processing_tool(
 
     panel.show_song({"name": source.name, "path": str(source)})
 
-    assert len(TOOLS) == 11
+    assert len(TOOLS) == 10
     assert set(panel.tool_pages) == {spec.key for spec in TOOLS}
-    assert {"files", "record", "more", "edit", "fade"}.isdisjoint(panel.tool_pages)
+    assert {"files", "record", "more", "edit", "fade", "tags"}.isdisjoint(
+        panel.tool_pages
+    )
+    assert [label.text() for label in panel.tool_group_labels] == [
+        "编辑工具",
+        "修复与音色",
+        "合成与输出",
+    ]
+    assert all(label.objectName() == "audioToolGroupLabel" for label in panel.tool_group_labels)
     trim_page = panel.tool_pages["trim"]
     denoise_page = panel.tool_pages["denoise"]
     equalizer_page = panel.tool_pages["equalizer"]

@@ -39,6 +39,7 @@ from core.vocal_separation import (
     separation_available,
     separation_model_installed,
 )
+from ui.playback_coordinator import PlaybackSession
 from ui.system_audio import apply_system_default_audio
 
 
@@ -269,6 +270,9 @@ class VocalSeparationPanel(QWidget):
         self.vocal_audio = QAudioOutput(self)
         self.accompaniment_player.setAudioOutput(self.accompaniment_audio)
         self.vocal_player.setAudioOutput(self.vocal_audio)
+        self._playback_session = PlaybackSession(
+            self.accompaniment_player, self.vocal_player
+        )
         self.accompaniment_audio.setVolume(1.0)
         self.vocal_audio.setVolume(1.0)
         self.accompaniment_player.positionChanged.connect(self._position_changed)
@@ -670,10 +674,18 @@ class VocalSeparationPanel(QWidget):
             )
             position = master.position()
             self.vocal_player.setPosition(position)
-            if self._result and self._result.vocals_path is not None:
-                self.vocal_player.play()
-            if self._result and self._result.accompaniment_path is not None:
-                self.accompaniment_player.play()
+            players = tuple(
+                player
+                for player, path in (
+                    (self.vocal_player, self._result.vocals_path if self._result else None),
+                    (
+                        self.accompaniment_player,
+                        self._result.accompaniment_path if self._result else None,
+                    ),
+                )
+                if path is not None
+            )
+            self._playback_session.play_all(players)
             track_count = sum(
                 path is not None
                 for path in (

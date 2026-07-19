@@ -175,6 +175,14 @@ QPushButton#statusStopButton:disabled {
     color: #A0A8B3;
     border-color: #E0E4E9;
 }
+QPushButton#modelActionButton {
+    min-height: 26px;
+    max-height: 26px;
+    min-width: 68px;
+    margin: 5px 4px;
+    padding: 0 10px;
+    border-radius: 6px;
+}
 QFrame[frameShape="4"], QFrame[frameShape="5"] {
     color: #E1E6ED;
 }
@@ -478,6 +486,12 @@ def polish_widget_tree(root: QWidget) -> None:
                 widget.setCursor(Qt.CursorShape.PointingHandCursor)
                 widget.setFixedHeight(24)
                 widget.setMinimumWidth(58)
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
+                continue
+            if widget.objectName() == "modelActionButton":
+                widget.setProperty("buttonRole", _button_role(widget))
+                widget.setCursor(Qt.CursorShape.PointingHandCursor)
                 widget.style().unpolish(widget)
                 widget.style().polish(widget)
                 continue

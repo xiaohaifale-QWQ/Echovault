@@ -32,6 +32,9 @@ def test_model_library_contains_asr_and_separation_models(monkeypatch):
         ENHANCEMENT_MODELS
     )
     assert dialog.separation_table.minimumHeight() >= 235
+    assert dialog.asr_table.rowHeight(0) >= 44
+    assert dialog.online_table.cellWidget(0, 4).objectName() == "modelActionButton"
+    assert dialog.asr_table.cellWidget(0, 6).objectName() == "modelActionButton"
     assert dialog.separation_model_combo.count() == len(SEPARATION_MODELS)
     assert dialog.separation_model_combo.currentData() == "htdemucs"
     assert not dialog.separation_gpu_check.isEnabled()
