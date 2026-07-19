@@ -313,8 +313,20 @@ def test_online_workspace_keeps_lyrics_and_tag_actions_visible():
         "封面候选",
         "音频标签",
     ]
-    assert panel.results_table.maximumHeight() == 145
-    assert panel.online_result_pane.editor.minimumHeight() >= 190
+    assert panel.lyrics_content_splitter.orientation().name == "Horizontal"
+    assert panel.results_table.maximumHeight() > 1000
+    assert panel.results_table.minimumHeight() >= 245
+    assert panel.online_result_pane.editor.minimumHeight() >= 245
+    assert panel.results_table.mapTo(panel, panel.results_table.rect().topRight()).x() < (
+        panel.online_result_pane.editor.mapTo(
+            panel, panel.online_result_pane.editor.rect().topLeft()
+        ).x()
+    )
+    assert panel.online_player_group.mapTo(
+        panel, panel.online_player_group.rect().topLeft()
+    ).y() >= panel.lyrics_content_splitter.mapTo(
+        panel, panel.lyrics_content_splitter.rect().bottomLeft()
+    ).y()
     panel.online_side_tabs.setCurrentWidget(panel.tag_page)
     app.processEvents()
     assert panel.save_tags_button.isVisibleTo(panel)

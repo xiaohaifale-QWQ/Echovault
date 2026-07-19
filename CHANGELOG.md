@@ -14,6 +14,11 @@
 
 ### Changed
 
+- Reflowed the Online Lyrics module into a horizontal candidate/editor workspace.
+  The candidate table now uses the full left column, the selected lyric uses the
+  full right column, and the synchronized player spans both below the splitter.
+  The divider is adjustable and the table no longer consumes a fixed 145 px row
+  above the lyric text.
 - Accelerated Online Lyrics & Cover search. LRCLIB exact lookup and the broader
   candidate search now race each other so an exact lyric can render first. Cover
   discovery uses Apple's one-request catalog artwork path before falling back to

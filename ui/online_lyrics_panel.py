@@ -514,8 +514,8 @@ class OnlineLyricsResultPane(QWidget):
         self.editor.textChanged.connect(self.content_changed)
         layout.addWidget(self.editor, 1)
 
-        player = QGroupBox("播放器 · 同步滚动在线歌词")
-        player_layout = QHBoxLayout(player)
+        self.player_group = QGroupBox("播放器 · 同步滚动在线歌词")
+        player_layout = QHBoxLayout(self.player_group)
         self.play_button = QPushButton("播放")
         self.play_button.setEnabled(False)
         self.play_button.clicked.connect(self._toggle_playback)
@@ -528,7 +528,7 @@ class OnlineLyricsResultPane(QWidget):
         player_layout.addWidget(self.position_slider, 1)
         self.time_label = QLabel("00:00 / 00:00")
         player_layout.addWidget(self.time_label)
-        layout.addWidget(player)
+        layout.addWidget(self.player_group)
 
         self.audio_output = QAudioOutput(self)
         self.audio_output.setVolume(0.8)
@@ -540,6 +540,12 @@ class OnlineLyricsResultPane(QWidget):
         self.media_devices = QMediaDevices(self)
         self.media_devices.audioOutputsChanged.connect(self._apply_system_audio_output)
         self._apply_system_audio_output()
+
+    def take_player_group(self) -> QGroupBox:
+        """Move the transport outside the editor pane so it can span its workspace."""
+        self.layout().removeWidget(self.player_group)
+        self.player_group.setParent(None)
+        return self.player_group
 
     def show_song(self, song: dict):
         self.player.stop()
@@ -840,13 +846,26 @@ class OnlineLyricsPanel(QWidget):
         lyrics_layout = QVBoxLayout(lyrics_group)
         lyrics_layout.setContentsMargins(10, 10, 10, 8)
         lyrics_layout.setSpacing(7)
+        lyrics_content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.lyrics_content_splitter = lyrics_content_splitter
+        lyrics_content_splitter.setChildrenCollapsible(False)
+        lyrics_content_splitter.setHandleWidth(8)
+
+        candidates_panel = QWidget()
+        self.lyrics_candidates_panel = candidates_panel
+        candidates_layout = QVBoxLayout(candidates_panel)
+        candidates_layout.setContentsMargins(0, 0, 0, 0)
+        candidates_layout.setSpacing(5)
+        candidates_label = QLabel("候选结果")
+        candidates_label.setStyleSheet("font-weight:600;color:#344054")
+        candidates_layout.addWidget(candidates_label)
         self.results_table = QTableWidget(0, 5)
         self.results_table.setHorizontalHeaderLabels(["匹配", "歌名", "歌手", "时长", "同步"])
         self.results_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.results_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.results_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.results_table.setMinimumHeight(118)
-        self.results_table.setMaximumHeight(145)
+        self.results_table.setMinimumHeight(245)
+        self.results_table.verticalHeader().setVisible(False)
         self.results_table.currentCellChanged.connect(self._on_result_selected)
         header = self.results_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -854,12 +873,21 @@ class OnlineLyricsPanel(QWidget):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        lyrics_layout.addWidget(self.results_table)
+        candidates_layout.addWidget(self.results_table, 1)
+        lyrics_content_splitter.addWidget(candidates_panel)
+
         self.online_result_pane = OnlineLyricsResultPane()
-        self.online_result_pane.editor.setMinimumHeight(190)
+        self.online_result_pane.editor.setMinimumHeight(245)
         self.online_result_pane.content_changed.connect(self._online_result_edited)
         self.online_result_pane.playback_started.connect(self.playback_started)
-        lyrics_layout.addWidget(self.online_result_pane, 1)
+        lyrics_content_splitter.addWidget(self.online_result_pane)
+        lyrics_content_splitter.setStretchFactor(0, 4)
+        lyrics_content_splitter.setStretchFactor(1, 6)
+        lyrics_content_splitter.setSizes([380, 560])
+        lyrics_layout.addWidget(lyrics_content_splitter, 1)
+
+        self.online_player_group = self.online_result_pane.take_player_group()
+        lyrics_layout.addWidget(self.online_player_group)
         self.lyrics_status_label = QLabel("点击一键搜索后，最佳匹配歌词会自动显示。")
         self.lyrics_status_label.setWordWrap(True)
         self.lyrics_status_label.setStyleSheet("font-size:11px;color:#667085")
