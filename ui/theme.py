@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
@@ -27,6 +30,16 @@ class ClickJumpSliderStyle(QProxyStyle):
         if hint == QStyle.StyleHint.SH_Slider_AbsoluteSetButtons:
             return Qt.MouseButton.LeftButton.value
         return super().styleHint(hint, option, widget, return_data)
+
+
+def _asset_url(name: str) -> str:
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return (base / "ui" / "assets" / name).as_posix()
+
+
+_SLIDER_HANDLE = _asset_url("slider-handle.svg")
+_SLIDER_HANDLE_HOVER = _asset_url("slider-handle-hover.svg")
+_SLIDER_HANDLE_PRESSED = _asset_url("slider-handle-pressed.svg")
 
 PRIMARY_OBJECT_NAMES = {
     "primaryAction",
@@ -381,44 +394,50 @@ QProgressBar::chunk {
     border-radius: 7px;
 }
 QSlider::groove:horizontal {
-    height: 5px;
-    background: #DCE3EB;
+    height: 4px;
+    background: #D8E0E9;
     border-radius: 2px;
 }
 QSlider::sub-page:horizontal {
-    background: #77AEE2;
+    background: #4D91D7;
     border-radius: 2px;
 }
 QSlider::handle:horizontal {
-    width: 15px;
-    height: 15px;
-    margin: -5px 0;
-    background: #FFFFFF;
-    border: 2px solid #2F7DD1;
-    border-radius: 8px;
+    width: 22px;
+    height: 22px;
+    margin: -9px 0;
+    background: transparent;
+    border: none;
+    image: url("{_SLIDER_HANDLE}");
 }
 QSlider::handle:horizontal:hover {
-    background: #EAF3FC;
+    image: url("{_SLIDER_HANDLE_HOVER}");
+}
+QSlider::handle:horizontal:pressed {
+    image: url("{_SLIDER_HANDLE_PRESSED}");
 }
 QSlider::groove:vertical {
-    width: 5px;
-    background: #DCE3EB;
+    width: 4px;
+    background: #D8E0E9;
     border-radius: 2px;
 }
 QSlider::sub-page:vertical {
-    background: #77AEE2;
+    background: #4D91D7;
     border-radius: 2px;
 }
 QSlider::handle:vertical {
-    width: 15px;
-    height: 15px;
-    margin: 0 -5px;
-    background: #FFFFFF;
-    border: 2px solid #2F7DD1;
-    border-radius: 8px;
+    width: 22px;
+    height: 22px;
+    margin: 0 -9px;
+    background: transparent;
+    border: none;
+    image: url("{_SLIDER_HANDLE}");
 }
 QSlider::handle:vertical:hover {
-    background: #EAF3FC;
+    image: url("{_SLIDER_HANDLE_HOVER}");
+}
+QSlider::handle:vertical:pressed {
+    image: url("{_SLIDER_HANDLE_PRESSED}");
 }
 QSplitter::handle {
     background: transparent;
@@ -461,6 +480,11 @@ QScrollBar::add-page, QScrollBar::sub-page {
     border: none;
 }
 """
+APP_STYLESHEET = (
+    APP_STYLESHEET.replace("{_SLIDER_HANDLE}", _SLIDER_HANDLE)
+    .replace("{_SLIDER_HANDLE_HOVER}", _SLIDER_HANDLE_HOVER)
+    .replace("{_SLIDER_HANDLE_PRESSED}", _SLIDER_HANDLE_PRESSED)
+)
 
 
 def _button_role(button: QPushButton) -> str:

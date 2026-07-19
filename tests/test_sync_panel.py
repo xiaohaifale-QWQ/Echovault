@@ -5,7 +5,7 @@ from tests.qt_test_app import ensure_app, keep_widget
 from ui.sync_panel import SyncPanel
 
 
-def test_sync_panel_uses_phone_task_workflow_and_hides_advanced_sync(
+def test_sync_panel_exposes_separate_send_receive_and_advanced_pages(
     monkeypatch, tmp_path
 ):
     ensure_app()
@@ -27,9 +27,14 @@ def test_sync_panel_uses_phone_task_workflow_and_hides_advanced_sync(
     assert panel.open_receive_button.text() == "打开目录"
     assert panel.browse_receive_button.text() == "选择目录"
     assert panel.send_button.text() == "发送选中的文件到手机"
-    assert panel.advanced_group.isCheckable()
-    assert panel.advanced_group.isChecked() is False
-    assert panel.folder_sync_panel.isHidden()
+    assert panel.send_page.objectName() == "phoneSendPage"
+    assert panel.receive_page.objectName() == "phoneReceivePage"
+    assert panel.advanced_sync_page.objectName() == "advancedFolderSyncPage"
+    assert panel.send_page.isAncestorOf(panel.send_button)
+    assert panel.receive_page.isAncestorOf(panel.receiver_button)
+    assert panel.advanced_sync_page.isAncestorOf(panel.folder_sync_panel)
+    assert not panel.advanced_group.isCheckable()
+    assert not panel.folder_sync_panel.isHidden()
 
     panel.set_dir_a(str(tmp_path / "music"))
     assert panel.receive_dir_input.text().endswith("Echovault接收")

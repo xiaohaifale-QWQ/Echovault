@@ -405,11 +405,25 @@ class SyncPanel(QWidget):
             self.receiver_button.setChecked(True)
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        self.send_page = QWidget(self)
+        self.send_page.setObjectName("phoneSendPage")
+        send_page_layout = QVBoxLayout(self.send_page)
+        send_page_layout.setContentsMargins(8, 8, 8, 8)
+        send_page_layout.setSpacing(8)
 
-        receive_group = QGroupBox("1. 从手机接收")
+        self.receive_page = QWidget(self)
+        self.receive_page.setObjectName("phoneReceivePage")
+        receive_page_layout = QVBoxLayout(self.receive_page)
+        receive_page_layout.setContentsMargins(8, 8, 8, 8)
+        receive_page_layout.setSpacing(8)
+
+        self.advanced_sync_page = QWidget(self)
+        self.advanced_sync_page.setObjectName("advancedFolderSyncPage")
+        advanced_page_layout = QVBoxLayout(self.advanced_sync_page)
+        advanced_page_layout.setContentsMargins(8, 8, 8, 8)
+        advanced_page_layout.setSpacing(8)
+
+        receive_group = QGroupBox("接收设置")
         receive_group.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
         )
@@ -441,9 +455,10 @@ class SyncPanel(QWidget):
         self.recent_received = QLabel("")
         self.recent_received.setVisible(False)
         receive_layout.addWidget(self.recent_received)
-        layout.addWidget(receive_group)
+        receive_page_layout.addWidget(receive_group)
+        receive_page_layout.addStretch()
 
-        task_group = QGroupBox("2. 当前传输任务与处理结果")
+        task_group = QGroupBox("待发送文件")
         task_layout = QVBoxLayout(task_group)
         task_row = QHBoxLayout()
         self.session_combo = QComboBox()
@@ -502,9 +517,9 @@ class SyncPanel(QWidget):
         self.diff_table.itemChanged.connect(self._selection_changed)
         self.diff_table.cellDoubleClicked.connect(lambda _row, _column: self._preview_selected())
         task_layout.addWidget(self.diff_table, 1)
-        layout.addWidget(task_group, 1)
+        send_page_layout.addWidget(task_group, 1)
 
-        send_group = QGroupBox("3. 把处理结果传回手机")
+        send_group = QGroupBox("发送到手机")
         send_group.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
         )
@@ -533,20 +548,16 @@ class SyncPanel(QWidget):
         self.send_status = QLabel("请先开启接收，手机 LocalSend 打开后会出现在设备列表。")
         self.send_status.setWordWrap(True)
         send_layout.addWidget(self.send_status)
-        layout.addWidget(send_group)
+        send_page_layout.addWidget(send_group)
 
-        self.advanced_group = QGroupBox("高级文件夹同步")
+        self.advanced_group = QGroupBox("文件夹 A/B 同步")
         self.advanced_group.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        self.advanced_group.setCheckable(True)
-        self.advanced_group.setChecked(False)
         advanced_layout = QVBoxLayout(self.advanced_group)
         self.folder_sync_panel = FolderSyncPanel()
-        self.folder_sync_panel.setVisible(False)
-        self.advanced_group.toggled.connect(self.folder_sync_panel.setVisible)
         advanced_layout.addWidget(self.folder_sync_panel)
-        layout.addWidget(self.advanced_group)
+        advanced_page_layout.addWidget(self.advanced_group, 1)
 
     def set_dir_a(self, folder_path):
         self.folder_sync_panel.set_dir_a(folder_path)

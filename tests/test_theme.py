@@ -24,6 +24,10 @@ def test_theme_uses_rounded_light_controls_and_blue_primary_actions():
     assert 'background: #2F7DD1' in APP_STYLESHEET
     assert 'QTabBar::tab:selected' in APP_STYLESHEET
     assert 'QScrollBar::handle:vertical' in APP_STYLESHEET
+    assert "QSlider::handle:horizontal" in APP_STYLESHEET
+    assert "QSlider::handle:vertical" in APP_STYLESHEET
+    assert "border-radius: 11px" in APP_STYLESHEET
+    assert "slider-handle.svg" in APP_STYLESHEET
 
 
 def test_theme_normalizes_inline_button_styles_and_assigns_roles():

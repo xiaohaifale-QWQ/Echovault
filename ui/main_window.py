@@ -138,7 +138,7 @@ class MainWindow(QMainWindow):
         self.vocal_separation_panel.model_library_requested.connect(self._on_model_library)
         self.audio_editor_panel = AudioEditorPanel()
         self.batch_operations_panel = BatchOperationsPanel(self.config)
-        self.sync_panel = SyncPanel()
+        self.sync_panel = SyncPanel(self)
 
         shell = QWidget()
         shell_layout = QVBoxLayout(shell)
@@ -368,7 +368,7 @@ class MainWindow(QMainWindow):
         routes = (
             (("歌词", "封面", "标签", "翻译", "核对", "校准", "本地识别"), "lyrics"),
             (("音频", "剪辑", "裁剪", "降噪", "均衡", "人声", "混音"), "audio"),
-            (("传输", "手机", "回传", "导出", "批量"), "transfer"),
+            (("传输", "手机", "回传", "导出", "批量", "接收", "发送", "同步"), "transfer"),
             (("素材", "音乐", "视频", "文件"), "materials"),
         )
         for keywords, workspace in routes:
@@ -383,6 +383,16 @@ class MainWindow(QMainWindow):
                         self.lyrics_tabs.setCurrentIndex(0)
                 if workspace == "transfer" and "批量" in query:
                     self.transfer_tabs.setCurrentWidget(self.batch_operations_panel)
+                elif workspace == "transfer" and "接收" in query:
+                    self.transfer_tabs.setCurrentWidget(self.sync_panel.receive_page)
+                elif workspace == "transfer" and any(
+                    word in query for word in ("同步", "文件夹")
+                ):
+                    self.transfer_tabs.setCurrentWidget(
+                        self.sync_panel.advanced_sync_page
+                    )
+                elif workspace == "transfer":
+                    self.transfer_tabs.setCurrentWidget(self.sync_panel.send_page)
                 return
         self._switch_workspace("materials")
 
@@ -551,8 +561,12 @@ class MainWindow(QMainWindow):
     def _build_transfer_workspace(self):
         self.transfer_tabs = QTabWidget()
         self.transfer_tabs.setDocumentMode(True)
-        self.transfer_tabs.addTab(self.sync_panel, "手机接收与回传")
+        self.transfer_tabs.addTab(self.sync_panel.send_page, "发送")
+        self.transfer_tabs.addTab(self.sync_panel.receive_page, "接收")
         self.transfer_tabs.addTab(self.batch_operations_panel, "批量任务")
+        self.transfer_tabs.addTab(
+            self.sync_panel.advanced_sync_page, "高级文件夹同步"
+        )
         return self.transfer_tabs
 
     def _switch_workspace(self, key: str):

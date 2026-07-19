@@ -36,10 +36,15 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
         "音频编辑",
         "人声分离",
     ]
-    assert [window.transfer_tabs.tabText(index) for index in range(2)] == [
-        "手机接收与回传",
+    assert [window.transfer_tabs.tabText(index) for index in range(4)] == [
+        "发送",
+        "接收",
         "批量任务",
+        "高级文件夹同步",
     ]
+    assert window.transfer_tabs.widget(0) is window.sync_panel.send_page
+    assert window.transfer_tabs.widget(1) is window.sync_panel.receive_page
+    assert window.transfer_tabs.widget(3) is window.sync_panel.advanced_sync_page
     assert window.outer_splitter.widget(1) is window.ai_chat_panel
     assert window.outer_splitter.widget(0) is window.body
     shell_layout = window.centralWidget().layout()
@@ -78,6 +83,15 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
     window._submit_global_search()
     assert window.workspace_stack.currentWidget() is window.workspace_pages["transfer"]
     assert window.transfer_tabs.currentWidget() is window.batch_operations_panel
+    window.global_search.setText("手机接收")
+    window._submit_global_search()
+    assert window.transfer_tabs.currentWidget() is window.sync_panel.receive_page
+    window.global_search.setText("高级同步")
+    window._submit_global_search()
+    assert window.transfer_tabs.currentWidget() is window.sync_panel.advanced_sync_page
+    window.global_search.setText("发送")
+    window._submit_global_search()
+    assert window.transfer_tabs.currentWidget() is window.sync_panel.send_page
     window.global_search.setText("歌词核对")
     window._submit_global_search()
     assert window.lyrics_tabs.currentIndex() == 2

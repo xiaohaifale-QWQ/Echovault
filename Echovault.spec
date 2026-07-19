@@ -39,7 +39,10 @@ hidden_imports = [
 ] + collect_submodules("argostranslate") + collect_submodules("audio_separator") + collect_submodules("demucs") + collect_submodules("groq") + collect_submodules("samplerate") + collect_submodules("torchaudio") + collect_submodules("whisper") + collect_submodules("tiktoken_ext")
 
 datas = (
-    copy_metadata("audio-separator")
+    [(str(project_root / "ui" / "assets" / "slider-handle.svg"), "ui/assets")]
+    + [(str(project_root / "ui" / "assets" / "slider-handle-hover.svg"), "ui/assets")]
+    + [(str(project_root / "ui" / "assets" / "slider-handle-pressed.svg"), "ui/assets")]
+    + copy_metadata("audio-separator")
     + collect_data_files("argostranslate")
     + collect_data_files("audio_separator")
     + collect_data_files("certifi")

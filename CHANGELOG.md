@@ -23,10 +23,15 @@
   tool; metadata is now maintained only in Lyrics & Tags. Model Library action
   buttons now have independent row spacing and fitted table rows instead of
   merging into a clipped vertical button strip.
+- Split Export & Transfer into four task pages: Send, Receive, Batch Tasks, and
+  Advanced Folder Sync. Phone result review now stays with Send, receiver setup
+  has its own compact page, and A/B folder synchronization is always visible in
+  its dedicated workspace instead of being collapsed below the phone workflow.
 - Made every Qt slider track directly interactive: a left click anywhere on the
   unfilled groove now jumps to that absolute value for playback, volume, effects,
   denoise, balance, and vertical equalizer controls. Vertical sliders now share
-  the same visual treatment as horizontal sliders.
+  the same visual treatment as horizontal sliders. Square native handles were
+  replaced with compact solid-blue circular handles and a slimmer track.
 - Reduced the AI assistant drawer from 340 px to 280 px and moved it into the body
   splitter. It now begins below the integrated title bar and 60 px product header,
   leaving all branding, search, and top actions at full-window width; the prompt
