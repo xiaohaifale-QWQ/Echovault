@@ -147,7 +147,8 @@ class MainWindow(QMainWindow):
 
         self.title_bar = ApplicationTitleBar(self, self.windowTitle())
         shell_layout.addWidget(self.title_bar)
-        shell_layout.addWidget(self._build_top_header())
+        self.top_header = self._build_top_header()
+        shell_layout.addWidget(self.top_header)
         body = QWidget()
         body_layout = QHBoxLayout(body)
         body_layout.setContentsMargins(0, 0, 0, 0)
@@ -183,7 +184,7 @@ class MainWindow(QMainWindow):
             self.workspace_stack.addWidget(page)
         workspace_layout.addWidget(self.workspace_stack, 1)
         body_layout.addWidget(workspace_container, 1)
-        shell_layout.addWidget(body, 1)
+        self.body = body
 
         self.setStyleSheet(
             """
@@ -301,20 +302,21 @@ class MainWindow(QMainWindow):
             """
         )
 
-        self._ai_panel_width = 340
+        self._ai_panel_width = 280
         self._ai_mode_enabled = False
         self.ai_chat_panel = AIChatPanel(self.config)
         self.ai_chat_panel.setMinimumWidth(0)
         self.ai_chat_panel.setMaximumWidth(self._ai_panel_width)
         self.ai_chat_panel.setVisible(False)
         self.outer_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.outer_splitter.addWidget(shell)
+        self.outer_splitter.addWidget(body)
         self.outer_splitter.addWidget(self.ai_chat_panel)
         self.outer_splitter.setCollapsible(1, False)
         self.outer_splitter.setStretchFactor(0, 1)
         self.outer_splitter.setStretchFactor(1, 0)
         self.outer_splitter.setSizes([1440, 0])
-        self.setCentralWidget(self.outer_splitter)
+        shell_layout.addWidget(self.outer_splitter, 1)
+        self.setCentralWidget(shell)
         self.resize_handles = FramelessResizeHandles(self)
         self.motion = MotionController(self)
         self._switch_workspace("materials")

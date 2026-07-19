@@ -1,8 +1,11 @@
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (
     QAbstractSpinBox,
     QDialog,
     QMainWindow,
     QPushButton,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
 )
@@ -46,6 +49,40 @@ def test_theme_normalizes_inline_button_styles_and_assigns_roles():
     assert danger.property("buttonRole") == "danger"
     assert all(button.minimumHeight() >= 32 for button in (primary, secondary, danger))
     assert score.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
+
+
+def test_left_click_on_slider_track_jumps_to_clicked_position():
+    app = ensure_app()
+    apply_application_theme(app)
+    slider = keep_widget(QSlider(Qt.Orientation.Horizontal))
+    slider.setRange(0, 100)
+    slider.setValue(0)
+    slider.resize(200, 30)
+    slider.show()
+    app.processEvents()
+
+    QTest.mouseClick(
+        slider,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(150, slider.height() // 2),
+    )
+
+    assert 70 <= slider.value() <= 80
+
+    vertical = keep_widget(QSlider(Qt.Orientation.Vertical))
+    vertical.setRange(0, 100)
+    vertical.setValue(0)
+    vertical.resize(30, 200)
+    vertical.show()
+    app.processEvents()
+
+    QTest.mouseClick(
+        vertical,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(vertical.width() // 2, 50),
+    )
+
+    assert 70 <= vertical.value() <= 80
 
 
 def test_application_title_bar_exposes_standard_window_controls():

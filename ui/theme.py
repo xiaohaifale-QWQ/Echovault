@@ -11,10 +11,22 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QLineEdit,
+    QProxyStyle,
     QPushButton,
+    QSlider,
     QSpinBox,
+    QStyle,
     QWidget,
 )
+
+
+class ClickJumpSliderStyle(QProxyStyle):
+    """Make a left click on any slider track set the absolute position."""
+
+    def styleHint(self, hint, option=None, widget=None, return_data=None):
+        if hint == QStyle.StyleHint.SH_Slider_AbsoluteSetButtons:
+            return Qt.MouseButton.LeftButton.value
+        return super().styleHint(hint, option, widget, return_data)
 
 PRIMARY_OBJECT_NAMES = {
     "primaryAction",
@@ -148,8 +160,8 @@ QPushButton#statusStopButton {
     border: 1px solid #E7B8B8;
     border-radius: 6px;
     min-width: 58px;
-    min-height: 24px;
-    max-height: 24px;
+    min-height: 22px;
+    max-height: 22px;
     padding: 0 10px;
     font-size: 11px;
 }
@@ -380,6 +392,26 @@ QSlider::handle:horizontal {
 QSlider::handle:horizontal:hover {
     background: #EAF3FC;
 }
+QSlider::groove:vertical {
+    width: 5px;
+    background: #DCE3EB;
+    border-radius: 2px;
+}
+QSlider::sub-page:vertical {
+    background: #77AEE2;
+    border-radius: 2px;
+}
+QSlider::handle:vertical {
+    width: 15px;
+    height: 15px;
+    margin: 0 -5px;
+    background: #FFFFFF;
+    border: 2px solid #2F7DD1;
+    border-radius: 8px;
+}
+QSlider::handle:vertical:hover {
+    background: #EAF3FC;
+}
 QSplitter::handle {
     background: transparent;
     width: 6px;
@@ -462,6 +494,8 @@ def polish_widget_tree(root: QWidget) -> None:
                 widget.style().polish(widget)
         elif isinstance(widget, QAbstractButton):
             widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        elif isinstance(widget, QSlider):
+            widget.setCursor(Qt.CursorShape.PointingHandCursor)
         elif isinstance(widget, (QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox)):
             if widget.minimumHeight() < 32:
                 widget.setMinimumHeight(32)
@@ -471,5 +505,7 @@ def polish_widget_tree(root: QWidget) -> None:
 
 def apply_application_theme(app: QApplication) -> None:
     """Install the global visual system before the main window is constructed."""
+    if not isinstance(app.style(), ClickJumpSliderStyle):
+        app.setStyle(ClickJumpSliderStyle(app.style()))
     app.setFont(QFont("Microsoft YaHei UI", 9))
     app.setStyleSheet(APP_STYLESHEET)

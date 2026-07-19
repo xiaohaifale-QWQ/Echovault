@@ -41,6 +41,14 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(monkeypatch):
         "批量任务",
     ]
     assert window.outer_splitter.widget(1) is window.ai_chat_panel
+    assert window.outer_splitter.widget(0) is window.body
+    shell_layout = window.centralWidget().layout()
+    assert shell_layout.indexOf(window.title_bar) == 0
+    assert shell_layout.indexOf(window.top_header) == 1
+    assert shell_layout.indexOf(window.outer_splitter) == 2
+    assert window._ai_panel_width == 280
+    assert window.ai_chat_panel.maximumWidth() == 280
+    assert window.ai_chat_panel.input.height() == 68
     assert window.ai_chat_panel.isHidden()
     assert window.menuBar().isHidden()
     assert window.global_search.placeholderText() == "搜索素材、歌词、标签或功能"

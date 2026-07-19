@@ -122,7 +122,7 @@ class AIChatPanel(QWidget):
         self._record_file = None
         self._raw_path: Path | None = None
         self._record_seconds = 0
-        self.setMinimumWidth(310)
+        self.setMinimumWidth(260)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -139,7 +139,7 @@ class AIChatPanel(QWidget):
         self.input = ChatInputEdit()
         self.input.setPlaceholderText("输入问题，Enter 发送，Ctrl+Enter 换行")
         self.input.send_requested.connect(self._send)
-        self.input.setFixedHeight(80)
+        self.input.setFixedHeight(68)
         layout.addWidget(self.input)
         actions = QHBoxLayout()
         self.clear_button = QPushButton("清空")

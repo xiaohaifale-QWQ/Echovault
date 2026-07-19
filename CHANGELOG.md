@@ -14,6 +14,14 @@
 
 ### Changed
 
+- Made every Qt slider track directly interactive: a left click anywhere on the
+  unfilled groove now jumps to that absolute value for playback, volume, effects,
+  denoise, balance, and vertical equalizer controls. Vertical sliders now share
+  the same visual treatment as horizontal sliders.
+- Reduced the AI assistant drawer from 340 px to 280 px and moved it into the body
+  splitter. It now begins below the integrated title bar and 60 px product header,
+  leaving all branding, search, and top actions at full-window width; the prompt
+  editor is also reduced from 80 px to 68 px high.
 - Reflowed the Online Lyrics module into a horizontal candidate/editor workspace.
   The candidate table now uses the full left column, the selected lyric uses the
   full right column, and the synchronized player spans both below the splitter.
