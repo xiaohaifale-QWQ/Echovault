@@ -1201,6 +1201,7 @@ def cmd_doctor(args):
 def cmd_gui(args):
     import traceback
 
+    from PyQt6.QtGui import QIcon
     from PyQt6.QtWidgets import QApplication, QMessageBox
 
     from ui.main_window import MainWindow
@@ -1216,6 +1217,8 @@ def cmd_gui(args):
     app = QApplication(sys.argv)
     app.setApplicationName("Echovault")
     app.setOrganizationName("Echovault")
+    resource_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    app.setWindowIcon(QIcon(str(resource_root / "ui" / "assets" / "echovault.ico")))
     app.setStyle("Fusion")
     apply_application_theme(app)
     try:

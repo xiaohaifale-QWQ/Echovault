@@ -54,7 +54,8 @@ if full_build:
     )
 
 datas = (
-    [(str(project_root / "ui" / "assets" / "slider-handle.svg"), "ui/assets")]
+    [(str(project_root / "ui" / "assets" / "echovault.ico"), "ui/assets")]
+    + [(str(project_root / "ui" / "assets" / "slider-handle.svg"), "ui/assets")]
     + [(str(project_root / "ui" / "assets" / "slider-handle-hover.svg"), "ui/assets")]
     + [(str(project_root / "ui" / "assets" / "slider-handle-pressed.svg"), "ui/assets")]
     + collect_data_files("certifi")
@@ -133,6 +134,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=os.environ.get("ECHOVAULT_CONSOLE") == "1",
+    icon=str(project_root / "ui" / "assets" / "echovault.ico"),
     disable_windowed_traceback=False,
 )
 

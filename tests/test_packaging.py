@@ -30,3 +30,11 @@ def test_full_profile_collects_offline_ai_runtimes():
     assert 'collect_data_files("argostranslate")' in spec
     assert 'collect_submodules("whisper")' in full_section
     assert 'copy_metadata("audio-separator")' in full_section
+
+
+def test_desktop_package_bundles_and_applies_application_icon():
+    project_root = Path(__file__).resolve().parents[1]
+    spec = (project_root / "packaging" / "Echovault.spec").read_text(encoding="utf-8")
+
+    assert (project_root / "ui" / "assets" / "echovault.ico").is_file()
+    assert spec.count('"echovault.ico"') >= 2
