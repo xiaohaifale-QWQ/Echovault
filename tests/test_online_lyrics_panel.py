@@ -277,6 +277,43 @@ def test_one_click_search_starts_lyrics_and_cover_together(monkeypatch, tmp_path
     assert started == ["lyrics", "cover"]
 
 
+def test_online_panel_imports_local_lyrics_into_edit_and_apply_flow(
+    monkeypatch,
+    tmp_path,
+):
+    ensure_app()
+    monkeypatch.setattr(
+        "ui.online_lyrics_panel.media_search_metadata",
+        lambda _path: MediaSearchMetadata("Song", "Singer", "Album", 10.0),
+    )
+    monkeypatch.setattr("ui.online_lyrics_panel.read_cover_art", lambda _path: None)
+    media_path = tmp_path / "Song.mp3"
+    media_path.write_bytes(b"audio")
+    lyrics_path = tmp_path / "manual.lrc"
+    lyrics_path.write_text("[00:01.00]first\n[00:02.00]second\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "ui.online_lyrics_panel.QFileDialog.getOpenFileName",
+        lambda *_args, **_kwargs: (str(lyrics_path), "歌词文件"),
+    )
+    panel = keep_widget(OnlineLyricsPanel())
+    panel.show_song({"name": media_path.name, "path": str(media_path)})
+    captured = []
+    panel.action_requested.connect(
+        lambda path, payload, action: captured.append((path, payload, action))
+    )
+
+    panel._import_local_lyrics()
+    panel._request_action("use_online")
+
+    assert panel.manual_search_button.text() == "手动搜索歌词"
+    assert panel.import_lyrics_button.text() == "导入本地歌词"
+    assert "second" in panel.online_result_pane.content()
+    assert panel.results_table.rowCount() == 1
+    assert captured[0][0] == str(media_path)
+    assert captured[0][2] == "use_online"
+    assert captured[0][1].match.record_id == -1
+
+
 def test_repeated_lyrics_search_uses_ten_minute_cache(monkeypatch):
     ensure_app()
     _LYRICS_SEARCH_CACHE.clear()

@@ -339,6 +339,59 @@ def test_live_preview_position_maps_back_to_original_timeline(monkeypatch, tmp_p
     assert positions[-1] == 13_000
 
 
+def test_audio_editor_combines_parameters_across_workspaces(monkeypatch, tmp_path):
+    ensure_app()
+    panel = keep_widget(AudioEditorPanel())
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"audio")
+    monkeypatch.setattr(panel, "_start_waveform_load", lambda _path: None)
+    monkeypatch.setattr(panel._playback_session, "play", lambda _player: None)
+    panel.show_song({"name": source.name, "path": str(source)})
+    panel._duration = 180.0
+
+    trim = panel.tool_pages["trim"]
+    volume = panel.tool_pages["volume"]
+    speed_pitch = panel.tool_pages["speed_pitch"]
+    trim.fields["gain_db"].setValue(2.0)
+    volume.fields["gain_db"].setValue(3.0)
+    speed_pitch.fields["speed"].setValue(1.25)
+    speed_pitch.fields["semitones"].setValue(2.0)
+
+    combined = panel._combined_effect_params()
+    assert panel._preview_range() == (0.0, 180.0)
+    assert combined["gain_db"] == pytest.approx(5.0)
+    assert combined["speed"] == pytest.approx(1.25)
+    assert combined["semitones"] == pytest.approx(2.0)
+    assert panel._active_effect_keys == {"trim", "volume", "speed_pitch"}
+
+
+@pytest.mark.skipif(
+    not find_ffmpeg() or not find_ffprobe(),
+    reason="FFmpeg and FFprobe are required",
+)
+def test_whole_song_effect_chain_renders_full_input(tmp_path):
+    source = tmp_path / "whole.wav"
+    output = tmp_path / "whole-edited.wav"
+    _write_sine_wave(source, duration=1.0)
+
+    process_audio(
+        "effect_chain",
+        [str(source)],
+        str(output),
+        {
+            "gain_db": -2.0,
+            "speed": 1.0,
+            "bands": [2, 1, 0, -1, 0, 1, 2, 1],
+            "fade_in": 0.05,
+            "fade_out": 0.05,
+            "_preview": True,
+        },
+    )
+
+    assert output.is_file()
+    assert get_audio_info(str(output))["duration"] == pytest.approx(1.0, abs=0.08)
+
+
 def test_audio_editor_panel_exposes_detailed_pages_for_every_processing_tool(
     tmp_path,
 ):
@@ -374,6 +427,7 @@ def test_audio_editor_panel_exposes_detailed_pages_for_every_processing_tool(
     }
     assert len(denoise_page.timelines) == 2
     assert len(equalizer_page.eq_bands) == 8
+    assert equalizer_page.eq_curve.values() == [0.0] * 8
     assert set(equalizer_page.fields) == {"balance"}
     assert mix_page.track_editor is not None
     assert equalizer_page.inputs() == []

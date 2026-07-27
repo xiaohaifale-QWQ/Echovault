@@ -796,6 +796,12 @@ class OnlineLyricsPanel(QWidget):
         self.search_button.setMinimumWidth(190)
         self.search_button.setMinimumHeight(42)
         self.search_button.clicked.connect(self._start_combined_search)
+        self.manual_search_button = QPushButton("手动搜索歌词")
+        self.manual_search_button.setToolTip("按当前填写的歌名、歌手和专辑只搜索歌词")
+        self.manual_search_button.clicked.connect(self._start_search)
+        self.import_lyrics_button = QPushButton("导入本地歌词")
+        self.import_lyrics_button.setToolTip("导入 LRC 或纯文本歌词到右侧编辑区")
+        self.import_lyrics_button.clicked.connect(self._import_local_lyrics)
 
         search_card = QGroupBox("歌曲与搜索条件")
         search_card.setObjectName("onlineSearchCard")
@@ -826,14 +832,15 @@ class OnlineLyricsPanel(QWidget):
         search_grid.addWidget(self.artist_input, 1, 3)
         search_grid.addWidget(QLabel("专辑"), 1, 4)
         search_grid.addWidget(self.album_input, 1, 5)
-        search_grid.addWidget(
-            self.search_button,
-            0,
-            6,
-            2,
-            1,
-            Qt.AlignmentFlag.AlignVCenter,
-        )
+        search_actions = QVBoxLayout()
+        search_actions.setSpacing(5)
+        search_actions.addWidget(self.search_button)
+        secondary_actions = QHBoxLayout()
+        secondary_actions.setSpacing(5)
+        secondary_actions.addWidget(self.manual_search_button)
+        secondary_actions.addWidget(self.import_lyrics_button)
+        search_actions.addLayout(secondary_actions)
+        search_grid.addLayout(search_actions, 0, 6, 2, 1)
         search_grid.setColumnStretch(1, 2)
         search_grid.setColumnStretch(3, 3)
         search_grid.setColumnStretch(5, 2)
@@ -1236,6 +1243,59 @@ class OnlineLyricsPanel(QWidget):
     def _update_search_state(self):
         has_track = bool(self.track_input.text().strip())
         self.search_button.setEnabled(has_track and not self._lyrics_busy)
+        self.manual_search_button.setEnabled(has_track and not self._lyrics_busy)
+        self.import_lyrics_button.setEnabled(not self._lyrics_busy)
+
+    def _import_local_lyrics(self):
+        file_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "导入本地歌词",
+            "",
+            "歌词文件 (*.lrc *.txt);;所有文件 (*)",
+        )
+        if not file_path:
+            return
+        path = Path(file_path)
+        try:
+            if path.stat().st_size > 2 * 1024 * 1024:
+                raise ValueError("歌词文件超过 2 MB，请检查所选文件。")
+            raw = path.read_bytes()
+            content = ""
+            for encoding in ("utf-8-sig", "utf-8", "gb18030"):
+                try:
+                    content = raw.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if not content.strip():
+                raise ValueError("没有读取到有效歌词内容。")
+        except (OSError, ValueError) as exc:
+            self.lyrics_status_label.setText(f"导入歌词失败：{exc}")
+            return
+        content = simplify_lyrics_content(
+            content.replace("\r\n", "\n").replace("\r", "\n").strip()
+        )
+        match = LyricsMatch(
+            record_id=-1,
+            track_name=self.track_input.text().strip() or path.stem,
+            artist_name=self.artist_input.text().strip(),
+            album_name=self.album_input.text().strip(),
+            duration=self._duration,
+            instrumental=False,
+            plain_lyrics="" if timed_text_entries(content) else content,
+            synced_lyrics=content if timed_text_entries(content) else "",
+            score=100.0,
+        )
+        self._populate_lyrics_results([match])
+        self.online_result_pane.set_content(content)
+        if self._comparison is not None:
+            self._comparison.set_online_content(content)
+        kind = "同步 LRC" if timed_text_entries(content) else "纯文本歌词"
+        self.lyrics_status_label.setText(
+            f"已导入 {path.name}（{kind}），可继续编辑并应用到当前歌曲。"
+        )
+        self.status_label.setText("本地歌词已进入在线歌词编辑区。")
+        self._refresh_action_state()
 
     def _start_cover_search(self):
         self.online_side_tabs.setCurrentIndex(0)

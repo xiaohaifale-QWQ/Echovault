@@ -145,6 +145,76 @@ def _edit_effect_filters(
     return filters
 
 
+def _shared_effect_chain_filters(
+    path: Path,
+    params: dict[str, Any],
+    duration: float,
+) -> list[str]:
+    """Build one cumulative whole-song effect chain for live editing."""
+
+    filters: list[str] = []
+    denoise = params.get("denoise") or {}
+    if denoise.get("enabled"):
+        mode = min(2, max(0, int(denoise.get("mode", 1))))
+        strength = min(60.0, max(1.0, float(denoise.get("strength", 20.0))))
+        noise_floor = (-50.0, -40.0, -30.0)[mode]
+        filters.append(f"afftdn=nr={strength:.1f}:nf={noise_floor:.1f}")
+
+    bands = list(params.get("bands") or [])
+    if bands:
+        frequencies = (60, 150, 400, 1000, 2400, 6000, 12000, 16000)
+        bands = (bands + [0.0] * 8)[:8]
+        filters.extend(
+            f"equalizer=f={frequency}:t=q:w=1:g={min(12.0, max(-12.0, float(gain))):.2f}"
+            for frequency, gain in zip(frequencies, bands, strict=True)
+            if abs(float(gain)) > 0.001
+        )
+    balance = min(100.0, max(-100.0, float(params.get("balance", 0.0))))
+    if abs(balance) > 0.001:
+        filters.append(f"stereotools=balance_out={balance / 100.0:.3f}")
+
+    speed = max(0.25, min(4.0, float(params.get("speed", 1.0))))
+    semitones = min(24.0, max(-24.0, float(params.get("semitones", 0.0))))
+    if abs(speed - 1.0) > 0.0001 or abs(semitones) > 0.001:
+        sample_rate = int(get_audio_info(str(path)).get("sample_rate") or 44100)
+        pitch = 2 ** (semitones / 12.0)
+        filters.extend(
+            (
+                f"asetrate={sample_rate}*{pitch:.8f}",
+                f"aresample={sample_rate}",
+                _atempo_chain(speed / pitch),
+            )
+        )
+        duration /= speed
+
+    gain_db = min(48.0, max(-60.0, float(params.get("gain_db", 0.0))))
+    if abs(gain_db) > 0.001:
+        filters.append(f"volume={gain_db:.2f}dB")
+    delay = max(0.0, float(params.get("delay", 0.0)))
+    if delay > 0.001:
+        filters.append(f"adelay={int(round(delay * 1000))}:all=1")
+        duration += delay
+
+    normalize = params.get("normalize") or {}
+    if normalize.get("enabled"):
+        target = min(-5.0, max(-30.0, float(normalize.get("target_lufs", -14.0))))
+        peak = min(-0.1, max(-5.0, float(normalize.get("true_peak", -1.0))))
+        filters.append(f"loudnorm=I={target:.1f}:LRA=11:TP={peak:.1f}")
+    if params.get("prevent_clipping"):
+        filters.append("alimiter=limit=0.98")
+
+    fade_in = max(0.0, float(params.get("fade_in", 0.0)))
+    fade_out = max(0.0, float(params.get("fade_out", 0.0)))
+    if fade_in > 0.001:
+        filters.append(f"afade=t=in:st=0:d={min(fade_in, duration):.3f}")
+    if fade_out > 0.001:
+        filters.append(
+            f"afade=t=out:st={max(0.0, duration - fade_out):.3f}:"
+            f"d={min(fade_out, duration):.3f}"
+        )
+    return filters
+
+
 def _atomic_single_output(args: list[str], output_path: str) -> str:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -261,6 +331,16 @@ def process_audio(
             if filters:
                 args.extend(["-af", ",".join(filters)])
             outputs = [_atomic_single_output([*args, *_codec_args(output)], str(output))]
+    elif operation == "effect_chain":
+        filters = _shared_effect_chain_filters(
+            paths[0],
+            params,
+            _media_duration(paths[0]),
+        )
+        args = ["-i", str(paths[0])]
+        if filters:
+            args.extend(["-af", ",".join(filters)])
+        outputs = [_atomic_single_output([*args, *_codec_args(output)], str(output))]
     elif operation == "concat":
         args: list[str] = []
         chains: list[str] = []

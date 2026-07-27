@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 
 from PyQt6.QtCore import QPointF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPainterPath
+from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -98,33 +98,146 @@ class ValueSlider(QWidget):
         self.spin.setValue(value)
 
 
-class EqualizerBand(QWidget):
-    def __init__(self, frequency: str, parent=None):
+class EqualizerCurve(QWidget):
+    """Eight-band EQ editor with a directly draggable response curve."""
+
+    values_changed = pyqtSignal()
+    FREQUENCIES = (60, 150, 400, 1000, 2400, 6000, 12000, 16000)
+    LABELS = ("60", "150", "400", "1k", "2.4k", "6k", "12k", "16k")
+
+    def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(2, 0, 2, 0)
-        self.value_label = QLabel("+0.0")
-        self.value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.value_label.setObjectName("eqValue")
-        layout.addWidget(self.value_label)
-        self.slider = QSlider(Qt.Orientation.Vertical)
-        self.slider.setRange(-120, 120)
-        self.slider.setValue(0)
-        self.slider.setTickInterval(30)
-        self.slider.setMinimumHeight(190)
-        self.slider.valueChanged.connect(
-            lambda value: self.value_label.setText(f"{value / 10:+.1f}")
-        )
-        layout.addWidget(self.slider, 1, Qt.AlignmentFlag.AlignHCenter)
-        label = QLabel(frequency)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(label)
+        self._values = [0.0] * 8
+        self._active_index = -1
+        self.setMinimumHeight(280)
+        self.setMouseTracking(True)
+        self.setToolTip("拖动曲线节点调节频段；点击曲线区域会移动最近的节点")
+
+    def values(self) -> list[float]:
+        return list(self._values)
+
+    def set_values(self, values: list[float]) -> None:
+        normalized = [
+            min(12.0, max(-12.0, float(value)))
+            for value in (list(values) + [0.0] * 8)[:8]
+        ]
+        if normalized == self._values:
+            return
+        self._values = normalized
+        self.update()
+        self.values_changed.emit()
+
+    def _plot_rect(self):
+        return self.rect().adjusted(50, 26, -24, -42)
+
+    def _x_for_index(self, index: int) -> float:
+        plot = self._plot_rect()
+        low = math.log10(self.FREQUENCIES[0])
+        high = math.log10(self.FREQUENCIES[-1])
+        ratio = (math.log10(self.FREQUENCIES[index]) - low) / (high - low)
+        return plot.left() + ratio * plot.width()
+
+    def _y_for_value(self, value: float) -> float:
+        plot = self._plot_rect()
+        return plot.top() + (12.0 - value) / 24.0 * plot.height()
+
+    def _value_for_y(self, y: float) -> float:
+        plot = self._plot_rect()
+        ratio = (min(plot.bottom(), max(plot.top(), y)) - plot.top()) / plot.height()
+        return round((12.0 - ratio * 24.0) * 10.0) / 10.0
+
+    def _nearest_index(self, x: float) -> int:
+        return min(range(8), key=lambda index: abs(self._x_for_index(index) - x))
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        plot = self._plot_rect()
+        painter.setPen(QPen(QColor("#DCE5EF"), 1))
+        for value in (12, 6, 0, -6, -12):
+            y = self._y_for_value(value)
+            painter.drawLine(plot.left(), int(y), plot.right(), int(y))
+            painter.setPen(QColor("#7B8BA1"))
+            painter.drawText(7, int(y + 4), f"{value:+d} dB")
+            painter.setPen(QPen(QColor("#DCE5EF"), 1))
+        for index, label in enumerate(self.LABELS):
+            x = self._x_for_index(index)
+            painter.drawLine(int(x), plot.top(), int(x), plot.bottom())
+            painter.setPen(QColor("#526073"))
+            painter.drawText(int(x - 18), plot.bottom() + 25, 36, 18, Qt.AlignmentFlag.AlignCenter, label)
+            painter.setPen(QPen(QColor("#DCE5EF"), 1))
+
+        points = [
+            QPointF(self._x_for_index(index), self._y_for_value(value))
+            for index, value in enumerate(self._values)
+        ]
+        curve = QPainterPath(points[0])
+        for index in range(1, len(points)):
+            previous = points[index - 1]
+            current = points[index]
+            middle = (previous.x() + current.x()) / 2
+            curve.cubicTo(middle, previous.y(), middle, current.y(), current.x(), current.y())
+        fill = QPainterPath(curve)
+        fill.lineTo(points[-1].x(), self._y_for_value(0))
+        fill.lineTo(points[0].x(), self._y_for_value(0))
+        fill.closeSubpath()
+        painter.fillPath(fill, QColor(53, 132, 214, 38))
+        painter.setPen(QPen(QColor("#3584D6"), 3))
+        painter.drawPath(curve)
+        for index, point in enumerate(points):
+            painter.setPen(QPen(QColor("#FFFFFF"), 3))
+            painter.setBrush(QColor("#2478C7") if index == self._active_index else QColor("#3584D6"))
+            painter.drawEllipse(point, 8 if index == self._active_index else 7, 8 if index == self._active_index else 7)
+            painter.setPen(QColor("#D94E5D"))
+            painter.drawText(
+                int(point.x() - 25),
+                max(2, int(point.y() - 25)),
+                50,
+                18,
+                Qt.AlignmentFlag.AlignCenter,
+                f"{self._values[index]:+.1f}",
+            )
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return super().mousePressEvent(event)
+        self._active_index = self._nearest_index(event.position().x())
+        self._move_active(event.position().y())
+
+    def mouseMoveEvent(self, event):
+        if self._active_index >= 0 and event.buttons() & Qt.MouseButton.LeftButton:
+            self._move_active(event.position().y())
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._move_active(event.position().y())
+            self._active_index = -1
+            self.update()
+
+    def _move_active(self, y: float) -> None:
+        if self._active_index < 0:
+            return
+        value = self._value_for_y(y)
+        if value != self._values[self._active_index]:
+            self._values[self._active_index] = value
+            self.values_changed.emit()
+        self.update()
+
+
+class _EqualizerBandState:
+    """Compatibility facade for callers that inspect the eight EQ values."""
+
+    def __init__(self, curve: EqualizerCurve, index: int):
+        self._curve = curve
+        self._index = index
 
     def value(self) -> float:
-        return self.slider.value() / 10.0
+        return self._curve.values()[self._index]
 
-    def setValue(self, value: float):
-        self.slider.setValue(round(value * 10))
+    def setValue(self, value: float) -> None:
+        values = self._curve.values()
+        values[self._index] = value
+        self._curve.set_values(values)
 
 
 class MiniWaveform(QWidget):
@@ -320,8 +433,9 @@ class AudioToolWorkspace(QWidget):
                 widget.currentIndexChanged.connect(
                     self._emit_preview_parameters_changed
                 )
-        for band in getattr(self, "eq_bands", []):
-            band.slider.valueChanged.connect(self._emit_preview_parameters_changed)
+        eq_curve = getattr(self, "eq_curve", None)
+        if isinstance(eq_curve, EqualizerCurve):
+            eq_curve.values_changed.connect(self._emit_preview_parameters_changed)
         for checkbox in self.findChildren(QCheckBox):
             checkbox.toggled.connect(self._emit_preview_parameters_changed)
         for radio in self.findChildren(QRadioButton):
@@ -563,13 +677,14 @@ class AudioToolWorkspace(QWidget):
         self.fields["balance"] = ValueSlider("左右平衡", -100, 100, 0, step=1, suffix="%")
         balance_layout.addWidget(self.fields["balance"])
         self.body.addWidget(balance_group)
-        bands_group = QGroupBox("八段均衡器")
-        bands_layout = QHBoxLayout(bands_group)
-        self.eq_bands: list[EqualizerBand] = []
-        for frequency in ("60", "150", "400", "1k", "2.4k", "6k", "12k", "16k"):
-            band = EqualizerBand(frequency)
-            self.eq_bands.append(band)
-            bands_layout.addWidget(band, 1)
+        bands_group = QGroupBox("可拖拽八段均衡曲线")
+        bands_layout = QVBoxLayout(bands_group)
+        self.eq_curve = EqualizerCurve()
+        self.eq_bands = [
+            _EqualizerBandState(self.eq_curve, index)
+            for index in range(8)
+        ]
+        bands_layout.addWidget(self.eq_curve)
         self.body.addWidget(bands_group)
         preset_row = QHBoxLayout()
         for title, values in (
@@ -888,7 +1003,7 @@ class AudioToolWorkspace(QWidget):
         if self.spec.key == "denoise":
             result["denoise_mode"] = self.denoise_mode_group.checkedId()
         if self.spec.key == "equalizer":
-            result["bands"] = [band.value() for band in self.eq_bands]
+            result["bands"] = self.eq_curve.values()
         if self.track_editor is not None:
             result["volumes"] = self.track_editor.volumes()
             result["duration_mode"] = self.duration_mode.currentData()
@@ -930,8 +1045,7 @@ class AudioToolWorkspace(QWidget):
         self.fields["semitones"].setValue(pitch)
 
     def _set_eq_preset(self, values: list[float]):
-        for band, value in zip(self.eq_bands, values, strict=True):
-            band.setValue(value)
+        self.eq_curve.set_values(values)
 
     def _update_split_summary(self, *_args):
         if not hasattr(self, "split_summary"):

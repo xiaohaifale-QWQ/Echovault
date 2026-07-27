@@ -35,8 +35,7 @@ from ui.audio_tool_workspaces import AudioToolWorkspace
 from ui.playback_coordinator import PlaybackSession
 
 WAVEFORM_CACHE_MAX_ITEMS = 8
-LIVE_PREVIEW_MAX_ITEMS = 12
-LIVE_PREVIEW_SECONDS = 8.0
+LIVE_PREVIEW_MAX_ITEMS = 3
 LIVE_PREVIEW_TOOLS = {
     "trim",
     "volume",
@@ -44,7 +43,6 @@ LIVE_PREVIEW_TOOLS = {
     "normalize",
     "equalizer",
     "speed_pitch",
-    "mix",
 }
 _WAVEFORM_CACHE: OrderedDict[tuple[str, int, int], tuple[object, float]] = OrderedDict()
 _WAVEFORM_CACHE_LOCK = Lock()
@@ -148,7 +146,7 @@ TOOLS = (
     ToolSpec(
         "equalizer",
         "八段均衡器",
-        "使用 60 Hz 到 16 kHz 八段推子和声道平衡塑造音色。",
+        "拖动 60 Hz 到 16 kHz 的均衡曲线，并与其他页面参数实时叠加。",
         "equalizer",
     ),
     ToolSpec(
@@ -269,6 +267,8 @@ class AudioEditorPanel(QWidget):
         self._preview_ready_serial = -1
         self._preview_pending = False
         self._preview_page: AudioToolWorkspace | None = None
+        self._active_effect_keys: set[str] = set()
+        self._effect_states: dict[str, dict] = {}
         self._preview_cache: OrderedDict[str, tuple[str, float, float]] = OrderedDict()
         self._live_preview_path = ""
         self._live_preview_start = 0.0
@@ -372,7 +372,7 @@ class AudioEditorPanel(QWidget):
         title = QLabel("音频工作台")
         title.setStyleSheet("font-size:15px;font-weight:700;color:#14213D;padding:2px 6px")
         rail_layout.addWidget(title)
-        subtitle = QLabel("每个工具使用独立界面")
+        subtitle = QLabel("整曲共享实时效果链")
         subtitle.setStyleSheet("color:#64748B;font-size:10px;padding:0 6px 5px")
         rail_layout.addWidget(subtitle)
         self.tool_button_group = QButtonGroup(self)
@@ -462,6 +462,8 @@ class AudioEditorPanel(QWidget):
         self._song = dict(song)
         self.save_available_changed.emit(True)
         self._invalidate_live_preview()
+        self._active_effect_keys.clear()
+        self._effect_states.clear()
         self._source_key = source_key
         self._duration = 0.0
         self._selection = (0.0, 0.0)
@@ -528,29 +530,88 @@ class AudioEditorPanel(QWidget):
             self.status_label.setText("未选择时间范围；支持选区的工具会处理整段素材。")
 
     def _schedule_live_preview(self, page: AudioToolWorkspace) -> None:
-        """Debounce audible controls and start immediate source-side feedback."""
+        """Persist this page's controls and rebuild the shared whole-song chain."""
 
         if (
-            page is not self.stack.currentWidget()
-            or page.spec.key not in LIVE_PREVIEW_TOOLS
+            page.spec.key not in LIVE_PREVIEW_TOOLS
             or not self._song.get("path")
             or self._duration <= 0
         ):
             return
+        try:
+            state = page.params()
+        except ValueError as exc:
+            self.status_label.setText(f"实时试听参数无效：{exc}")
+            return
+        state.pop("selection_start", None)
+        state.pop("selection_end", None)
+        state.pop("crop_mode", None)
+        self._effect_states[page.spec.key] = state
+        self._active_effect_keys.add(page.spec.key)
         self._preview_page = page
         self._preview_serial += 1
         self._preview_ready_serial = -1
-        self._apply_immediate_preview(page)
+        self._apply_immediate_preview()
         self._preview_timer.start()
-        self.status_label.setText("实时试听：参数已变化，正在更新效果…")
+        self.status_label.setText(
+            f"整曲实时效果链：已叠加 {len(self._active_effect_keys)} 个工具，正在更新…"
+        )
 
-    def _apply_immediate_preview(self, page: AudioToolWorkspace) -> None:
+    def _combined_effect_params(self) -> dict:
+        """Flatten all changed workspaces into one cumulative FFmpeg chain."""
+
+        result = {
+            "gain_db": 0.0,
+            "speed": 1.0,
+            "semitones": 0.0,
+            "delay": 0.0,
+            "fade_in": 0.0,
+            "fade_out": 0.0,
+            "bands": [],
+            "balance": 0.0,
+            "prevent_clipping": False,
+        }
+        trim = self._effect_states.get("trim", {})
+        if "trim" in self._active_effect_keys:
+            result["gain_db"] += float(trim.get("gain_db", 0.0))
+            result["speed"] *= float(trim.get("speed", 1.0))
+            result["semitones"] += float(trim.get("semitones", 0.0))
+            result["delay"] = float(trim.get("delay", 0.0))
+            result["fade_in"] = float(trim.get("fade_in", 0.0))
+            result["fade_out"] = float(trim.get("fade_out", 0.0))
+        volume = self._effect_states.get("volume", {})
+        if "volume" in self._active_effect_keys:
+            result["gain_db"] += float(volume.get("gain_db", 0.0))
+            result["prevent_clipping"] = bool(volume.get("prevent_clipping", False))
+        denoise = self._effect_states.get("denoise", {})
+        if "denoise" in self._active_effect_keys:
+            result["gain_db"] += float(denoise.get("output_gain", 0.0))
+            result["denoise"] = {
+                "enabled": True,
+                "mode": denoise.get("denoise_mode", 1),
+                "strength": denoise.get("strength", 20.0),
+            }
+        normalize = self._effect_states.get("normalize", {})
+        if "normalize" in self._active_effect_keys:
+            result["normalize"] = {
+                "enabled": True,
+                "target_lufs": normalize.get("target_lufs", -14.0),
+                "true_peak": normalize.get("true_peak", -1.0),
+            }
+        equalizer = self._effect_states.get("equalizer", {})
+        if "equalizer" in self._active_effect_keys:
+            result["bands"] = list(equalizer.get("bands") or [0.0] * 8)
+            result["balance"] = float(equalizer.get("balance", 0.0))
+        speed_pitch = self._effect_states.get("speed_pitch", {})
+        if "speed_pitch" in self._active_effect_keys:
+            result["speed"] *= float(speed_pitch.get("speed", 1.0))
+            result["semitones"] += float(speed_pitch.get("semitones", 0.0))
+        return result
+
+    def _apply_immediate_preview(self) -> None:
         """Apply controls supported natively while the rendered preview catches up."""
 
-        try:
-            params = page.params()
-        except ValueError:
-            return
+        params = self._combined_effect_params()
         source = str(self._song.get("path", ""))
         if not source:
             return
@@ -579,56 +640,31 @@ class AudioEditorPanel(QWidget):
         self._playback_session.play(self._player)
 
     def _preview_range(self) -> tuple[float, float]:
-        current = self._current_source_position()
-        if self._selection[1] - self._selection[0] > 0.001:
-            lower, upper = self._selection
-            start = current if lower <= current < upper else lower
-            end = min(upper, start + LIVE_PREVIEW_SECONDS)
-        else:
-            start = max(0.0, min(current, max(0.0, self._duration - 0.1)))
-            end = min(self._duration, start + LIVE_PREVIEW_SECONDS)
-        if end - start < 0.5 and self._duration > 0.5:
-            end = min(self._duration, max(end, start + LIVE_PREVIEW_SECONDS))
-            start = max(0.0, end - LIVE_PREVIEW_SECONDS)
-        return start, end
+        return 0.0, self._duration
 
     def _render_live_preview(self) -> None:
         page = self._preview_page
-        if (
-            page is None
-            or page is not self.stack.currentWidget()
-            or page.spec.key not in LIVE_PREVIEW_TOOLS
-        ):
+        if page is None or not self._active_effect_keys:
             return
         if self._preview_worker is not None and self._preview_worker.isRunning():
             self._preview_pending = True
             return
-        inputs = page.inputs()
-        if not inputs:
+        source = str(self._song.get("path", ""))
+        if not source:
             return
-        if page.spec.multi_input and len(inputs) < 2:
-            return
-        try:
-            params = page.params()
-        except ValueError as exc:
-            self.status_label.setText(f"实时试听参数无效：{exc}")
-            return
+        inputs = [source]
+        params = self._combined_effect_params()
         start, end = self._preview_range()
         if end <= start:
             return
-        params["selection_start"] = start
-        params["selection_end"] = end
         params["_preview"] = True
-        operation = page.operation()
-        if page.spec.key == "trim":
-            operation = "edit"
-            params["crop_mode"] = "extract"
+        operation = "effect_chain"
         serial = self._preview_serial
         speed = float(params.get("speed", 1.0) or 1.0)
         signature = json.dumps(
             {
                 "source": self._source_key,
-                "tool": page.spec.key,
+                "tools": sorted(self._active_effect_keys),
                 "operation": operation,
                 "inputs": inputs,
                 "params": params,
@@ -651,7 +687,7 @@ class AudioEditorPanel(QWidget):
             return
         output_path = str(
             Path(self._preview_temp_dir.name)
-            / f"{page.spec.key}-{serial}.wav"
+            / f"whole-song-chain-{serial}.flac"
         )
         self._preview_worker = AudioEditorWorker(
             operation,
@@ -694,8 +730,10 @@ class AudioEditorPanel(QWidget):
                 Path(expired).unlink(missing_ok=True)
             except OSError:
                 pass
-        if serial == self._preview_serial and page is self.stack.currentWidget():
-            self._activate_live_preview(page, path, start, rate, serial)
+        if serial == self._preview_serial:
+            current = self.stack.currentWidget()
+            target = current if isinstance(current, AudioToolWorkspace) else page
+            self._activate_live_preview(target, path, start, rate, serial)
         if self._preview_pending:
             self._preview_pending = False
             self._preview_timer.start(20)
@@ -728,7 +766,8 @@ class AudioEditorPanel(QWidget):
             self._playback_session.play(self._player)
         source = "缓存" if from_cache else "新效果"
         self.status_label.setText(
-            f"实时试听已更新（{source}，{LIVE_PREVIEW_SECONDS:.0f} 秒窗口）。"
+            f"整曲实时效果链已更新（{source}，"
+            f"已叠加 {len(self._active_effect_keys)} 个工具）。"
         )
         page.set_playing(was_playing)
 
@@ -758,19 +797,15 @@ class AudioEditorPanel(QWidget):
         target = page or self.stack.currentWidget()
         return (
             isinstance(target, AudioToolWorkspace)
-            and target is self._preview_page
             and self._preview_ready_serial == self._preview_serial
             and bool(self._live_preview_path)
             and Path(self._live_preview_path).is_file()
         )
 
-    def _configure_direct_preview(self, page: AudioToolWorkspace) -> None:
+    def _configure_direct_preview(self, _page: AudioToolWorkspace) -> None:
         """Apply the subset QMediaPlayer can change without rendering."""
 
-        try:
-            params = page.params()
-        except ValueError:
-            return
+        params = self._combined_effect_params()
         speed = float(params.get("speed", 1.0) or 1.0)
         self._player.setPlaybackRate(max(0.25, min(4.0, speed)))
         gain_db = float(
@@ -805,7 +840,7 @@ class AudioEditorPanel(QWidget):
         if page is None:
             return
         previous = self.stack.currentWidget()
-        if previous is not page and (
+        if not isinstance(page, AudioToolWorkspace) and previous is not page and (
             self._preview_page is not None or self._live_preview_path
         ):
             self._invalidate_live_preview()
@@ -831,7 +866,12 @@ class AudioEditorPanel(QWidget):
             self._player.pause()
             self.timeline = None
             title = "人声分离"
-        self.status_label.setText(f"已进入“{title}”独立工作台。")
+        if isinstance(page, AudioToolWorkspace):
+            count = len(self._active_effect_keys)
+            suffix = f"；当前已叠加 {count} 个实时效果" if count else ""
+            self.status_label.setText(f"已进入“{title}”工作台{suffix}。")
+        else:
+            self.status_label.setText(f"已进入“{title}”独立工作台。")
 
     def _prepare_page(self, page: AudioToolWorkspace | None) -> None:
         if not isinstance(page, AudioToolWorkspace):
@@ -907,11 +947,51 @@ class AudioEditorPanel(QWidget):
         self._worker.start()
 
     def save_active_as_new_file(self) -> None:
-        """Run the active editor or save the active separation mix as a new file."""
+        """Save the cumulative whole-song chain without overwriting the source."""
 
         page = self.stack.currentWidget()
         if isinstance(page, AudioToolWorkspace):
-            self._run_tool(page)
+            if not self._active_effect_keys:
+                self._run_tool(page)
+                return
+            if self._worker is not None and self._worker.isRunning():
+                QMessageBox.information(self, "音频编辑", "当前已有音频任务正在处理。")
+                return
+            source = str(self._song.get("path", ""))
+            if not source:
+                QMessageBox.information(self, "音频编辑", "请先选择素材。")
+                return
+            output_path = page.output_edit.text().strip()
+            if not output_path:
+                QMessageBox.information(self, "音频编辑", "请先选择输出文件。")
+                return
+            output_path = unique_output_path(output_path, [source])
+            page.output_edit.setText(output_path)
+            self._invalidate_live_preview()
+            page.run_button.setEnabled(False)
+            self.progress.setVisible(True)
+            self.status_label.setText(
+                f"正在保存整曲效果链（{len(self._active_effect_keys)} 个工具）…"
+            )
+            self._worker = AudioEditorWorker(
+                "effect_chain",
+                [source],
+                output_path,
+                self._combined_effect_params(),
+                self,
+            )
+            self._worker.completed.connect(
+                lambda result, target=page, original=source: self._on_process_completed(
+                    target,
+                    result,
+                    original,
+                    "effect_chain",
+                )
+            )
+            self._worker.failed.connect(
+                lambda message, target=page: self._on_process_failed(target, message)
+            )
+            self._worker.start()
             return
         for key, special_page in self._special_pages.items():
             if page is special_page:
@@ -1048,7 +1128,7 @@ class AudioEditorPanel(QWidget):
         use_live_preview = self._live_preview_is_ready(
             page if isinstance(page, AudioToolWorkspace) else None
         )
-        preview_end = self._live_preview_start + LIVE_PREVIEW_SECONDS
+        preview_end = self._duration
         if (
             self._playing_path == self._live_preview_path
             and self._player.duration() > 0
