@@ -16,7 +16,7 @@ MUSICBRAINZ_API_BASE = "https://musicbrainz.org/ws/2"
 COVER_ART_API_BASE = "https://coverartarchive.org"
 ITUNES_SEARCH_API = "https://itunes.apple.com/search"
 COVER_USER_AGENT = (
-    "Echovault/0.6.0-dev (https://github.com/xiaohaifale-QWQ/Echovault)"
+    "Echovault/0.7.0-dev (https://github.com/xiaohaifale-QWQ/Echovault)"
 )
 MAX_COVER_BYTES = 20 * 1024 * 1024
 

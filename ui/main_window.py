@@ -2208,7 +2208,7 @@ class MainWindow(QMainWindow):
             "关于 琳琅乐府",
             "<h3>琳琅乐府</h3>"
             "<p>AI 歌词识别 + 文件同步</p>"
-            "<p>版本: 0.6.0-dev</p>"
+            "<p>版本: 0.7.0-dev</p>"
             "<hr>"
             "<p>技术栈: Python + PyQt6 + Whisper</p>"
             "<p>ASR: Groq Whisper / OpenAI Whisper</p>",

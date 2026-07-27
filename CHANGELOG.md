@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- Added an AI-safe media automation layer. The CLI now transcribes audio and
+  video directly, extracts ASR WAV files, runs non-destructive audio editing,
+  vocal separation, authorized-source search/download, model downloads, and
+  signed CUDA runtime setup with structured JSON output.
+- Added current-material and current-window controls to the built-in AI. Natural
+  language requests can use a locally resolved `@current` token or navigate to a
+  fixed workspace target without exposing the full local path to an online AI.
+- Added a dedicated Chinese guide for external AI agents covering CLI use,
+  Whisper model downloads, CUDA setup, MCP authorization, and safe media
+  organization workflows.
+
 ### Fixed
 
 - Fixed the transcription stop button being clipped below the status bar. It now
