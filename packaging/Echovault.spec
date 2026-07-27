@@ -12,7 +12,7 @@ from PyInstaller.utils.hooks import (
 )
 
 
-project_root = Path(SPECPATH)
+project_root = Path(SPECPATH).parent
 build_profile = os.environ.get("ECHOVAULT_BUILD_PROFILE", "lite").strip().lower()
 if build_profile not in {"lite", "full"}:
     raise SystemExit("ECHOVAULT_BUILD_PROFILE must be either 'lite' or 'full'.")
@@ -22,13 +22,13 @@ ffmpeg_path = os.environ.get("ECHOVAULT_FFMPEG", "")
 if not ffmpeg_path or not Path(ffmpeg_path).is_file():
     raise SystemExit(
         "ECHOVAULT_FFMPEG must point to an existing ffmpeg executable. "
-        "Use build.ps1 to configure it automatically."
+        "Use tools/build_app.ps1 to configure it automatically."
     )
 ffprobe_path = os.environ.get("ECHOVAULT_FFPROBE", "")
 if not ffprobe_path or not Path(ffprobe_path).is_file():
     raise SystemExit(
         "ECHOVAULT_FFPROBE must point to an existing ffprobe executable. "
-        "Use build.ps1 to configure it automatically."
+        "Use tools/build_app.ps1 to configure it automatically."
     )
 
 hidden_imports = [

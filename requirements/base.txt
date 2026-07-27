@@ -1,8 +1,8 @@
 # Echovault 基础运行依赖
 #
 # ffmpeg 是系统程序，不是 Python 包。安装说明见 README.md。
-# 云端和本地 ASR 引擎分别放在 requirements-cloud.txt 与
-# requirements-local.txt，避免基础安装自动拉取大型 AI 依赖。
+# 云端和本地 ASR 引擎分别放在 cloud.txt 与 local.txt，
+# 避免基础安装自动拉取大型 AI 依赖。
 
 # 桌面 GUI
 PyQt6>=6.6.0,<7

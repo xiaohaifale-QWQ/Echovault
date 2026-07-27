@@ -8,13 +8,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $ProjectRoot
 
 if ($InstallDependencies) {
-    $RequirementFiles = @("requirements-cloud.txt", "requirements-dev.txt")
+    $RequirementFiles = @("requirements\cloud.txt", "requirements\dev.txt")
     if ($Profile -eq "Full") {
-        $RequirementFiles += @("requirements-local.txt", "requirements-translation.txt")
+        $RequirementFiles += @("requirements\local.txt", "requirements\translation.txt")
     }
     $RequirementArguments = foreach ($RequirementFile in $RequirementFiles) {
         "-r"
@@ -28,19 +28,19 @@ if ($InstallDependencies) {
 
 $CloudDependenciesAvailable = & $Python -c "import groq, requests; print('yes')" 2>$null
 if ($LASTEXITCODE -ne 0 -or $CloudDependenciesAvailable -ne "yes") {
-    throw "Cloud dependencies are missing. Run build.ps1 with -InstallDependencies."
+    throw "Cloud dependencies are missing. Run tools\build_app.ps1 with -InstallDependencies."
 }
 
 if ($Profile -eq "Full") {
     $LocalDependenciesAvailable = & $Python -c "import argostranslate, audio_separator, demucs, torch, torchaudio, whisper; print('yes')" 2>$null
     if ($LASTEXITCODE -ne 0 -or $LocalDependenciesAvailable -ne "yes") {
-        throw "Full-build AI dependencies are missing. Run build.ps1 -Profile Full -InstallDependencies."
+        throw "Full-build AI dependencies are missing. Run tools\build_app.ps1 -Profile Full -InstallDependencies."
     }
 }
 
 $PyInstallerAvailable = & $Python -c "import PyInstaller; print('yes')" 2>$null
 if ($LASTEXITCODE -ne 0 -or $PyInstallerAvailable -ne "yes") {
-    throw "PyInstaller is not installed. Run: python -m pip install -r requirements-dev.txt"
+    throw "PyInstaller is not installed. Run: python -m pip install -r requirements\dev.txt"
 }
 
 $FfmpegCommand = Get-Command ffmpeg -ErrorAction SilentlyContinue
@@ -55,7 +55,7 @@ if (-not $FfprobeCommand) {
 $env:ECHOVAULT_FFMPEG = $FfmpegCommand.Source
 $env:ECHOVAULT_FFPROBE = $FfprobeCommand.Source
 $env:ECHOVAULT_BUILD_PROFILE = $Profile.ToLowerInvariant()
-& $Python -m PyInstaller --clean --noconfirm Echovault.spec `
+& $Python -m PyInstaller --clean --noconfirm packaging\Echovault.spec `
     --distpath $DistPath --workpath $WorkPath
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed with exit code $LASTEXITCODE"

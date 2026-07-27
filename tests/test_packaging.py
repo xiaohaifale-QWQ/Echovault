@@ -2,7 +2,8 @@ from pathlib import Path
 
 
 def test_desktop_package_bundles_resource_monitor_dependency():
-    spec = (Path(__file__).resolve().parents[1] / "Echovault.spec").read_text(encoding="utf-8")
+    spec_path = Path(__file__).resolve().parents[1] / "packaging" / "Echovault.spec"
+    spec = spec_path.read_text(encoding="utf-8")
 
     hidden_imports = spec.split("hidden_imports = [", 1)[1].split("]", 1)[0]
 
@@ -11,7 +12,8 @@ def test_desktop_package_bundles_resource_monitor_dependency():
 
 
 def test_desktop_package_defaults_to_lite_profile():
-    spec = (Path(__file__).resolve().parents[1] / "Echovault.spec").read_text(encoding="utf-8")
+    spec_path = Path(__file__).resolve().parents[1] / "packaging" / "Echovault.spec"
+    spec = spec_path.read_text(encoding="utf-8")
 
     assert 'os.environ.get("ECHOVAULT_BUILD_PROFILE", "lite")' in spec
     assert 'if not full_build:' in spec
@@ -20,7 +22,8 @@ def test_desktop_package_defaults_to_lite_profile():
 
 
 def test_full_profile_collects_offline_ai_runtimes():
-    spec = (Path(__file__).resolve().parents[1] / "Echovault.spec").read_text(encoding="utf-8")
+    spec_path = Path(__file__).resolve().parents[1] / "packaging" / "Echovault.spec"
+    spec = spec_path.read_text(encoding="utf-8")
     full_section = spec.split("if full_build:", 1)[1].split("a = Analysis(", 1)[0]
 
     assert 'collect_submodules("argostranslate")' in spec

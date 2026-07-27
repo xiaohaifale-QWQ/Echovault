@@ -19,7 +19,7 @@ def build_server(*, allow_writes: bool, host: str, port: int):
         from mcp.server.fastmcp import FastMCP
     except ImportError as exc:
         raise RuntimeError(
-            "未安装 MCP 依赖。请运行: pip install -r requirements-mcp.txt"
+            "未安装 MCP 依赖。请运行: pip install -r requirements/mcp.txt"
         ) from exc
 
     server = FastMCP(

@@ -7,7 +7,7 @@
     python main.py <命令> [参数]          # CLI 模式
 
 CLI 命令: list | info | transcribe | lyrics | config | model | gpu | sync | rename | mark | serve | doctor
-详细文档: CLI.md
+详细文档: docs/CLI.md
 """
 
 # ruff: noqa: E402

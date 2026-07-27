@@ -24,7 +24,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-mcp.txt "pytest>=8,<9"
+          python -m pip install -r requirements/mcp.txt "pytest>=8,<9"
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
@@ -43,10 +43,10 @@ jobs:
         shell: powershell
         run: .\.github\scripts\install_ffmpeg.ps1
       - name: Install build dependencies
-        run: python -m pip install -r requirements-cloud.txt -r requirements-dev.txt
+        run: python -m pip install -r requirements/cloud.txt -r requirements/dev.txt
       - name: Build Windows application
         shell: powershell
-        run: .\build.ps1 -Profile Lite
+        run: .\tools\build_app.ps1 -Profile Lite
       - uses: actions/upload-artifact@v4
         with:
           name: Echovault-Windows

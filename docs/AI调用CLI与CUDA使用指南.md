@@ -175,7 +175,7 @@ UI 目标采用固定白名单，不接受任意 Python 方法名。导航指令
 安装并启动：
 
 ```powershell
-python -m pip install -r requirements-mcp.txt
+python -m pip install -r requirements/mcp.txt
 python mcp_server.py
 ```
 

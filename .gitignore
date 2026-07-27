@@ -11,5 +11,5 @@ release-keys/
 .pytest_cache/
 .test-temp/
 *.spec
-!Echovault.spec
-!EchovaultWorker.spec
+!packaging/
+!packaging/*.spec

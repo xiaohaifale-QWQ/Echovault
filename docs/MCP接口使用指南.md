@@ -6,7 +6,7 @@ Echovault MCP Server 把现有 CLI 白名单包装成标准 Model Context Protoc
 
 ```powershell
 cd E:\music\music-lyrics-sync
-python -m pip install -r requirements-mcp.txt
+python -m pip install -r requirements/mcp.txt
 ```
 
 当前固定使用官方 Python SDK `mcp>=1.27,<2`。MCP v2 进入稳定版后应先阅读迁移说明、运行回归测试，再调整版本范围。

@@ -39,7 +39,7 @@ New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 
 Push-Location $ProjectRoot
 try {
-    & $Python -m PyInstaller --noconfirm --clean EchovaultWorker.spec `
+    & $Python -m PyInstaller --noconfirm --clean packaging\EchovaultWorker.spec `
         --distpath $DistRoot --workpath $WorkRoot
     if ($LASTEXITCODE -ne 0) {
         throw "ASR Worker build failed with exit code $LASTEXITCODE."

@@ -125,7 +125,7 @@ def translate_lines_locally(
         import argostranslate.translate
     except ImportError as exc:
         raise RuntimeError(
-            "未安装本地翻译组件。请重新安装最新版 Echovault，或安装 requirements-translation.txt。"
+            "未安装本地翻译组件。请重新安装最新版 Echovault，或安装 requirements/translation.txt。"
         ) from exc
     if not local_translation_available(source_language, target_language):
         raise RuntimeError(
@@ -167,7 +167,7 @@ def install_local_translation_package(source_language: str, target_language: str
         import argostranslate.package
     except ImportError as exc:
         raise RuntimeError(
-            "未安装本地翻译组件。请重新安装最新版 Echovault，或安装 requirements-translation.txt。"
+            "未安装本地翻译组件。请重新安装最新版 Echovault，或安装 requirements/translation.txt。"
         ) from exc
     argostranslate.package.update_package_index()
     available = argostranslate.package.get_available_packages()
