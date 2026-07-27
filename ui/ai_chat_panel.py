@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.ai_assistant import AISettings, chat
-from core.ai_control import CLICommand, extract_cli_directives, run_cli_command
+from core.ai_control import CLICommand, extract_control_directives, run_cli_command
 from core.asr.provider_selection import select_available_provider
 from core.asr.router import get_router
 from core.config import AppConfig
@@ -110,11 +110,13 @@ class AIChatPanel(QWidget):
     """Conversation UI that always sends the built-in manual as the system prompt."""
 
     command_requested = pyqtSignal(str)
+    ui_action_requested = pyqtSignal(str)
 
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent)
         self.config = config
         self._history: list[dict[str, str]] = []
+        self._current_material = ""
         self._worker: AIChatWorker | None = None
         self._voice_worker: VoiceTranscribeWorker | None = None
         self._audio_source: QAudioSource | None = None
@@ -278,6 +280,10 @@ class AIChatPanel(QWidget):
 
         return settings_from_config(self.config)
 
+    def set_current_material(self, path: str | None) -> None:
+        """Expose only the current selection needed for safe @current commands."""
+        self._current_material = str(path or "").strip()
+
     @staticmethod
     def _escape(text: str) -> str:
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
@@ -293,17 +299,39 @@ class AIChatPanel(QWidget):
         self.input.clear()
         self._append("你", question)
         self.send_button.setEnabled(False)
-        self._worker = AIChatWorker(self._settings(), question, list(self._history), self)
+        contextual_question = question
+        if self._current_material:
+            contextual_question = (
+                "[软件当前上下文]\n"
+                f"当前素材已选择：{Path(self._current_material).name}\n"
+                "生成命令时请使用 @current，不要重复或猜测绝对路径。\n"
+                "[用户请求]\n"
+                f"{question}"
+            )
+        self._worker = AIChatWorker(
+            self._settings(),
+            contextual_question,
+            list(self._history),
+            self,
+        )
         self._worker.completed.connect(lambda answer: self._on_answer(question, answer))
         self._worker.failed.connect(self._on_error)
         self._worker.start()
 
     def _on_answer(self, question: str, answer: str):
-        displayed_answer, commands = extract_cli_directives(answer)
+        displayed_answer, commands, ui_actions = extract_control_directives(answer)
         self._history.extend(({"role": "user", "content": question}, {"role": "assistant", "content": answer}))
         self._append("AI", displayed_answer or "我正在执行软件操作。")
+        if len(commands) + len(ui_actions) > 1:
+            self.append_command_result(
+                "已拒绝：AI 一次请求了多个操作。请让它分步骤执行并等待每步结果。"
+            )
+            self._finish_request()
+            return
         for command in commands:
             self.command_requested.emit(command)
+        for action in ui_actions:
+            self.ui_action_requested.emit(action)
         self._finish_request()
 
     def append_command_result(self, message: str):

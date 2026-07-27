@@ -255,6 +255,9 @@ python mcp_server.py
 
 详细配置与安全边界见 [MCP 接口使用指南](docs/MCP接口使用指南.md)。
 
+视频直接转写、音频编辑 CLI、模型下载、CUDA 运行时以及内置/外部 AI
+调用约定见 [AI 调用 CLI 与 CUDA 使用指南](docs/AI调用CLI与CUDA使用指南.md)。
+
 ## 致谢
 
 - [OpenAI Whisper](https://github.com/openai/whisper)

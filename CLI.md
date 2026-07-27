@@ -35,7 +35,7 @@ python main.py <命令> [参数] [--json]
 |------|------|---------|
 | `list` | 列出歌曲 | 歌曲列表面板 |
 | `info` | 歌曲详情 | 详情面板 |
-| `transcribe` | 识别歌词 | 识别按钮 |
+| `transcribe` | 识别音频或视频并生成 LRC | 识别按钮 |
 | `lyrics show` | 显示歌词 | 歌词预览 |
 | `lyrics search` | 搜索歌词 | — (新增) |
 | `config show` | 查看配置 | 设置对话框 |
@@ -46,12 +46,17 @@ python main.py <命令> [参数] [--json]
 | `model download` | 下载模型 | 下载模型按钮 |
 | `gpu scan` | 扫描显卡 | 扫描显卡按钮 |
 | `gpu status` | GPU 状态 | 状态栏引擎显示 |
+| `gpu setup` | 安装并激活推荐的签名 CUDA 运行时 | 模型库/设置 |
+| `audio process` | 非破坏式音频编辑并另存新文件 | 音频编辑 |
+| `audio separate` | 人声与伴奏分离 | 人声分离 |
+| `download search/fetch` | 搜索和下载已配置的授权音源 | 音频下载 |
 | `sync compare` | 对比文件夹 | 对比按钮 |
 | `sync serve` | HTTP 文件服务 | — |
 | `rename` | 重命名歌曲 | 双击改名 |
 | `mark` | 标记纯音乐 | 右键标记 |
 | `serve http` | HTTP 文件浏览 | — |
 | `library list/add/remove/select-all` | 管理音乐/视频素材文件夹与详情页全选范围 | 素材库 |
+| `video transcribe/extract-audio` | 视频识别、按需抽取 ASR 音轨 | 视频模式 |
 | `video timeline/calibrate/aggregate` | 视频时间轴导出、时间校准、按时间汇总 | 视频模式 |
 | `ai chat` | 使用内置手册与提示词咨询 DeepSeek 助手 | AI 模式 |
 | `doctor` | 检查 ffmpeg、依赖、Provider 与模型 | 启动状态提示 |

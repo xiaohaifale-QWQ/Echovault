@@ -36,7 +36,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from core.ai_control import validate_cli_command
+from core.ai_control import validate_cli_command, validate_ui_command
 from core.asr.router import get_router
 from core.config import config_manager
 from core.environment import build_environment_report
@@ -988,6 +988,7 @@ class MainWindow(QMainWindow):
             self.online_lyrics_panel.pause_playback
         )
         self.ai_chat_panel.command_requested.connect(self._on_ai_command_requested)
+        self.ai_chat_panel.ui_action_requested.connect(self._on_ai_ui_action_requested)
         self.audio_editor_panel.output_created.connect(self._on_audio_editor_output_created)
         self.audio_editor_panel.save_available_changed.connect(
             self.audio_save_button.setEnabled
@@ -1138,6 +1139,7 @@ class MainWindow(QMainWindow):
             button.setEnabled(True)
         self.audio_save_button.setEnabled(True)
         self.navigation_lyrics_card.set_song(song)
+        self.ai_chat_panel.set_current_material(str(path))
 
     def _on_audio_download_completed(self, output_path: str):
         self._online_catalog_dirty = True
@@ -2032,7 +2034,10 @@ class MainWindow(QMainWindow):
 
     def _on_ai_command_requested(self, raw_command: str):
         try:
-            command = validate_cli_command(raw_command)
+            command = validate_cli_command(
+                raw_command,
+                current_material=getattr(self, "_selected_song", {}).get("path"),
+            )
         except ValueError as exc:
             self.ai_chat_panel.append_command_result(f"已拒绝命令：{exc}")
             return
@@ -2055,6 +2060,55 @@ class MainWindow(QMainWindow):
             lambda error: self._on_ai_command_finished(raw_command, False, error)
         )
         self._ai_command_worker.start()
+
+    def _on_ai_ui_action_requested(self, raw_action: str):
+        try:
+            action = validate_ui_command(raw_action)
+        except ValueError as exc:
+            self.ai_chat_panel.append_command_result(f"已拒绝界面操作：{exc}")
+            return
+        target = action.target
+        workspace_targets = {
+            "materials": "materials",
+            "download": "download",
+            "batch": "batch",
+            "audio": "audio",
+        }
+        if target in workspace_targets:
+            self._switch_workspace(workspace_targets[target])
+        elif target.startswith("lyrics-"):
+            self._switch_workspace("lyrics")
+            self.lyrics_tabs.setCurrentIndex(
+                {"lyrics-online": 0, "lyrics-local": 1, "lyrics-review": 2}[target]
+            )
+        elif target.startswith("audio-"):
+            self._switch_workspace("audio")
+            tool = target.removeprefix("audio-").replace("-", "_")
+            self.audio_editor_panel._open_tool(
+                "vocal_separation" if tool == "separate" else tool
+            )
+        elif target.startswith("transfer-"):
+            self._switch_workspace("transfer")
+            page = {
+                "transfer-send": self.sync_panel.send_page,
+                "transfer-receive": self.sync_panel.receive_page,
+                "transfer-sync": self.sync_panel.advanced_sync_page,
+            }[target]
+            self.transfer_tabs.setCurrentWidget(page)
+        elif target == "models":
+            self._on_model_library()
+        elif target == "keys":
+            self._on_key_manager()
+        elif target.startswith("settings"):
+            section = {
+                "settings": "recognition",
+                "settings-recognition": "recognition",
+                "settings-lyrics": "lyrics",
+                "settings-local-ai": "local_ai",
+                "settings-audio-sources": "audio_sources",
+            }[target]
+            self._on_settings(section)
+        self.ai_chat_panel.append_command_result(f"已打开：{target}")
 
     def _on_ai_command_finished(self, raw_command: str, success: bool, output: str):
         self.ai_chat_panel.append_command_result(

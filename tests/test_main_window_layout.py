@@ -116,6 +116,16 @@ def test_main_window_uses_six_task_workspaces_and_right_ai_drawer(
     window._submit_global_search()
     assert window.lyrics_tabs.currentIndex() == 0
 
+    window._on_ai_ui_action_requested("open lyrics-review")
+    assert window.workspace_stack.currentWidget() is window.workspace_pages["lyrics"]
+    assert window.lyrics_tabs.currentIndex() == 2
+    window._on_ai_ui_action_requested("open audio-separate")
+    assert window.workspace_stack.currentWidget() is window.workspace_pages["audio"]
+    assert (
+        window.audio_editor_panel.stack.currentWidget()
+        is window.audio_editor_panel._special_pages["vocal_separation"]
+    )
+
     polish_widget_tree(window)
     assert window.statusbar.minimumHeight() >= 30
     assert window.btn_stop_transcribe.objectName() == "statusStopButton"

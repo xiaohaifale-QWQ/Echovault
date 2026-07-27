@@ -52,7 +52,7 @@ sys.stdout = _configure_utf8_stream(sys.stdout, capture_cli_output=True)
 sys.stderr = _configure_utf8_stream(sys.stderr)
 
 from core.asr.router import get_router
-from core.audio_utils import is_supported
+from core.audio_utils import convert_to_whisper_format, is_supported
 from core.config import config_manager, update_config_value
 from core.environment import build_environment_report
 from core.lrc_parser import parse_lrc_file
@@ -74,6 +74,27 @@ logger = logging.getLogger("linlangyuefu")
 
 def _scan_audio(folder):
     return scan_audio(folder)
+
+
+def _is_transcribable_media(path: str | Path) -> bool:
+    """Return whether a file can be decoded for ASR by the bundled FFmpeg."""
+    from core.video_library import VIDEO_FORMATS
+
+    value = Path(path)
+    return is_supported(str(value)) or value.suffix.lower() in VIDEO_FORMATS
+
+
+def _scan_transcribable_media(folder: str | Path) -> list[dict]:
+    """Scan audio and video without probing expensive video timestamps."""
+    from core.video_library import scan_video_catalog
+
+    items = [
+        {**song, "material_type": "audio"}
+        for song in scan_audio(folder)
+        if not song.get("instrumental")
+    ]
+    items.extend(scan_video_catalog(folder))
+    return sorted(items, key=lambda item: item["path"].casefold())
 
 
 def _fmt_size(b):
@@ -193,21 +214,28 @@ def cmd_transcribe(args):
         logger.error(f"Target not found: {target}")
         sys.exit(1)
 
-    files = []
+    media_items = []
     if target.is_file():
-        if is_supported(str(target)):
-            files.append(str(target))
+        if _is_transcribable_media(target):
+            media_items.append(
+                {
+                    "path": str(target.resolve()),
+                    "material_type": (
+                        "audio" if is_supported(str(target)) else "video"
+                    ),
+                }
+            )
         else:
             logger.error(f"Unsupported format: {target.suffix}")
             sys.exit(1)
     elif target.is_dir():
-        files.extend(song["path"] for song in scan_audio(target) if not song["instrumental"])
-        if not files:
-            logger.error("No supported audio files found")
+        media_items.extend(_scan_transcribable_media(target))
+        if not media_items:
+            logger.error("No supported audio or video files found")
             sys.exit(1)
 
     if not args.quiet:
-        logger.info(f"Found {len(files)} audio files")
+        logger.info(f"Found {len(media_items)} transcribable media files")
 
     config = config_manager.load()
     router = get_router(config)
@@ -220,29 +248,70 @@ def cmd_transcribe(args):
 
     results = []
     ok = fail = skip = 0
-    for i, fp in enumerate(files, 1):
+    for i, media in enumerate(media_items, 1):
+        fp = media["path"]
         name = Path(fp).name
-        lrc_p = str(Path(fp).with_suffix(".lrc"))
+        lrc_p = str(
+            (Path(args.output_dir) / f"{Path(fp).stem}.lrc")
+            if args.output_dir
+            else Path(fp).with_suffix(".lrc")
+        )
         if os.path.exists(lrc_p) and not args.force:
-            if not args.quiet: logger.info(f"[{i}/{len(files)}] SKIP {name}")
-            skip += 1; results.append({"file": name, "status": "skipped"})
+            if not args.quiet: logger.info(f"[{i}/{len(media_items)}] SKIP {name}")
+            skip += 1
+            results.append(
+                {
+                    "file": name,
+                    "path": fp,
+                    "material_type": media["material_type"],
+                    "status": "skipped",
+                    "lrc_path": lrc_p,
+                }
+            )
             continue
         try:
-            if not args.quiet: logger.info(f"[{i}/{len(files)}] TRANS {name}")
+            if not args.quiet: logger.info(f"[{i}/{len(media_items)}] TRANS {name}")
             out = transcribe_and_save_lrc(
                 audio_path=fp, router=router,
                 language=args.language, output_dir=args.output_dir,
                 overwrite=args.force,
             )
-            if not args.quiet: logger.info(f"[{i}/{len(files)}] OK   {name}")
-            ok += 1; results.append({"file": name, "status": "ok", "lrc_path": out})
+            if not args.quiet: logger.info(f"[{i}/{len(media_items)}] OK   {name}")
+            ok += 1
+            results.append(
+                {
+                    "file": name,
+                    "path": fp,
+                    "material_type": media["material_type"],
+                    "status": "ok",
+                    "lrc_path": out,
+                }
+            )
         except FileExistsError:
-            skip += 1; results.append({"file": name, "status": "skipped"})
+            skip += 1
+            results.append(
+                {
+                    "file": name,
+                    "path": fp,
+                    "material_type": media["material_type"],
+                    "status": "skipped",
+                    "lrc_path": lrc_p,
+                }
+            )
         except Exception as e:
-            if not args.quiet: logger.error(f"[{i}/{len(files)}] FAIL {name}: {e}")
-            fail += 1; results.append({"file": name, "status": "failed", "error": str(e)})
+            if not args.quiet: logger.error(f"[{i}/{len(media_items)}] FAIL {name}: {e}")
+            fail += 1
+            results.append(
+                {
+                    "file": name,
+                    "path": fp,
+                    "material_type": media["material_type"],
+                    "status": "failed",
+                    "error": str(e),
+                }
+            )
 
-    summary = {"total": len(files), "ok": ok, "failed": fail, "skipped": skip}
+    summary = {"total": len(media_items), "ok": ok, "failed": fail, "skipped": skip}
     if args.json_output:
         print(_json.dumps({"summary": summary, "results": results}, ensure_ascii=False, indent=2))
     else:
@@ -526,6 +595,35 @@ def cmd_cache(args):
 
 
 def cmd_video(args):
+    if args.video_action == "transcribe":
+        args.target = args.input
+        return cmd_transcribe(args)
+    if args.video_action == "extract-audio":
+        source = Path(args.input).expanduser().resolve()
+        if not source.is_file() or not _is_transcribable_media(source):
+            raise SystemExit(f"Unsupported or missing media file: {source}")
+        output = (
+            Path(args.output).expanduser().resolve()
+            if args.output
+            else source.with_name(f"{source.stem}.asr.wav")
+        )
+        if output.exists() and not args.force:
+            raise SystemExit(f"Output already exists: {output}")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        convert_to_whisper_format(str(source), str(output))
+        _out(
+            {
+                "status": "ok",
+                "input": str(source),
+                "output": str(output),
+                "format": "wav",
+                "sample_rate": 16000,
+                "channels": 1,
+            },
+            args,
+        )
+        return
+
     from core.video_aggregation import aggregate_videos_by_time, write_video_transcript_timeline
 
     folder = str(Path(args.folder).expanduser().resolve())
@@ -589,22 +687,31 @@ def cmd_model(args):
         if name not in _MODELS:
             logger.error(f"Unknown model: {name}")
             sys.exit(1)
-        from PyQt6.QtCore import QCoreApplication
+        from core.model_download import download_model
 
-        from ui.settings_dialog import _DownloadWorker
-        app = QCoreApplication(sys.argv)
-        worker = _DownloadWorker(name)
+        progress_stream = sys.stderr if args.json_output else sys.stdout
 
-        def _p(pct, msg): print(f"\r  [{pct:3d}%] {msg}", end="", flush=True)
-        def _d(ok, msg):
-            print()
-            print(f"{'OK' if ok else 'FAIL'}: {msg}")
-            app.exit(0 if ok else 1)
+        def _p(pct, msg):
+            print(f"\r  [{pct:3d}%] {msg}", end="", flush=True, file=progress_stream)
 
-        worker.progress.connect(_p)
-        worker.finished.connect(_d)
-        worker.start()
-        sys.exit(app.exec())
+        try:
+            result = download_model(name, progress=_p)
+        except Exception as exc:
+            if not args.json_output:
+                print(file=progress_stream)
+            _out({"status": "failed", "model": name, "error": str(exc)}, args)
+            raise SystemExit(1) from exc
+        if not args.json_output:
+            print(file=progress_stream)
+        _out(
+            {
+                "status": "ok",
+                "model": name,
+                "path": str(result.path),
+                "cached": result.cached,
+            },
+            args,
+        )
 
 
 # ============================================================
@@ -644,6 +751,217 @@ def cmd_gpu(args):
         except ImportError:
             result["cuda_available"] = False
         _out(result, args)
+    elif args.gpu_action == "setup":
+        from core.runtime_setup import RuntimeSetupService
+
+        progress_stream = sys.stderr if args.json_output else sys.stdout
+
+        def _progress(percent, message):
+            print(
+                f"[{percent:3d}%] {message}",
+                file=progress_stream,
+                flush=True,
+            )
+
+        try:
+            result = RuntimeSetupService().configure(progress=_progress)
+        except Exception as exc:
+            _out({"status": "failed", "error": str(exc)}, args)
+            raise SystemExit(1) from exc
+        config = config_manager.load()
+        config.asr.use_gpu = result.selection.variant.backend == "cuda"
+        config.asr.vocal_separation_use_gpu = config.asr.use_gpu
+        config_manager.config = config
+        config_manager.save()
+        install = result.install_result
+        _out(
+            {
+                "status": "ok",
+                "hardware": result.report.as_dict(),
+                "selection": result.selection.as_dict(),
+                "installed_path": str(install.path) if install else None,
+                "cached": install.cached if install else True,
+                "activated": install.activated if install else False,
+                "asr_gpu_enabled": config.asr.use_gpu,
+            },
+            args,
+        )
+
+
+def cmd_audio(args):
+    if args.audio_action == "process":
+        from core.audio_editor import process_audio
+
+        try:
+            params = _json.loads(args.params_json or "{}")
+        except _json.JSONDecodeError as exc:
+            raise SystemExit(f"--params-json is not valid JSON: {exc}") from exc
+        if not isinstance(params, dict):
+            raise SystemExit("--params-json must be a JSON object")
+        for item in getattr(args, "param", None) or []:
+            if "=" not in item:
+                raise SystemExit(f"--param must use KEY=VALUE: {item}")
+            key, raw_value = item.split("=", 1)
+            key = key.strip()
+            if not key:
+                raise SystemExit("--param key cannot be empty")
+            try:
+                value = _json.loads(raw_value)
+            except _json.JSONDecodeError:
+                value = raw_value
+            params[key] = value
+        try:
+            result = process_audio(args.operation, args.input, args.output, params)
+        except (OSError, RuntimeError, ValueError) as exc:
+            _out({"status": "failed", "error": str(exc)}, args)
+            raise SystemExit(1) from exc
+        _out(
+            {
+                "status": "ok",
+                "operation": args.operation,
+                "inputs": args.input,
+                "outputs": result.outputs,
+                "message": result.message,
+            },
+            args,
+        )
+        return
+
+    if args.audio_action == "separate":
+        from core.separation_process import run_separation_process
+        from core.vocal_separation import recommended_device
+
+        progress_stream = sys.stderr if args.json_output else sys.stdout
+        device = args.device
+        if device == "auto":
+            device = recommended_device()
+
+        def _progress(percent, message):
+            print(f"[{percent:3d}%] {message}", file=progress_stream, flush=True)
+
+        try:
+            result = run_separation_process(
+                args.input,
+                args.output_dir,
+                model=args.model,
+                device=device,
+                output_content=args.output_content,
+                denoise=args.denoise,
+                dereverb=args.dereverb,
+                progress=_progress,
+            )
+        except Exception as exc:
+            _out({"status": "failed", "error": str(exc)}, args)
+            raise SystemExit(1) from exc
+        _out(
+            {
+                "status": "ok",
+                "input": str(Path(args.input).resolve()),
+                "device": device,
+                "vocals": str(result.vocals_path) if result.vocals_path else None,
+                "accompaniment": (
+                    str(result.accompaniment_path)
+                    if result.accompaniment_path
+                    else None
+                ),
+                "sample_rate": result.sample_rate,
+            },
+            args,
+        )
+
+
+def cmd_download(args):
+    from core.audio_sources import (
+        download_audio,
+        resolve_download,
+        search_source,
+        suggested_filename,
+    )
+
+    config = config_manager.load()
+    sources = [
+        source for source in config.audio_sources if source.get("enabled", True)
+    ]
+    if not sources:
+        raise SystemExit("No enabled audio source. Import one in Settings > Audio sources.")
+    selected = None
+    if args.source:
+        selected = next(
+            (
+                source
+                for source in sources
+                if args.source in {source.get("id"), source.get("name")}
+            ),
+            None,
+        )
+        if selected is None:
+            raise SystemExit(f"Audio source not found: {args.source}")
+    selected = selected or sources[0]
+    tracks = search_source(selected, args.query)
+    if args.download_action == "search":
+        _out(
+            {
+                "source": {
+                    "id": selected.get("id"),
+                    "name": selected.get("name"),
+                },
+                "tracks": [
+                    {
+                        "index": index,
+                        "title": track.get("title"),
+                        "artist": track.get("artist"),
+                        "album": track.get("album"),
+                        "duration": track.get("duration"),
+                        "qualities": track.get("qualities", []),
+                    }
+                    for index, track in enumerate(tracks)
+                ],
+            },
+            args,
+        )
+        return
+    if not tracks:
+        raise SystemExit("No matching tracks.")
+    if args.index < 0 or args.index >= len(tracks):
+        raise SystemExit(f"Result index out of range: {args.index}")
+    track = tracks[args.index]
+    qualities = list(track.get("qualities") or selected.get("qualities") or [])
+    quality = args.quality or (qualities[0] if qualities else "")
+    if not quality:
+        raise SystemExit("No downloadable quality is available.")
+    url, headers = resolve_download(selected, track, quality)
+    directory = Path(
+        args.output_dir
+        or config.audio_download_dir
+        or (Path.home() / "Music" / "Echovault下载")
+    )
+    output = download_audio(
+        url,
+        headers,
+        directory / suggested_filename(track, quality),
+        progress=(
+            lambda percent: print(
+                f"[{percent:3d}%] downloading",
+                file=sys.stderr if args.json_output else sys.stdout,
+                flush=True,
+            )
+        ),
+        allow_remote_http=selected.get("type") == "lx_js",
+    )
+    _out(
+        {
+            "status": "ok",
+            "source": selected.get("name"),
+            "track": {
+                "title": track.get("title"),
+                "artist": track.get("artist"),
+                "album": track.get("album"),
+            },
+            "quality": quality,
+            "output": output,
+        },
+        args,
+    )
 
 
 def cmd_separation_worker(args):
@@ -937,7 +1255,7 @@ def main():
     sp.set_defaults(func=cmd_info)
 
     # transcribe
-    sp = sub.add_parser("transcribe", help="Transcribe lyrics")
+    sp = sub.add_parser("transcribe", help="Transcribe audio or video to LRC")
     sp.add_argument("target")
     sp.add_argument("--language", "-l")
     sp.add_argument("--force", "-f", action="store_true")
@@ -1001,6 +1319,21 @@ def main():
     # video
     sp = sub.add_parser("video", help="Video material operations")
     s2 = sp.add_subparsers(dest="video_action", required=True)
+    x = s2.add_parser("transcribe", help="Transcribe one video or a media folder")
+    x.add_argument("input")
+    x.add_argument("--language", "-l")
+    x.add_argument("--force", "-f", action="store_true")
+    x.add_argument("--output-dir", "-o")
+    x.add_argument("--provider", "-p")
+    x.add_argument("--json", dest="json_output", action="store_true")
+    x.add_argument("--quiet", "-q", action="store_true")
+    x.set_defaults(func=cmd_video)
+    x = s2.add_parser("extract-audio", help="Extract a 16 kHz mono WAV for ASR")
+    x.add_argument("input")
+    x.add_argument("--output", "-o")
+    x.add_argument("--force", "-f", action="store_true")
+    x.add_argument("--json", dest="json_output", action="store_true")
+    x.set_defaults(func=cmd_video)
     x = s2.add_parser("timeline", help="Export video transcript timeline"); x.add_argument("folder"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_video)
     x = s2.add_parser("calibrate", help="Set a video-folder time offset"); x.add_argument("folder"); x.add_argument("--source", required=True, help="YYYY-MM-DDTHH:MM:SS"); x.add_argument("--target", required=True, help="YYYY-MM-DDTHH:MM:SS"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_video)
     x = s2.add_parser("aggregate", help="Aggregate videos by calibrated time"); x.add_argument("folder"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_video)
@@ -1023,13 +1356,73 @@ def main():
     s2 = sp.add_subparsers(dest="model_action", required=True)
     x = s2.add_parser("list", help="List models"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_model)
     x = s2.add_parser("info", help="Model detail"); x.add_argument("model_name"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_model)
-    x = s2.add_parser("download", help="Download model"); x.add_argument("model_name"); x.set_defaults(func=cmd_model)
+    x = s2.add_parser("download", help="Download model"); x.add_argument("model_name"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_model)
 
     # gpu
     sp = sub.add_parser("gpu", help="GPU management")
     s2 = sp.add_subparsers(dest="gpu_action", required=True)
     x = s2.add_parser("scan", help="Scan GPU"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_gpu)
     x = s2.add_parser("status", help="GPU status"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_gpu)
+    x = s2.add_parser("setup", help="Install and activate the recommended signed runtime"); x.add_argument("--json", dest="json_output", action="store_true"); x.set_defaults(func=cmd_gpu)
+
+    # audio
+    sp = sub.add_parser("audio", help="Audio editing and vocal separation")
+    s2 = sp.add_subparsers(dest="audio_action", required=True)
+    x = s2.add_parser("process", help="Run one non-destructive audio edit")
+    x.add_argument(
+        "operation",
+        choices=[
+            "extract", "trim", "edit", "concat", "mix", "fade",
+            "speed_pitch", "denoise", "normalize", "split", "equalizer",
+            "volume", "tags", "reverse", "convert",
+        ],
+    )
+    x.add_argument("--input", "-i", action="append", required=True)
+    x.add_argument("--output", "-o", required=True)
+    x.add_argument("--params-json", default="{}")
+    x.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        help="Typed KEY=VALUE parameter; repeat as needed",
+    )
+    x.add_argument("--json", dest="json_output", action="store_true")
+    x.set_defaults(func=cmd_audio)
+    x = s2.add_parser("separate", help="Separate vocals and accompaniment")
+    x.add_argument("input")
+    x.add_argument("--output-dir", "-o", required=True)
+    x.add_argument(
+        "--model",
+        choices=["htdemucs", "htdemucs_ft", "mdx_extra_q"],
+        default="htdemucs",
+    )
+    x.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    x.add_argument(
+        "--output-content",
+        choices=["both", "vocals", "accompaniment"],
+        default="both",
+    )
+    x.add_argument("--denoise", action="store_true")
+    x.add_argument("--dereverb", action="store_true")
+    x.add_argument("--json", dest="json_output", action="store_true")
+    x.set_defaults(func=cmd_audio)
+
+    # authorized audio-source search and download
+    sp = sub.add_parser("download", help="Search configured audio sources")
+    s2 = sp.add_subparsers(dest="download_action", required=True)
+    x = s2.add_parser("search", help="Search one configured audio source")
+    x.add_argument("query")
+    x.add_argument("--source", help="Configured source id or name")
+    x.add_argument("--json", dest="json_output", action="store_true")
+    x.set_defaults(func=cmd_download)
+    x = s2.add_parser("fetch", help="Download one indexed search result")
+    x.add_argument("query")
+    x.add_argument("--source", help="Configured source id or name")
+    x.add_argument("--index", type=int, default=0)
+    x.add_argument("--quality")
+    x.add_argument("--output-dir", "-o")
+    x.add_argument("--json", dest="json_output", action="store_true")
+    x.set_defaults(func=cmd_download)
 
     # sync
     sp = sub.add_parser("sync", help="File sync")
