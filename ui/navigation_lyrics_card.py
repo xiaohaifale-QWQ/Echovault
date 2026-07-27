@@ -25,7 +25,7 @@ class NavigationLyricsCard(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("navigationLyricsCard")
-        self.setFixedHeight(224)
+        self.setFixedHeight(264)
         self._media_path = ""
         self._lrc_path: Path | None = None
         self._entries: list[TimedTextEntry] = []
@@ -33,7 +33,7 @@ class NavigationLyricsCard(QFrame):
         self._current_index = -2
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 9, 10, 9)
+        layout.setContentsMargins(8, 8, 8, 4)
         layout.setSpacing(5)
 
         header = QHBoxLayout()
@@ -45,13 +45,11 @@ class NavigationLyricsCard(QFrame):
         self.time_label = QLabel("00:00")
         self.time_label.setObjectName("navigationLyricsTime")
         header.addWidget(self.time_label)
-        layout.addLayout(header)
 
         self.song_label = QLabel("尚未选择歌曲")
         self.song_label.setObjectName("navigationLyricsSong")
         self.song_label.setWordWrap(True)
         self.song_label.setMaximumHeight(38)
-        layout.addWidget(self.song_label)
 
         self.lyrics_list = QListWidget()
         self.lyrics_list.setObjectName("navigationLyricsList")
@@ -63,6 +61,8 @@ class NavigationLyricsCard(QFrame):
         self.lyrics_list.setWordWrap(True)
         self.lyrics_list.setSpacing(2)
         layout.addWidget(self.lyrics_list, 1)
+        layout.addLayout(header)
+        layout.addWidget(self.song_label)
 
         self._scroll_animation = QPropertyAnimation(
             self.lyrics_list.verticalScrollBar(), b"value", self
@@ -74,7 +74,7 @@ class NavigationLyricsCard(QFrame):
         self.setStyleSheet(
             """
             QFrame#navigationLyricsCard {
-                background:#FFFFFF; border:1px solid #DCE4ED; border-radius:11px;
+                background:transparent; border:none;
             }
             QLabel#navigationLyricsCaption {
                 color:#718096; font-size:9px; font-weight:600;
@@ -86,7 +86,7 @@ class NavigationLyricsCard(QFrame):
                 color:#17233A; font-size:12px; font-weight:700;
             }
             QListWidget#navigationLyricsList {
-                background:#F7F9FC; border:none; border-radius:8px;
+                background:transparent; border:none;
                 color:#7B8798; font-size:10px; padding:5px 3px;
                 outline:none;
             }
@@ -94,7 +94,7 @@ class NavigationLyricsCard(QFrame):
                 border:none; border-radius:6px; padding:5px 4px;
             }
             QListWidget#navigationLyricsList::item:selected {
-                background:#E7F1FC; color:#1F6FBB; font-size:11px;
+                background:transparent; color:#1F6FBB; font-size:11px;
                 font-weight:700;
             }
             """

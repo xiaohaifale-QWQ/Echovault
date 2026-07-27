@@ -289,6 +289,7 @@ class AudioToolWorkspace(QWidget):
     result_open_requested = pyqtSignal()
     seek_requested = pyqtSignal(float)
     selection_requested = pyqtSignal(float, float)
+    preview_parameters_changed = pyqtSignal()
 
     def __init__(self, spec, parent=None):
         super().__init__(parent)
@@ -305,6 +306,44 @@ class AudioToolWorkspace(QWidget):
         self.input_edit.hide()
         self.output_edit = QLineEdit()
         self._setup_ui()
+        self._connect_preview_controls()
+
+    def _connect_preview_controls(self):
+        """Expose every audible control through one debounced preview signal."""
+
+        for widget in self.fields.values():
+            if isinstance(widget, ValueSlider):
+                widget.valueChanged.connect(self._emit_preview_parameters_changed)
+            elif isinstance(widget, (QDoubleSpinBox, QSpinBox)):
+                widget.valueChanged.connect(self._emit_preview_parameters_changed)
+            elif isinstance(widget, QComboBox):
+                widget.currentIndexChanged.connect(
+                    self._emit_preview_parameters_changed
+                )
+        for band in getattr(self, "eq_bands", []):
+            band.slider.valueChanged.connect(self._emit_preview_parameters_changed)
+        for checkbox in self.findChildren(QCheckBox):
+            checkbox.toggled.connect(self._emit_preview_parameters_changed)
+        for radio in self.findChildren(QRadioButton):
+            radio.toggled.connect(self._emit_preview_parameters_changed)
+        for combo in (
+            getattr(self, "duration_mode", None),
+            getattr(self, "extract_format", None),
+            getattr(self, "extract_quality", None),
+        ):
+            if isinstance(combo, QComboBox):
+                combo.currentIndexChanged.connect(
+                    self._emit_preview_parameters_changed
+                )
+        master_gain = getattr(self, "master_gain", None)
+        if isinstance(master_gain, ValueSlider):
+            master_gain.valueChanged.connect(self._emit_preview_parameters_changed)
+        if self.track_editor is not None:
+            self.track_editor.changed.connect(self._emit_preview_parameters_changed)
+
+    def _emit_preview_parameters_changed(self, *_args):
+        if not self._building_selection:
+            self.preview_parameters_changed.emit()
 
     def _setup_ui(self):
         outer = QVBoxLayout(self)

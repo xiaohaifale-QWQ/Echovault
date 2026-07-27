@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.audio_enhancement import enhancement_model_installed
+from core.output_paths import unique_output_path
 from core.separation_process import run_separation_process
 from core.vocal_separation import (
     SeparationCancelled,
@@ -248,6 +249,7 @@ class VocalSeparationPanel(QWidget):
     model_library_requested = pyqtSignal()
     position_changed_ms = pyqtSignal(int)
     playback_started = pyqtSignal()
+    mix_saved = pyqtSignal(str, str)
 
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
@@ -932,6 +934,14 @@ class VocalSeparationPanel(QWidget):
         )
         if not output_path:
             return
+        output_path = unique_output_path(
+            output_path,
+            [
+                self._selected_path,
+                str(self._result.vocals_path),
+                str(self._result.accompaniment_path),
+            ],
+        )
         self.save_mix_button.setEnabled(False)
         self.processing_status.setText("正在保存调音结果…")
         self.mix_worker = MixExportWorker(
@@ -945,10 +955,27 @@ class VocalSeparationPanel(QWidget):
         self.mix_worker.completed.connect(self._mix_finished)
         self.mix_worker.start()
 
+    def save_mix_as_new_file(self):
+        """Public save action used by the integrated audio-editor toolbar."""
+
+        if (
+            self._result is None
+            or self._result.vocals_path is None
+            or self._result.accompaniment_path is None
+        ):
+            QMessageBox.information(
+                self,
+                "保存为新文件",
+                "请先完成人声与伴奏分离，再保存当前调音结果。",
+            )
+            return
+        self._save_mix()
+
     def _mix_finished(self, success: bool, message: str):
         self.save_mix_button.setEnabled(True)
         if success:
             self.processing_status.setText(f"调音结果已保存：{message}")
+            self.mix_saved.emit(self._selected_path, message)
             QMessageBox.information(self, "保存完成", f"调音结果已保存：\n{message}")
         else:
             self.processing_status.setText(message)

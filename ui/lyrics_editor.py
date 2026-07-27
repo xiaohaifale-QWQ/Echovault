@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QHeaderView, QAbstractItemView, QMessageBox,
     QDoubleSpinBox, QDialogButtonBox,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt
 
 from core.lrc_parser import parse_lrc_file, LRCFile, LyricLine, format_timestamp
 

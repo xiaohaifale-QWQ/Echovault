@@ -11,6 +11,7 @@ from typing import Any
 
 from core.audio_utils import find_ffmpeg, get_audio_info
 from core.metadata import write_tags
+from core.output_paths import unique_output_path
 from core.process_utils import hidden_window_kwargs
 from core.transfer_session import register_artifact
 
@@ -179,6 +180,7 @@ def process_audio(
 ) -> AudioEditResult:
     """Execute one validated audio editing operation."""
     params = dict(params or {})
+    preview_mode = bool(params.pop("_preview", False))
     minimum_inputs = 2 if operation in {"concat", "mix"} else 1
     paths = _require_inputs(inputs, minimum_inputs)
     output = Path(output_path)
@@ -297,7 +299,10 @@ def process_audio(
         if duration_mode not in {"longest", "shortest", "first"}:
             duration_mode = "longest"
         for index, path in enumerate(paths):
-            args.extend(["-i", str(path)])
+            if preview_mode:
+                args.extend(_selection_input_args(path, params))
+            else:
+                args.extend(["-i", str(path)])
             volume = float(volumes[index]) if index < len(volumes) else 1.0
             layout = "mono" if mix_mode == "stereo" and index < 2 else "stereo"
             chains.append(
@@ -437,8 +442,9 @@ def process_audio(
                 destination = output.with_name(
                     f"{output.stem}_{index:03d}{output.suffix}"
                 )
-                if destination.resolve() in resolved_inputs:
-                    raise ValueError("分割结果会覆盖输入原文件，请修改输出文件名。")
+                destination = Path(
+                    unique_output_path(destination, [str(path) for path in paths])
+                )
                 source.replace(destination)
                 outputs.append(str(destination))
     elif operation == "equalizer":
@@ -515,5 +521,6 @@ def process_audio(
     else:
         raise ValueError(f"未知音频编辑操作：{operation}")
 
-    _register(paths, outputs, operation)
+    if not preview_mode:
+        _register(paths, outputs, operation)
     return AudioEditResult(outputs, f"已生成 {len(outputs)} 个文件。")

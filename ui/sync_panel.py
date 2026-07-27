@@ -6,14 +6,17 @@ import difflib
 import threading
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import QRect, Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor, QDesktopServices, QPainter
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFrame,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -53,6 +56,45 @@ OPERATION_TEXT = {
     "audio_enhancement": "音频增强",
     "video_aggregation": "视频汇总",
 }
+
+
+class EmptyStateTableWidget(QTableWidget):
+    """A table that explains what to do instead of showing a blank white slab."""
+
+    def __init__(self, rows, columns, title, hint, parent=None):
+        super().__init__(rows, columns, parent)
+        self._empty_title = title
+        self._empty_hint = hint
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.rowCount():
+            return
+        painter = QPainter(self.viewport())
+        rect = self.viewport().rect().adjusted(40, 40, -40, -40)
+        painter.setPen(QColor("#334155"))
+        title_font = painter.font()
+        title_font.setPointSize(13)
+        title_font.setBold(True)
+        painter.setFont(title_font)
+        center_y = rect.center().y()
+        title_rect = QRect(rect.left(), center_y - 34, rect.width(), 30)
+        painter.drawText(
+            title_rect,
+            Qt.AlignmentFlag.AlignCenter,
+            self._empty_title,
+        )
+        hint_font = painter.font()
+        hint_font.setPointSize(10)
+        hint_font.setBold(False)
+        painter.setFont(hint_font)
+        painter.setPen(QColor("#8492A6"))
+        hint_rect = QRect(rect.left(), center_y + 4, rect.width(), 42)
+        painter.drawText(
+            hint_rect,
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+            self._empty_hint,
+        )
 
 
 class FolderSyncWorker(QThread):
@@ -393,6 +435,7 @@ class SyncPanel(QWidget):
         self._sessions: list[TransferSession] = []
         self._diffs: list[ArtifactDiff] = []
         self._selected_paths: set[str] = set()
+        self._manual_diffs: list[ArtifactDiff] = []
         self._selection_initialized: set[str] = set()
         self._current_session: TransferSession | None = None
         self._setup_ui()
@@ -408,104 +451,226 @@ class SyncPanel(QWidget):
         self.send_page = QWidget(self)
         self.send_page.setObjectName("phoneSendPage")
         send_page_layout = QVBoxLayout(self.send_page)
-        send_page_layout.setContentsMargins(8, 8, 8, 8)
-        send_page_layout.setSpacing(8)
+        send_page_layout.setContentsMargins(14, 14, 14, 14)
+        send_page_layout.setSpacing(10)
 
         self.receive_page = QWidget(self)
         self.receive_page.setObjectName("phoneReceivePage")
         receive_page_layout = QVBoxLayout(self.receive_page)
-        receive_page_layout.setContentsMargins(8, 8, 8, 8)
-        receive_page_layout.setSpacing(8)
+        receive_page_layout.setContentsMargins(14, 14, 14, 14)
+        receive_page_layout.setSpacing(10)
 
         self.advanced_sync_page = QWidget(self)
         self.advanced_sync_page.setObjectName("advancedFolderSyncPage")
         advanced_page_layout = QVBoxLayout(self.advanced_sync_page)
-        advanced_page_layout.setContentsMargins(8, 8, 8, 8)
-        advanced_page_layout.setSpacing(8)
+        advanced_page_layout.setContentsMargins(14, 14, 14, 14)
+        advanced_page_layout.setSpacing(10)
 
-        receive_group = QGroupBox("接收设置")
-        receive_group.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        # 接收：左侧实时队列，右侧服务设置。
+        receive_columns = QHBoxLayout()
+        receive_columns.setSpacing(12)
+        receive_queue_card = QFrame()
+        receive_queue_card.setObjectName("transferCard")
+        receive_queue_layout = QVBoxLayout(receive_queue_card)
+        receive_queue_layout.setContentsMargins(16, 14, 16, 14)
+        receive_queue_layout.setSpacing(10)
+        receive_title_row = QHBoxLayout()
+        receive_title = QLabel("接收队列")
+        receive_title.setObjectName("transferSectionTitle")
+        receive_title_row.addWidget(receive_title)
+        receive_count = QLabel("手机传来的文件会自动出现在这里")
+        receive_count.setObjectName("transferMuted")
+        receive_title_row.addWidget(receive_count)
+        receive_title_row.addStretch()
+        self.receive_filter_all = QPushButton("全部")
+        self.receive_filter_all.setCheckable(True)
+        self.receive_filter_all.setChecked(True)
+        self.receive_filter_all.setObjectName("transferFilter")
+        self.receive_filter_active = QPushButton("传输中")
+        self.receive_filter_active.setCheckable(True)
+        self.receive_filter_active.setObjectName("transferFilter")
+        self.receive_filter_done = QPushButton("已完成")
+        self.receive_filter_done.setCheckable(True)
+        self.receive_filter_done.setObjectName("transferFilter")
+        self.receive_filter_group = QButtonGroup(self)
+        self.receive_filter_group.setExclusive(True)
+        for button, mode in (
+            (self.receive_filter_all, "all"),
+            (self.receive_filter_active, "active"),
+            (self.receive_filter_done, "done"),
+        ):
+            self.receive_filter_group.addButton(button)
+            button.clicked.connect(
+                lambda _checked, selected=mode: self._filter_receive_queue(selected)
+            )
+        receive_title_row.addWidget(self.receive_filter_all)
+        receive_title_row.addWidget(self.receive_filter_active)
+        receive_title_row.addWidget(self.receive_filter_done)
+        self.clear_receive_history_button = QPushButton("清除记录")
+        self.clear_receive_history_button.clicked.connect(
+            lambda: self.receive_queue.setRowCount(0)
         )
-        receive_layout = QVBoxLayout(receive_group)
-        path_row = QHBoxLayout()
-        self.receive_dir_input = QLineEdit(self.config.transfer.receive_dir)
-        self.receive_dir_input.setPlaceholderText("选择手机文件接收目录…")
-        path_row.addWidget(QLabel("接收目录："))
-        path_row.addWidget(self.receive_dir_input)
-        self.open_receive_button = QPushButton("打开目录")
-        self.open_receive_button.clicked.connect(self._open_receive_dir)
-        path_row.addWidget(self.open_receive_button)
-        self.browse_receive_button = QPushButton("选择目录")
-        self.browse_receive_button.clicked.connect(self._browse_receive_dir)
-        path_row.addWidget(self.browse_receive_button)
-        receive_layout.addLayout(path_row)
-        service_row = QHBoxLayout()
-        self.receiver_button = QPushButton("开启接收")
-        self.receiver_button.setCheckable(True)
-        self.receiver_button.clicked.connect(self._toggle_receiver)
-        self.receiver_status = QLabel("未开启")
-        service_row.addWidget(self.receiver_button)
-        service_row.addWidget(self.receiver_status)
-        service_row.addStretch()
-        receive_layout.addLayout(service_row)
+        receive_title_row.addWidget(self.clear_receive_history_button)
+        receive_queue_layout.addLayout(receive_title_row)
+        self.receive_queue = EmptyStateTableWidget(
+            0,
+            4,
+            "等待接收文件",
+            "开启右侧接收服务后，在手机 LocalSend 中选择本机即可发送。",
+        )
+        self.receive_queue.setHorizontalHeaderLabels(["文件", "来源", "进度", "状态"])
+        receive_header = self.receive_queue.horizontalHeader()
+        receive_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in (1, 2, 3):
+            receive_header.setSectionResizeMode(
+                column, QHeaderView.ResizeMode.ResizeToContents
+            )
+        self.receive_queue.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.receive_queue.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.receive_queue.verticalHeader().setVisible(False)
+        receive_queue_layout.addWidget(self.receive_queue, 1)
         self.receive_progress = QProgressBar()
         self.receive_progress.setVisible(False)
-        receive_layout.addWidget(self.receive_progress)
+        receive_queue_layout.addWidget(self.receive_progress)
         self.recent_received = QLabel("")
         self.recent_received.setVisible(False)
-        receive_layout.addWidget(self.recent_received)
-        receive_page_layout.addWidget(receive_group)
-        receive_page_layout.addStretch()
+        receive_queue_layout.addWidget(self.recent_received)
+        receive_columns.addWidget(receive_queue_card, 7)
 
-        task_group = QGroupBox("待发送文件")
+        receive_settings_card = QFrame()
+        receive_settings_card.setObjectName("transferSideCard")
+        receive_settings_layout = QVBoxLayout(receive_settings_card)
+        receive_settings_layout.setContentsMargins(16, 14, 16, 14)
+        receive_settings_layout.setSpacing(12)
+        settings_title = QLabel("接收设置")
+        settings_title.setObjectName("transferSectionTitle")
+        receive_settings_layout.addWidget(settings_title)
+        service_row = QHBoxLayout()
+        service_copy = QVBoxLayout()
+        service_label = QLabel("本机接收服务")
+        service_label.setStyleSheet("font-weight:700")
+        self.receiver_status = QLabel("● 未开启")
+        self.receiver_status.setObjectName("transferStatus")
+        service_copy.addWidget(service_label)
+        service_copy.addWidget(self.receiver_status)
+        service_row.addLayout(service_copy, 1)
+        self.receiver_button = QPushButton("开启接收")
+        self.receiver_button.setCheckable(True)
+        self.receiver_button.setMinimumHeight(38)
+        self.receiver_button.clicked.connect(self._toggle_receiver)
+        service_row.addWidget(self.receiver_button)
+        service_card = QFrame()
+        service_card.setObjectName("serviceStatusCard")
+        service_card_layout = QVBoxLayout(service_card)
+        service_card_layout.setContentsMargins(12, 10, 12, 10)
+        service_card_layout.addLayout(service_row)
+        receive_settings_layout.addWidget(service_card)
+        device_alias = QLabel(f"本机设备名：{self.config.transfer.device_alias or 'Echovault-PC'}")
+        device_alias.setObjectName("transferMuted")
+        receive_settings_layout.addWidget(device_alias)
+        receive_settings_layout.addWidget(self._transfer_divider())
+        path_label = QLabel("保存到文件夹")
+        path_label.setStyleSheet("font-weight:600")
+        receive_settings_layout.addWidget(path_label)
+        self.receive_dir_input = QLineEdit(self.config.transfer.receive_dir)
+        self.receive_dir_input.setPlaceholderText("选择手机文件接收目录…")
+        receive_settings_layout.addWidget(self.receive_dir_input)
+        path_actions = QHBoxLayout()
+        self.browse_receive_button = QPushButton("选择")
+        self.browse_receive_button.clicked.connect(self._browse_receive_dir)
+        path_actions.addWidget(self.browse_receive_button)
+        self.open_receive_button = QPushButton("打开")
+        self.open_receive_button.clicked.connect(self._open_receive_dir)
+        path_actions.addWidget(self.open_receive_button)
+        path_actions.addStretch()
+        receive_settings_layout.addLayout(path_actions)
+        self.auto_accept_checkbox = QCheckBox("自动接受来自已配对设备的文件")
+        self.auto_accept_checkbox.setChecked(True)
+        receive_settings_layout.addWidget(self.auto_accept_checkbox)
+        self.receive_notify_checkbox = QCheckBox("完成后显示通知")
+        self.receive_notify_checkbox.setChecked(True)
+        receive_settings_layout.addWidget(self.receive_notify_checkbox)
+        receive_settings_layout.addStretch()
+        self.receive_network_status = QLabel("▮▮  局域网连接正常")
+        self.receive_network_status.setObjectName("transferSuccess")
+        receive_settings_layout.addWidget(self.receive_network_status)
+        receive_columns.addWidget(receive_settings_card, 3)
+        receive_page_layout.addLayout(receive_columns, 1)
+
+        # 发送：左侧待发送文件，右侧设备与发送设置。
+        send_columns = QHBoxLayout()
+        send_columns.setSpacing(12)
+        task_group = QFrame()
+        task_group.setObjectName("transferCard")
         task_layout = QVBoxLayout(task_group)
+        task_layout.setContentsMargins(16, 14, 16, 14)
+        task_layout.setSpacing(10)
+        task_title_row = QHBoxLayout()
+        task_title = QLabel("待发送文件")
+        task_title.setObjectName("transferSectionTitle")
+        task_title_row.addWidget(task_title)
+        queue_hint = QLabel("从处理任务载入，或直接添加本地文件")
+        queue_hint.setObjectName("transferMuted")
+        task_title_row.addWidget(queue_hint)
+        task_title_row.addStretch()
+        self.add_send_files_button = QPushButton("添加文件")
+        self.add_send_files_button.clicked.connect(self._add_send_files)
+        task_title_row.addWidget(self.add_send_files_button)
+        self.add_send_folder_button = QPushButton("添加文件夹")
+        self.add_send_folder_button.clicked.connect(self._add_send_folder)
+        task_title_row.addWidget(self.add_send_folder_button)
+        task_layout.addLayout(task_title_row)
         task_row = QHBoxLayout()
         self.session_combo = QComboBox()
         self.session_combo.currentIndexChanged.connect(self._load_selected_session)
-        task_row.addWidget(QLabel("任务："))
+        self.session_combo.setMinimumHeight(38)
+        self.session_combo.setPlaceholderText("选择处理任务（可选）")
         task_row.addWidget(self.session_combo, 1)
-        refresh = QPushButton("刷新结果")
-        refresh.clicked.connect(self._scan_current_session)
-        task_row.addWidget(refresh)
-        open_workspace = QPushButton("打开目录")
-        open_workspace.clicked.connect(self._open_workspace)
-        task_row.addWidget(open_workspace)
+        self.send_search_input = QLineEdit()
+        self.send_search_input.setPlaceholderText("搜索文件")
+        self.send_search_input.setMinimumHeight(38)
+        self.send_search_input.textChanged.connect(self._filter_send_table)
+        task_row.addWidget(self.send_search_input, 1)
         task_layout.addLayout(task_row)
         outbox_row = QHBoxLayout()
         self.outbox_path_label = QLabel(str(self.session_manager.outbox_dir))
         self.outbox_path_label.setWordWrap(True)
-        self.outbox_path_label.setStyleSheet("font-size:11px;color:#666")
-        outbox_row.addWidget(QLabel("待回传目录："))
-        outbox_row.addWidget(self.outbox_path_label, 1)
-        open_outbox = QPushButton("打开待回传目录")
+        self.outbox_path_label.setObjectName("transferMuted")
+        self.outbox_path_label.setVisible(False)
+        self.task_status = QLabel("当前没有处理任务，可使用右上角按钮添加文件")
+        self.task_status.setObjectName("transferMuted")
+        outbox_row.addWidget(self.task_status, 1)
+        open_outbox = QPushButton("打开结果目录")
         open_outbox.clicked.connect(self._open_outbox)
         outbox_row.addWidget(open_outbox)
         task_layout.addLayout(outbox_row)
-        self.task_status = QLabel("尚未收到手机文件")
-        self.task_status.setStyleSheet("color:#526073")
 
         result_toolbar = QHBoxLayout()
-        result_toolbar.addWidget(self.task_status, 1)
+        result_toolbar.addStretch()
         self.select_all_diffs_button = QPushButton("全选差异")
         self.select_all_diffs_button.clicked.connect(self._select_all_diffs)
         result_toolbar.addWidget(self.select_all_diffs_button)
         self.clear_selection_button = QPushButton("清除选择")
         self.clear_selection_button.clicked.connect(self._clear_selection)
         result_toolbar.addWidget(self.clear_selection_button)
-        preview = QPushButton("查看选中文件")
+        preview = QPushButton("预览")
         preview.clicked.connect(self._preview_selected)
         result_toolbar.addWidget(preview)
-        open_file = QPushButton("打开文件")
+        open_file = QPushButton("打开")
         open_file.clicked.connect(self._open_selected_file)
         result_toolbar.addWidget(open_file)
-        self.selection_summary = QLabel("已选择 0 个文件")
-        result_toolbar.addWidget(self.selection_summary)
         task_layout.addLayout(result_toolbar)
 
-        self.diff_table = QTableWidget(0, 6)
+        self.diff_table = EmptyStateTableWidget(
+            0,
+            6,
+            "还没有待发送文件",
+            "点击“添加文件”或“添加文件夹”，也可以从上方选择一个处理任务。",
+        )
         self.diff_table.setHorizontalHeaderLabels(
-            ["选择", "文件", "状态", "处理来源", "大小", "回传"]
+            ["选择", "名称", "来源", "格式", "大小", "状态"]
         )
         header = self.diff_table.horizontalHeader()
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -514,41 +679,92 @@ class SyncPanel(QWidget):
         self.diff_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.diff_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.diff_table.setMinimumHeight(170)
+        self.diff_table.verticalHeader().setVisible(False)
         self.diff_table.itemChanged.connect(self._selection_changed)
         self.diff_table.cellDoubleClicked.connect(lambda _row, _column: self._preview_selected())
         task_layout.addWidget(self.diff_table, 1)
-        send_page_layout.addWidget(task_group, 1)
+        queue_footer = QHBoxLayout()
+        self.selection_summary = QLabel("已选择 0 项 · 0 B")
+        self.selection_summary.setStyleSheet("font-weight:600")
+        queue_footer.addWidget(self.selection_summary)
+        queue_footer.addStretch()
+        self.remove_send_item_button = QPushButton("移除")
+        self.remove_send_item_button.clicked.connect(self._remove_current_send_item)
+        queue_footer.addWidget(self.remove_send_item_button)
+        self.clear_send_queue_button = QPushButton("清空")
+        self.clear_send_queue_button.clicked.connect(self._clear_send_queue)
+        queue_footer.addWidget(self.clear_send_queue_button)
+        task_layout.addLayout(queue_footer)
+        send_columns.addWidget(task_group, 7)
 
-        send_group = QGroupBox("发送到手机")
-        send_group.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
-        )
+        send_group = QFrame()
+        send_group.setObjectName("transferSideCard")
         send_layout = QVBoxLayout(send_group)
+        send_layout.setContentsMargins(16, 14, 16, 14)
+        send_layout.setSpacing(12)
+        device_title_row = QHBoxLayout()
+        device_title = QLabel("附近设备")
+        device_title.setObjectName("transferSectionTitle")
+        device_title_row.addWidget(device_title)
+        device_title_row.addStretch()
+        discover = QPushButton("↻ 刷新")
+        discover.clicked.connect(self._refresh_devices)
+        device_title_row.addWidget(discover)
+        send_layout.addLayout(device_title_row)
         device_row = QHBoxLayout()
         self.device_combo = QComboBox()
-        device_row.addWidget(QLabel("发送到："))
+        self.device_combo.setMinimumHeight(44)
+        self.device_combo.addItem("未发现设备", None)
+        self.device_combo.currentIndexChanged.connect(
+            lambda _index: self._update_selection_summary()
+        )
         device_row.addWidget(self.device_combo, 1)
-        discover = QPushButton("刷新设备")
-        discover.clicked.connect(self._refresh_devices)
-        device_row.addWidget(discover)
-        self.send_button = QPushButton("发送选中的文件到手机")
-        self.send_button.setMinimumHeight(38)
-        self.send_button.setMinimumWidth(250)
-        self.send_button.setEnabled(False)
-        self.send_button.clicked.connect(self._send_selected)
-        self.cancel_send_button = QPushButton("取消")
-        self.cancel_send_button.setVisible(False)
-        self.cancel_send_button.clicked.connect(self._cancel_send)
-        device_row.addWidget(self.send_button)
-        device_row.addWidget(self.cancel_send_button)
         send_layout.addLayout(device_row)
+        self.send_status = QLabel("确保电脑与手机位于同一局域网，然后点击刷新。")
+        self.send_status.setWordWrap(True)
+        self.send_status.setObjectName("transferMuted")
+        send_layout.addWidget(self.send_status)
+        self.device_help = QLabel(
+            "连接设备\n"
+            "1  手机与电脑连接同一局域网\n"
+            "2  在手机打开 LocalSend\n"
+            "3  点击“刷新”并选择发现的设备"
+        )
+        self.device_help.setObjectName("transferHelp")
+        self.device_help.setWordWrap(True)
+        send_layout.addWidget(self.device_help)
         self.send_progress = QProgressBar()
         self.send_progress.setVisible(False)
         send_layout.addWidget(self.send_progress)
-        self.send_status = QLabel("请先开启接收，手机 LocalSend 打开后会出现在设备列表。")
-        self.send_status.setWordWrap(True)
-        send_layout.addWidget(self.send_status)
-        send_page_layout.addWidget(send_group)
+        send_layout.addWidget(self._transfer_divider())
+        send_settings_title = QLabel("发送设置")
+        send_settings_title.setObjectName("transferSectionTitle")
+        send_layout.addWidget(send_settings_title)
+        send_layout.addWidget(QLabel("重名处理规则"))
+        self.conflict_rule_combo = QComboBox()
+        self.conflict_rule_combo.addItems(
+            ["重名时自动重命名", "询问后处理", "跳过同名文件"]
+        )
+        send_layout.addWidget(self.conflict_rule_combo)
+        self.open_on_phone_checkbox = QCheckBox("发送后在手机端打开")
+        send_layout.addWidget(self.open_on_phone_checkbox)
+        send_layout.addStretch()
+        self.send_summary = QLabel("尚未选择文件")
+        self.send_summary.setObjectName("transferMuted")
+        self.send_summary.setWordWrap(True)
+        send_layout.addWidget(self.send_summary)
+        self.send_button = QPushButton("发送 0 个文件")
+        self.send_button.setObjectName("primaryAction")
+        self.send_button.setMinimumHeight(44)
+        self.send_button.setEnabled(False)
+        self.send_button.clicked.connect(self._send_selected)
+        send_layout.addWidget(self.send_button)
+        self.cancel_send_button = QPushButton("取消")
+        self.cancel_send_button.setVisible(False)
+        self.cancel_send_button.clicked.connect(self._cancel_send)
+        send_layout.addWidget(self.cancel_send_button)
+        send_columns.addWidget(send_group, 3)
+        send_page_layout.addLayout(send_columns, 1)
 
         self.advanced_group = QGroupBox("文件夹 A/B 同步")
         self.advanced_group.setSizePolicy(
@@ -558,6 +774,171 @@ class SyncPanel(QWidget):
         self.folder_sync_panel = FolderSyncPanel()
         advanced_layout.addWidget(self.folder_sync_panel)
         advanced_page_layout.addWidget(self.advanced_group, 1)
+
+        transfer_style = """
+            QWidget#phoneSendPage,
+            QWidget#phoneReceivePage,
+            QWidget#advancedFolderSyncPage {
+                background: #FFFFFF;
+                border: 1px solid #D8E0EA;
+                border-radius: 14px;
+            }
+            QFrame#transferCard {
+                background: #FFFFFF;
+                border: 1px solid #D8E0EA;
+                border-radius: 12px;
+            }
+            QFrame#transferSideCard {
+                background: #F9FBFE;
+                border: 1px solid #D5DFEA;
+                border-radius: 12px;
+            }
+            QFrame#serviceStatusCard {
+                background: #F6F9FD;
+                border: 1px solid #E1E8F0;
+                border-radius: 9px;
+            }
+            QLabel#transferSectionTitle {
+                color: #152238;
+                font-size: 15px;
+                font-weight: 700;
+            }
+            QLabel#transferMuted { color: #64748B; font-size: 12px; }
+            QLabel#transferHelp {
+                background: #EFF5FC;
+                color: #526176;
+                border: 1px solid #DDE8F4;
+                border-radius: 8px;
+                padding: 10px 12px;
+            }
+            QLabel#transferStatus { color: #64748B; font-weight: 600; }
+            QLabel#transferSuccess { color: #2F9B63; font-weight: 600; }
+            QPushButton#transferFilter:checked {
+                background: #E8F2FD;
+                color: #246FB8;
+                border-color: #B9D5F1;
+            }
+            QTableWidget {
+                background: #FBFCFE;
+                alternate-background-color: #F7FAFD;
+                border: 1px solid #E1E7EF;
+                border-radius: 8px;
+                gridline-color: #E9EEF4;
+            }
+            QHeaderView::section {
+                background: #F4F7FB;
+                color: #526176;
+                border: none;
+                border-bottom: 1px solid #E1E7EF;
+                padding: 9px 8px;
+                font-weight: 600;
+            }
+            """
+        self.setStyleSheet(transfer_style)
+        # These pages are later reparented into the main window's QTabWidget.
+        # Bind the visual rules to each real page as well, otherwise they stop
+        # inheriting SyncPanel's stylesheet and fall back to the gray workspace.
+        for page in (
+            self.send_page,
+            self.receive_page,
+            self.advanced_sync_page,
+        ):
+            page.setStyleSheet(transfer_style)
+
+    @staticmethod
+    def _transfer_divider():
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setFrameShadow(QFrame.Shadow.Plain)
+        divider.setStyleSheet("color:#E6EBF1")
+        return divider
+
+    def _add_send_files(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "添加待发送文件",
+            "",
+            "媒体与歌词 (*.mp3 *.flac *.wav *.m4a *.aac *.ogg *.opus *.lrc *.srt);;所有文件 (*)",
+        )
+        self._add_manual_paths(paths)
+
+    def _add_send_folder(self):
+        directory = QFileDialog.getExistingDirectory(self, "添加待发送文件夹")
+        if not directory:
+            return
+        supported = {
+            ".mp3",
+            ".flac",
+            ".wav",
+            ".m4a",
+            ".aac",
+            ".ogg",
+            ".opus",
+            ".lrc",
+            ".srt",
+        }
+        paths = [
+            str(path)
+            for path in Path(directory).rglob("*")
+            if path.is_file() and path.suffix.lower() in supported
+        ]
+        self._add_manual_paths(paths)
+
+    def _add_manual_paths(self, paths):
+        existing = {str(Path(item.path).resolve()) for item in self._manual_diffs}
+        for raw_path in paths:
+            path = Path(raw_path)
+            if not path.is_file():
+                continue
+            resolved = str(path.resolve())
+            if resolved in existing:
+                continue
+            self._manual_diffs.append(
+                ArtifactDiff(
+                    path=resolved,
+                    relative_path=path.name,
+                    status="generated",
+                    size=path.stat().st_size,
+                    operation="manual_import",
+                )
+            )
+            self._selected_paths.add(resolved)
+            existing.add(resolved)
+        self._populate_diff_table()
+
+    def _remove_current_send_item(self):
+        diff = self._current_diff()
+        if not isinstance(diff, ArtifactDiff):
+            return
+        self._selected_paths.discard(diff.path)
+        self._manual_diffs = [
+            item for item in self._manual_diffs if item.path != diff.path
+        ]
+        self._populate_diff_table()
+
+    def _clear_send_queue(self):
+        self._selected_paths.clear()
+        self._manual_diffs.clear()
+        self._populate_diff_table()
+
+    def _filter_send_table(self, text):
+        query = text.strip().lower()
+        for row in range(self.diff_table.rowCount()):
+            item = self.diff_table.item(row, 1)
+            self.diff_table.setRowHidden(
+                row, bool(query and item and query not in item.text().lower())
+            )
+
+    def _filter_receive_queue(self, mode):
+        for row in range(self.receive_queue.rowCount()):
+            status_item = self.receive_queue.item(row, 3)
+            status = status_item.text() if status_item else ""
+            visible = (
+                mode == "all"
+                or (mode == "active" and "传输中" in status)
+                or (mode == "done" and "完成" in status)
+            )
+            self.receive_queue.setRowHidden(row, not visible)
 
     def set_dir_a(self, folder_path):
         self.folder_sync_panel.set_dir_a(folder_path)
@@ -627,16 +1008,16 @@ class SyncPanel(QWidget):
             self.config.transfer.receive_dir = root
             config_manager.config = self.config
             config_manager.save()
-            self.receiver_button.setText("关闭接收")
-            self.receiver_status.setText(f"等待手机 · 端口 {HTTP_PORT}")
-            self.receiver_status.setStyleSheet("color:#2e7d32;font-weight:bold")
+            self.receiver_button.setText("停止接收")
+            self.receiver_status.setText(f"● 正在接收 · 端口 {HTTP_PORT}")
+            self.receiver_status.setStyleSheet("color:#2F9B63;font-weight:700")
             self._refresh_devices()
         else:
             if self._localsend:
                 self._localsend.stop()
                 self._localsend = None
             self.receiver_button.setText("开启接收")
-            self.receiver_status.setText("未开启")
+            self.receiver_status.setText("● 未开启")
             self.receiver_status.setStyleSheet("")
 
     def _on_receive_progress_ui(self, current, total, name):
@@ -644,10 +1025,25 @@ class SyncPanel(QWidget):
         self.receive_progress.setMaximum(max(1, total))
         self.receive_progress.setValue(current)
         self.receiver_status.setText(f"正在接收：{name}")
+        row = 0
+        if self.receive_queue.rowCount() == 0:
+            self.receive_queue.insertRow(0)
+        self.receive_queue.setItem(row, 0, QTableWidgetItem(name))
+        self.receive_queue.setItem(row, 1, QTableWidgetItem("局域网设备"))
+        percent = int(current / max(total, 1) * 100)
+        self.receive_queue.setItem(row, 2, QTableWidgetItem(f"{percent}%"))
+        self.receive_queue.setItem(row, 3, QTableWidgetItem("传输中"))
 
     def _on_file_received_ui(self, path):
         self.recent_received.setText(f"最近接收：{Path(path).name}")
         self.recent_received.setVisible(True)
+        row = 0
+        if self.receive_queue.rowCount() == 0:
+            self.receive_queue.insertRow(0)
+        self.receive_queue.setItem(row, 0, QTableWidgetItem(Path(path).name))
+        self.receive_queue.setItem(row, 1, QTableWidgetItem("局域网设备"))
+        self.receive_queue.setItem(row, 2, QTableWidgetItem("100%"))
+        self.receive_queue.setItem(row, 3, QTableWidgetItem("已完成 ✓"))
 
     def _on_session_completed_ui(self, payload):
         self.receive_progress.setVisible(False)
@@ -686,7 +1082,7 @@ class SyncPanel(QWidget):
             self._current_session = None
             self._diffs = []
             self.diff_table.setRowCount(0)
-            self.task_status.setText("尚未收到手机文件")
+            self.task_status.setText("当前没有处理任务，可使用右上角按钮添加文件")
 
     def _load_selected_session(self):
         session_id = self.session_combo.currentData()
@@ -740,10 +1136,14 @@ class SyncPanel(QWidget):
         self._populate_diff_table()
 
     def _filtered_diffs(self):
-        return [
+        session_diffs = [
             diff
             for diff in self._diffs
             if not diff.returned and diff.status in {"generated", "modified"}
+        ]
+        known = {diff.path for diff in session_diffs}
+        return session_diffs + [
+            diff for diff in self._manual_diffs if diff.path not in known
         ]
 
     def _populate_diff_table(self):
@@ -764,20 +1164,22 @@ class SyncPanel(QWidget):
             )
             choice.setData(Qt.ItemDataRole.UserRole, diff)
             self.diff_table.setItem(row, 0, choice)
+            path = Path(diff.path)
             self.diff_table.setItem(row, 1, QTableWidgetItem(diff.relative_path))
             self.diff_table.setItem(
-                row, 2, QTableWidgetItem(STATUS_TEXT.get(diff.status, diff.status))
-            )
-            self.diff_table.setItem(
                 row,
-                3,
+                2,
                 QTableWidgetItem(
-                    OPERATION_TEXT.get(diff.operation, diff.operation or "自动扫描")
+                    OPERATION_TEXT.get(
+                        diff.operation,
+                        "手动添加" if diff.operation == "manual_import" else "处理结果",
+                    )
                 ),
             )
+            self.diff_table.setItem(row, 3, QTableWidgetItem(path.suffix[1:].upper()))
             self.diff_table.setItem(row, 4, QTableWidgetItem(_format_size(diff.size)))
             self.diff_table.setItem(
-                row, 5, QTableWidgetItem("已发送" if diff.returned else "未发送")
+                row, 5, QTableWidgetItem("已发送" if diff.returned else "就绪")
             )
         self.diff_table.blockSignals(False)
         self._update_selection_summary()
@@ -805,7 +1207,7 @@ class SyncPanel(QWidget):
     def _selected_files(self):
         return [
             diff.path
-            for diff in self._diffs
+            for diff in self._filtered_diffs()
             if diff.path in self._selected_paths
             and diff.status != "missing"
             and Path(diff.path).is_file()
@@ -815,9 +1217,16 @@ class SyncPanel(QWidget):
         paths = self._selected_files()
         size = sum(Path(path).stat().st_size for path in paths)
         self.selection_summary.setText(
-            f"已选择 {len(paths)} 个文件，共 {_format_size(size)}"
+            f"已选择 {len(paths)} 项 · {_format_size(size)}"
         )
-        self.send_button.setEnabled(bool(paths) and self.device_combo.count() > 0)
+        self.send_summary.setText(
+            f"文件数量        {len(paths)} 个\n"
+            f"总大小          {_format_size(size)}\n"
+            f"目标设备        {self.device_combo.currentText() or '未选择'}"
+        )
+        self.send_button.setText(f"发送 {len(paths)} 个文件")
+        device_ready = self.device_combo.currentData() in self._devices
+        self.send_button.setEnabled(bool(paths) and device_ready)
 
     def _current_diff(self):
         row = self.diff_table.currentRow()
@@ -884,7 +1293,7 @@ class SyncPanel(QWidget):
         files = self._selected_files()
         key = self.device_combo.currentData()
         device = self._devices.get(key)
-        if not files or device is None or self._current_session is None:
+        if not files or device is None:
             return
         total_size = sum(Path(path).stat().st_size for path in files)
         message = (
@@ -921,13 +1330,17 @@ class SyncPanel(QWidget):
     def _send_finished(self, device, results):
         self.send_progress.setVisible(False)
         self.cancel_send_button.setVisible(False)
-        self.session_manager.record_return(
-            self._current_session, device=device.as_dict(), results=results
-        )
+        if self._current_session is not None:
+            self.session_manager.record_return(
+                self._current_session, device=device.as_dict(), results=results
+            )
         sent = sum(item.get("status") == "sent" for item in results)
         skipped = sum(item.get("status") == "skipped" for item in results)
         self.send_status.setText(f"回传完成：发送 {sent}，跳过 {skipped}。")
-        self._scan_current_session()
+        if self._current_session is not None:
+            self._scan_current_session()
+        else:
+            self._update_selection_summary()
 
     def _send_failed(self, error):
         self.send_progress.setVisible(False)

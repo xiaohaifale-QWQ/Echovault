@@ -24,6 +24,21 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     manager.config.translation_source_language = "ja"
     manager.config.translation_target_language = "zh"
     manager.config.voice_input_shortcut = "Ctrl+Alt+V"
+    manager.config.audio_download_dir = "D:/Music/Downloads"
+    manager.config.audio_sources = [
+        {
+            "id": "licensed",
+            "name": "授权曲库",
+            "base_url": "https://catalog.example",
+            "search_path": "/search?q={query}",
+            "resolve_path": "/tracks/{id}?quality={quality}",
+            "qualities": ["320k", "flac"],
+            "headers": {},
+            "terms_url": "https://catalog.example/terms",
+            "authorized": True,
+            "enabled": True,
+        }
+    ]
     manager.config.music_dirs = ["D:/Music"]
     manager.config.video_dirs = ["D:/Video"]
     manager.config.music_select_all = True
@@ -59,6 +74,8 @@ def test_config_roundtrip_persists_api_keys(tmp_path):
     assert loaded.translation_source_language == "ja"
     assert loaded.translation_target_language == "zh"
     assert loaded.voice_input_shortcut == "Ctrl+Alt+V"
+    assert loaded.audio_download_dir == "D:/Music/Downloads"
+    assert loaded.audio_sources[0]["id"] == "licensed"
     assert loaded.music_dirs == ["D:/Music"]
     assert loaded.video_dirs == ["D:/Video"]
     assert loaded.music_select_all is True
@@ -110,6 +127,35 @@ def test_environment_api_key_takes_precedence(tmp_path, monkeypatch):
     assert loaded.local_ai_api_key == "environment-local-ai-secret"
     assert loaded.local_ai_base_url == "http://environment.invalid/v1"
     assert loaded.local_ai_model_name == "environment-model"
+
+
+def test_config_save_rotates_backups_and_recovers_from_corruption(tmp_path):
+    path = tmp_path / "config.json"
+    manager = ConfigManager(path)
+    manager.config.music_dirs = ["D:/First"]
+    manager.save()
+
+    manager.config.music_dirs = ["D:/Second"]
+    manager.save()
+    assert json.loads(path.with_suffix(".json.bak").read_text(encoding="utf-8"))[
+        "music_dirs"
+    ] == ["D:/First"]
+
+    manager.config.music_dirs = ["D:/Third"]
+    manager.save()
+    assert json.loads(path.with_suffix(".json.bak").read_text(encoding="utf-8"))[
+        "music_dirs"
+    ] == ["D:/Second"]
+    assert json.loads(path.with_suffix(".json.bak.1").read_text(encoding="utf-8"))[
+        "music_dirs"
+    ] == ["D:/First"]
+
+    path.write_text("{broken", encoding="utf-8")
+    recovered_manager = ConfigManager(path)
+    recovered = recovered_manager.load()
+
+    assert recovered.music_dirs == ["D:/Second"]
+    assert recovered_manager.recovered_from_backup == path.with_suffix(".json.bak")
 
 
 def test_update_config_value_validates_provider_and_booleans():

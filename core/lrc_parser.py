@@ -9,7 +9,7 @@ LRC 歌词文件解析器
 """
 
 import re
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 
 # LRC 时间戳正则: [mm:ss.xx] 或 [mm:ss.xxx]

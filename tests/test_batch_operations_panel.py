@@ -20,7 +20,7 @@ def _match(score=91.0, synced=True):
     )
 
 
-def test_batch_panel_consolidates_three_operations_and_reports_scope():
+def test_batch_panel_uses_one_rule_driven_pipeline_and_reports_scope():
     ensure_app()
     panel = keep_widget(BatchOperationsPanel(AppConfig()))
 
@@ -32,23 +32,27 @@ def test_batch_panel_consolidates_three_operations_and_reports_scope():
         ]
     )
 
-    assert panel.batch_transcribe_button.text() == "开始批量识别"
-    assert panel.batch_translate_button.text() == "开始批量翻译"
-    assert panel.batch_online_button.text() == "开始批量在线匹配"
-    assert panel.translation_source.currentText() == "自动检测"
-    assert panel.translation_source.currentData() == "auto"
+    assert panel.start_pipeline_button.text() == "开始批量处理"
     assert "当前素材：3 个" in panel.scope_label.text()
-    assert "待识别 1 个" in panel.scope_label.text()
-    assert "可翻译 1 个" in panel.scope_label.text()
-    assert panel.apply_best_checkbox.isChecked() is False
+    assert "待处理 1 个" in panel.scope_label.text()
+    assert "已有歌词 1 个" in panel.scope_label.text()
+    assert panel.match_cover_checkbox.isChecked() is True
+    assert panel.match_lyrics_checkbox.isChecked() is True
+    assert panel.local_fallback_checkbox.isChecked() is True
+    assert panel.translate_english_checkbox.isChecked() is False
     assert panel.minimum_score.value() == 80
     assert len(
         [
             card
             for card in panel.findChildren(QFrame)
-            if card.objectName() == "batchTaskCard"
+            if card.objectName() == "batchPipelineCard"
         ]
-    ) == 3
+    ) == 2
+    requested = []
+    panel.batch_pipeline_requested.connect(requested.append)
+    panel.start_pipeline_button.click()
+    assert requested[0]["match_cover"] is True
+    assert requested[0]["match_lyrics"] is True
 
 
 def test_batch_online_worker_reports_best_match_without_writing(monkeypatch, tmp_path):
@@ -88,6 +92,7 @@ def test_batch_online_worker_reports_best_match_without_writing(monkeypatch, tmp
 def test_batch_panel_live_log_tracks_stages_and_summary():
     ensure_app()
     panel = keep_widget(BatchOperationsPanel(AppConfig()))
+    panel.update_scope([{"has_lrc": False, "instrumental": False}])
 
     panel.begin_task("recognition", "批量识别", 2)
     panel.show_task_progress(1, 2, "one.mp3", "正在转换音频…", 10)
@@ -95,8 +100,8 @@ def test_batch_panel_live_log_tracks_stages_and_summary():
     panel.finish_task("批量识别完成：成功 2 个，失败 0 个。")
 
     rendered = panel.log.toPlainText()
-    assert "[1/2] one.mp3：正在转换音频…" in rendered
-    assert "[1/2] one.mp3：已写入 one.lrc" in rendered
+    assert "[1/2]  one.mp3  ·  正在转换音频…" in rendered
+    assert "[1/2]  one.mp3  ·  已写入 one.lrc" in rendered
     assert "批量识别完成：成功 2 个，失败 0 个。" in rendered
     assert panel.progress.value() == panel.progress.maximum()
-    assert panel.batch_transcribe_button.isEnabled()
+    assert panel.start_pipeline_button.isEnabled()

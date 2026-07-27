@@ -9,6 +9,7 @@ build/
 release-out/
 release-keys/
 .pytest_cache/
+.test-temp/
 *.spec
 !Echovault.spec
 !EchovaultWorker.spec

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import math
 import os
+import tempfile
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 
-from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
     QButtonGroup,
@@ -27,10 +30,22 @@ from PyQt6.QtWidgets import (
 from core.audio_editor import AudioEditResult, process_audio
 from core.audio_utils import get_audio_info
 from core.audio_waveform import extract_waveform_peaks
+from core.output_paths import unique_output_path
 from ui.audio_tool_workspaces import AudioToolWorkspace
 from ui.playback_coordinator import PlaybackSession
 
 WAVEFORM_CACHE_MAX_ITEMS = 8
+LIVE_PREVIEW_MAX_ITEMS = 12
+LIVE_PREVIEW_SECONDS = 8.0
+LIVE_PREVIEW_TOOLS = {
+    "trim",
+    "volume",
+    "denoise",
+    "normalize",
+    "equalizer",
+    "speed_pitch",
+    "mix",
+}
 _WAVEFORM_CACHE: OrderedDict[tuple[str, int, int], tuple[object, float]] = OrderedDict()
 _WAVEFORM_CACHE_LOCK = Lock()
 
@@ -231,6 +246,8 @@ class AudioEditorPanel(QWidget):
     """Audio editor whose tools each own a complete task-specific workspace."""
 
     output_created = pyqtSignal(str, str, str)
+    save_available_changed = pyqtSignal(bool)
+    position_changed_ms = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -239,6 +256,23 @@ class AudioEditorPanel(QWidget):
         self._duration = 0.0
         self._selection = (0.0, 0.0)
         self._worker: AudioEditorWorker | None = None
+        self._preview_worker: AudioEditorWorker | None = None
+        self._preview_temp_dir = tempfile.TemporaryDirectory(
+            prefix="echovault-live-preview-",
+            ignore_cleanup_errors=True,
+        )
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(240)
+        self._preview_timer.timeout.connect(self._render_live_preview)
+        self._preview_serial = 0
+        self._preview_ready_serial = -1
+        self._preview_pending = False
+        self._preview_page: AudioToolWorkspace | None = None
+        self._preview_cache: OrderedDict[str, tuple[str, float, float]] = OrderedDict()
+        self._live_preview_path = ""
+        self._live_preview_start = 0.0
+        self._live_preview_rate = 1.0
         self._waveform_worker: WaveformLoadWorker | None = None
         self._result_waveform_workers: list[WaveformLoadWorker] = []
         self._waveform_peaks: object = ()
@@ -249,6 +283,8 @@ class AudioEditorPanel(QWidget):
         self._loading_page_paths: dict[str, str] = {}
         self._last_output = ""
         self._playing_path = ""
+        self._special_pages: dict[str, QWidget] = {}
+        self._special_controllers: dict[str, QWidget] = {}
         self._audio_output = QAudioOutput(self)
         self._player = QMediaPlayer(self)
         self._player.setAudioOutput(self._audio_output)
@@ -274,6 +310,9 @@ class AudioEditorPanel(QWidget):
             page.result_open_requested.connect(lambda target=page: self._open_result_folder(target))
             page.seek_requested.connect(self._seek_preview_seconds)
             page.selection_requested.connect(self._selection_changed)
+            page.preview_parameters_changed.connect(
+                lambda target=page: self._schedule_live_preview(target)
+            )
             self.tool_pages[spec.key] = page
             self.stack.addWidget(page)
         splitter.addWidget(self.stack)
@@ -359,9 +398,46 @@ class AudioEditorPanel(QWidget):
                 self.tool_buttons[key] = button
                 rail_layout.addWidget(button)
         rail_layout.addStretch()
+        self.tool_rail_layout = rail_layout
         scroll.setWidget(rail)
         self.tool_navigation_scroll = scroll
         return scroll
+
+    def attach_vocal_separation_workspace(
+        self,
+        workspace: QWidget,
+        controller: QWidget,
+    ) -> None:
+        """Expose Vocal Separation as a normal tool inside the audio editor rail."""
+
+        key = "vocal_separation"
+        if key in self._special_pages:
+            return
+        group = QLabel("智能处理")
+        group.setObjectName("audioToolGroupLabel")
+        self.tool_group_labels.append(group)
+        button = QPushButton("人声分离")
+        button.setObjectName("audioToolButton")
+        button.setCheckable(True)
+        button.setToolTip("分离人声与伴奏，并在同一工作台试听、调音和另存结果。")
+        button.clicked.connect(
+            lambda _checked=False: self._open_tool(key)
+        )
+        self.tool_button_group.addButton(button)
+        self.tool_buttons[key] = button
+        insert_at = max(0, self.tool_rail_layout.count() - 1)
+        self.tool_rail_layout.insertSpacing(insert_at, 7)
+        self.tool_rail_layout.insertWidget(insert_at + 1, group)
+        self.tool_rail_layout.insertWidget(insert_at + 2, button)
+        self._special_pages[key] = workspace
+        self._special_controllers[key] = controller
+        self.stack.addWidget(workspace)
+        if hasattr(controller, "mix_saved"):
+            controller.mix_saved.connect(
+                lambda source, output: self.output_created.emit(
+                    source, output, "vocal_mix"
+                )
+            )
 
     def set_songs(self, songs: list[dict]):
         self._songs = [dict(song) for song in songs if song.get("path")]
@@ -384,6 +460,8 @@ class AudioEditorPanel(QWidget):
             )
             return
         self._song = dict(song)
+        self.save_available_changed.emit(True)
+        self._invalidate_live_preview()
         self._source_key = source_key
         self._duration = 0.0
         self._selection = (0.0, 0.0)
@@ -439,7 +517,7 @@ class AudioEditorPanel(QWidget):
         start, end = sorted((start, end))
         self._selection = (start, end)
         page = self.stack.currentWidget()
-        if page is not None and page._selection != (start, end):
+        if isinstance(page, AudioToolWorkspace) and page._selection != (start, end):
             page.set_selection(start, end, self._duration)
         if end - start > 0.001:
             self.status_label.setText(
@@ -449,33 +527,314 @@ class AudioEditorPanel(QWidget):
         else:
             self.status_label.setText("未选择时间范围；支持选区的工具会处理整段素材。")
 
+    def _schedule_live_preview(self, page: AudioToolWorkspace) -> None:
+        """Debounce audible controls and start immediate source-side feedback."""
+
+        if (
+            page is not self.stack.currentWidget()
+            or page.spec.key not in LIVE_PREVIEW_TOOLS
+            or not self._song.get("path")
+            or self._duration <= 0
+        ):
+            return
+        self._preview_page = page
+        self._preview_serial += 1
+        self._preview_ready_serial = -1
+        self._apply_immediate_preview(page)
+        self._preview_timer.start()
+        self.status_label.setText("实时试听：参数已变化，正在更新效果…")
+
+    def _apply_immediate_preview(self, page: AudioToolWorkspace) -> None:
+        """Apply controls supported natively while the rendered preview catches up."""
+
+        try:
+            params = page.params()
+        except ValueError:
+            return
+        source = str(self._song.get("path", ""))
+        if not source:
+            return
+        if self._playing_path == self._live_preview_path:
+            position = self._live_preview_start + (
+                self._player.position() / 1000.0 * self._live_preview_rate
+            )
+        elif self._playing_path == source:
+            position = self._player.position() / 1000.0
+        else:
+            position = (
+                self._selection[0]
+                if self._selection[1] - self._selection[0] > 0.001
+                else 0.0
+            )
+        url = QUrl.fromLocalFile(str(Path(source).resolve()))
+        if self._player.source() != url:
+            self._player.setSource(url)
+        self._playing_path = source
+        self._player.setPosition(int(max(0.0, position) * 1000))
+        speed = float(params.get("speed", 1.0) or 1.0)
+        self._player.setPlaybackRate(max(0.25, min(4.0, speed)))
+        gain_db = float(params.get("gain_db", params.get("output_gain", 0.0)) or 0.0)
+        linear_gain = math.pow(10.0, gain_db / 20.0)
+        self._audio_output.setVolume(max(0.0, min(1.0, linear_gain)))
+        self._playback_session.play(self._player)
+
+    def _preview_range(self) -> tuple[float, float]:
+        current = self._current_source_position()
+        if self._selection[1] - self._selection[0] > 0.001:
+            lower, upper = self._selection
+            start = current if lower <= current < upper else lower
+            end = min(upper, start + LIVE_PREVIEW_SECONDS)
+        else:
+            start = max(0.0, min(current, max(0.0, self._duration - 0.1)))
+            end = min(self._duration, start + LIVE_PREVIEW_SECONDS)
+        if end - start < 0.5 and self._duration > 0.5:
+            end = min(self._duration, max(end, start + LIVE_PREVIEW_SECONDS))
+            start = max(0.0, end - LIVE_PREVIEW_SECONDS)
+        return start, end
+
+    def _render_live_preview(self) -> None:
+        page = self._preview_page
+        if (
+            page is None
+            or page is not self.stack.currentWidget()
+            or page.spec.key not in LIVE_PREVIEW_TOOLS
+        ):
+            return
+        if self._preview_worker is not None and self._preview_worker.isRunning():
+            self._preview_pending = True
+            return
+        inputs = page.inputs()
+        if not inputs:
+            return
+        if page.spec.multi_input and len(inputs) < 2:
+            return
+        try:
+            params = page.params()
+        except ValueError as exc:
+            self.status_label.setText(f"实时试听参数无效：{exc}")
+            return
+        start, end = self._preview_range()
+        if end <= start:
+            return
+        params["selection_start"] = start
+        params["selection_end"] = end
+        params["_preview"] = True
+        operation = page.operation()
+        if page.spec.key == "trim":
+            operation = "edit"
+            params["crop_mode"] = "extract"
+        serial = self._preview_serial
+        speed = float(params.get("speed", 1.0) or 1.0)
+        signature = json.dumps(
+            {
+                "source": self._source_key,
+                "tool": page.spec.key,
+                "operation": operation,
+                "inputs": inputs,
+                "params": params,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            default=str,
+        )
+        cached = self._preview_cache.get(signature)
+        if cached and Path(cached[0]).is_file():
+            self._preview_cache.move_to_end(signature)
+            self._activate_live_preview(
+                page,
+                cached[0],
+                cached[1],
+                cached[2],
+                serial,
+                from_cache=True,
+            )
+            return
+        output_path = str(
+            Path(self._preview_temp_dir.name)
+            / f"{page.spec.key}-{serial}.wav"
+        )
+        self._preview_worker = AudioEditorWorker(
+            operation,
+            inputs,
+            output_path,
+            params,
+            self,
+        )
+        self._preview_worker.completed.connect(
+            lambda result, target=page, token=serial, key=signature, offset=start, rate=speed: (
+                self._live_preview_completed(
+                    target,
+                    result,
+                    token,
+                    key,
+                    offset,
+                    rate,
+                )
+            )
+        )
+        self._preview_worker.failed.connect(self._live_preview_failed)
+        self._preview_worker.start()
+
+    def _live_preview_completed(
+        self,
+        page: AudioToolWorkspace,
+        result: AudioEditResult,
+        serial: int,
+        signature: str,
+        start: float,
+        rate: float,
+    ) -> None:
+        self._preview_worker = None
+        path = result.outputs[-1]
+        self._preview_cache[signature] = (path, start, rate)
+        self._preview_cache.move_to_end(signature)
+        while len(self._preview_cache) > LIVE_PREVIEW_MAX_ITEMS:
+            _key, (expired, _start, _rate) = self._preview_cache.popitem(last=False)
+            try:
+                Path(expired).unlink(missing_ok=True)
+            except OSError:
+                pass
+        if serial == self._preview_serial and page is self.stack.currentWidget():
+            self._activate_live_preview(page, path, start, rate, serial)
+        if self._preview_pending:
+            self._preview_pending = False
+            self._preview_timer.start(20)
+
+    def _activate_live_preview(
+        self,
+        page: AudioToolWorkspace,
+        path: str,
+        start: float,
+        rate: float,
+        serial: int,
+        *,
+        from_cache: bool = False,
+    ) -> None:
+        source_position = self._current_source_position()
+        was_playing = (
+            self._player.playbackState()
+            == QMediaPlayer.PlaybackState.PlayingState
+        )
+        self._reset_direct_preview()
+        self._live_preview_path = path
+        self._live_preview_start = start
+        self._live_preview_rate = max(0.01, rate)
+        self._preview_ready_serial = serial
+        self._playing_path = path
+        self._player.setSource(QUrl.fromLocalFile(str(Path(path).resolve())))
+        preview_position = max(0.0, (source_position - start) / self._live_preview_rate)
+        self._player.setPosition(int(preview_position * 1000))
+        if was_playing:
+            self._playback_session.play(self._player)
+        source = "缓存" if from_cache else "新效果"
+        self.status_label.setText(
+            f"实时试听已更新（{source}，{LIVE_PREVIEW_SECONDS:.0f} 秒窗口）。"
+        )
+        page.set_playing(was_playing)
+
+    def _live_preview_failed(self, message: str) -> None:
+        self._preview_worker = None
+        self.status_label.setText(
+            f"实时试听暂不可用：{message}。音量与速度仍会即时响应。"
+        )
+        if self._preview_pending:
+            self._preview_pending = False
+            self._preview_timer.start(20)
+
+    def _reset_direct_preview(self) -> None:
+        self._player.setPlaybackRate(1.0)
+        self._audio_output.setVolume(1.0)
+
+    def _current_source_position(self) -> float:
+        position = self._player.position() / 1000.0
+        if self._playing_path == self._live_preview_path and self._live_preview_path:
+            return self._live_preview_start + position * self._live_preview_rate
+        return position
+
+    def _live_preview_is_ready(
+        self,
+        page: AudioToolWorkspace | None = None,
+    ) -> bool:
+        target = page or self.stack.currentWidget()
+        return (
+            isinstance(target, AudioToolWorkspace)
+            and target is self._preview_page
+            and self._preview_ready_serial == self._preview_serial
+            and bool(self._live_preview_path)
+            and Path(self._live_preview_path).is_file()
+        )
+
+    def _configure_direct_preview(self, page: AudioToolWorkspace) -> None:
+        """Apply the subset QMediaPlayer can change without rendering."""
+
+        try:
+            params = page.params()
+        except ValueError:
+            return
+        speed = float(params.get("speed", 1.0) or 1.0)
+        self._player.setPlaybackRate(max(0.25, min(4.0, speed)))
+        gain_db = float(
+            params.get("gain_db", params.get("output_gain", 0.0)) or 0.0
+        )
+        linear_gain = math.pow(10.0, gain_db / 20.0)
+        self._audio_output.setVolume(max(0.0, min(1.0, linear_gain)))
+
+    def _invalidate_live_preview(self) -> None:
+        self._preview_timer.stop()
+        self._preview_serial += 1
+        self._preview_ready_serial = -1
+        self._preview_pending = False
+        self._preview_page = None
+        self._reset_direct_preview()
+        if self._playing_path == self._live_preview_path:
+            self._player.pause()
+        self._live_preview_path = ""
+
     def timeline_select_all(self):
         page = self.stack.currentWidget()
-        if getattr(page, "timeline", None):
+        if isinstance(page, AudioToolWorkspace) and getattr(page, "timeline", None):
             page.timeline.select_all()
 
     def timeline_clear_selection(self):
         page = self.stack.currentWidget()
-        if getattr(page, "timeline", None):
+        if isinstance(page, AudioToolWorkspace) and getattr(page, "timeline", None):
             page.timeline.clear_selection()
 
     def _open_tool(self, key: str):
-        if key not in self.tool_pages:
+        page = self.tool_pages.get(key) or self._special_pages.get(key)
+        if page is None:
             return
+        previous = self.stack.currentWidget()
+        if previous is not page and (
+            self._preview_page is not None or self._live_preview_path
+        ):
+            self._invalidate_live_preview()
         self.tool_buttons[key].setChecked(True)
-        page = self.tool_pages[key]
         self.stack.setCurrentWidget(page)
-        if self._song.get("path"):
+        if isinstance(page, AudioToolWorkspace) and self._song.get("path"):
             self._prepare_page(page)
-        page.set_playhead(self._player.position() / 1000.0)
-        playing = self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
-        page.set_playing(playing and self._playing_path == self._song.get("path"))
-        page.set_result_playing(playing and self._playing_path == page._result_path)
-        self.timeline = getattr(page, "timeline", None)
-        self.status_label.setText(f"已进入“{page.spec.title}”独立工作台。")
+        if isinstance(page, AudioToolWorkspace):
+            page.set_playhead(self._current_source_position())
+            playing = (
+                self._player.playbackState()
+                == QMediaPlayer.PlaybackState.PlayingState
+            )
+            page.set_playing(
+                playing and self._playing_path == self._song.get("path")
+            )
+            page.set_result_playing(
+                playing and self._playing_path == page._result_path
+            )
+            self.timeline = getattr(page, "timeline", None)
+            title = page.spec.title
+        else:
+            self._player.pause()
+            self.timeline = None
+            title = "人声分离"
+        self.status_label.setText(f"已进入“{title}”独立工作台。")
 
     def _prepare_page(self, page: AudioToolWorkspace | None) -> None:
-        if page is None:
+        if not isinstance(page, AudioToolWorkspace):
             return
         path = str(self._song.get("path", ""))
         if not path:
@@ -518,11 +877,20 @@ class AudioEditorPanel(QWidget):
         if not output_path:
             QMessageBox.information(self, "音频编辑", "请先选择输出文件。")
             return
+        safe_output_path = unique_output_path(output_path, inputs)
+        if safe_output_path != output_path:
+            page.output_edit.setText(safe_output_path)
+            output_path = safe_output_path
+            self.status_label.setText(
+                f"为保护源文件和已有结果，已改为新文件："
+                f"{Path(output_path).name}"
+            )
         try:
             params = page.params()
         except ValueError as exc:
             QMessageBox.warning(self, "参数错误", str(exc))
             return
+        self._invalidate_live_preview()
         operation = page.operation()
         page.run_button.setEnabled(False)
         self.progress.setVisible(True)
@@ -537,6 +905,21 @@ class AudioEditorPanel(QWidget):
             lambda message, target=page: self._on_process_failed(target, message)
         )
         self._worker.start()
+
+    def save_active_as_new_file(self) -> None:
+        """Run the active editor or save the active separation mix as a new file."""
+
+        page = self.stack.currentWidget()
+        if isinstance(page, AudioToolWorkspace):
+            self._run_tool(page)
+            return
+        for key, special_page in self._special_pages.items():
+            if page is special_page:
+                controller = self._special_controllers[key]
+                if hasattr(controller, "save_mix_as_new_file"):
+                    controller.save_mix_as_new_file()
+                return
+        QMessageBox.information(self, "保存为新文件", "请先选择音频编辑工具。")
 
     def _on_process_completed(
         self,
@@ -595,17 +978,42 @@ class AudioEditorPanel(QWidget):
         if not source:
             QMessageBox.information(self, "试听", "请先从素材工作区选择文件。")
             return
+        page = self.stack.currentWidget()
+        preview_path = (
+            self._live_preview_path
+            if isinstance(page, AudioToolWorkspace)
+            and self._live_preview_is_ready(page)
+            else ""
+        )
+        target_path = preview_path or source
         if (
-            self._playing_path == source
+            self._playing_path == target_path
             and self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
         ):
             self._player.pause()
             return
-        url = QUrl.fromLocalFile(str(Path(source).resolve()))
+        source_position = self._current_source_position()
+        url = QUrl.fromLocalFile(str(Path(target_path).resolve()))
         if self._player.source() != url:
             self._player.setSource(url)
-        self._playing_path = source
-        if self._selection[1] - self._selection[0] > 0.001:
+        self._playing_path = target_path
+        if preview_path:
+            self._reset_direct_preview()
+            preview_position = max(
+                0.0,
+                (source_position - self._live_preview_start)
+                / self._live_preview_rate,
+            )
+            self._player.setPosition(int(preview_position * 1000))
+        else:
+            if isinstance(page, AudioToolWorkspace):
+                self._configure_direct_preview(page)
+            if self._selection[1] - self._selection[0] > 0.001:
+                current = source_position
+                if not self._selection[0] <= current < self._selection[1]:
+                    source_position = self._selection[0]
+            self._player.setPosition(int(max(0.0, source_position) * 1000))
+        if not preview_path and self._selection[1] - self._selection[0] > 0.001:
             current = self._player.position() / 1000.0
             if not self._selection[0] <= current < self._selection[1]:
                 self._player.setPosition(int(self._selection[0] * 1000))
@@ -621,6 +1029,7 @@ class AudioEditorPanel(QWidget):
         ):
             self._player.pause()
             return
+        self._reset_direct_preview()
         self._playing_path = result_path
         self._player.setSource(QUrl.fromLocalFile(str(Path(result_path).resolve())))
         self._playback_session.play(self._player)
@@ -634,23 +1043,60 @@ class AudioEditorPanel(QWidget):
         source = str(self._song.get("path", ""))
         if not source:
             return
-        url = QUrl.fromLocalFile(str(Path(source).resolve()))
+        seconds = max(0.0, min(self._duration, seconds))
+        page = self.stack.currentWidget()
+        use_live_preview = self._live_preview_is_ready(
+            page if isinstance(page, AudioToolWorkspace) else None
+        )
+        preview_end = self._live_preview_start + LIVE_PREVIEW_SECONDS
+        if (
+            self._playing_path == self._live_preview_path
+            and self._player.duration() > 0
+        ):
+            preview_end = self._live_preview_start + (
+                self._player.duration() / 1000.0 * self._live_preview_rate
+            )
+        use_live_preview = bool(
+            use_live_preview
+            and self._live_preview_start <= seconds <= preview_end
+        )
+        target_path = self._live_preview_path if use_live_preview else source
+        url = QUrl.fromLocalFile(str(Path(target_path).resolve()))
         if self._player.source() != url:
             self._player.setSource(url)
-        self._playing_path = source
-        self._player.setPosition(int(seconds * 1000))
+        self._playing_path = target_path
+        if use_live_preview:
+            self._reset_direct_preview()
+            position = (seconds - self._live_preview_start) / self._live_preview_rate
+        else:
+            if isinstance(page, AudioToolWorkspace):
+                self._configure_direct_preview(page)
+            position = seconds
+        self._player.setPosition(int(max(0.0, position) * 1000))
+        if isinstance(page, AudioToolWorkspace):
+            page.set_playhead(seconds)
+        self.position_changed_ms.emit(int(seconds * 1000))
 
     def _preview_position_changed(self, position: int):
         source = str(self._song.get("path", ""))
         seconds = position / 1000.0
+        source_seconds = seconds
+        if self._playing_path == self._live_preview_path and self._live_preview_path:
+            source_seconds = (
+                self._live_preview_start + seconds * self._live_preview_rate
+            )
+        page = self.stack.currentWidget()
+        if isinstance(page, AudioToolWorkspace) and (
+            self._playing_path == source
+            or self._playing_path == self._live_preview_path
+        ):
+            page.set_playhead(source_seconds)
+        self.position_changed_ms.emit(int(max(0.0, source_seconds) * 1000))
         if self._playing_path == source:
-            page = self.stack.currentWidget()
-            if page is not None:
-                page.set_playhead(seconds)
             if (
                 self._selection[1] - self._selection[0] > 0.001
                 and self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
-                and seconds >= self._selection[1]
+                and source_seconds >= self._selection[1]
             ):
                 self._player.pause()
                 self._player.setPosition(int(self._selection[0] * 1000))
@@ -659,8 +1105,11 @@ class AudioEditorPanel(QWidget):
         playing = state == QMediaPlayer.PlaybackState.PlayingState
         source = str(self._song.get("path", ""))
         page = self.stack.currentWidget()
-        if page is not None:
-            page.set_playing(playing and self._playing_path == source)
+        if isinstance(page, AudioToolWorkspace):
+            page.set_playing(
+                playing
+                and self._playing_path in {source, self._live_preview_path}
+            )
             page.set_result_playing(playing and self._playing_path == page._result_path)
 
     @staticmethod

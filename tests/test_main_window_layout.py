@@ -11,7 +11,7 @@ from ui.online_lyrics_panel import CoverApplyAction, OnlineLyricsAction, TagAppl
 from ui.theme import polish_widget_tree
 
 
-def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(
+def test_main_window_uses_six_task_workspaces_and_right_ai_drawer(
     monkeypatch, tmp_path
 ):
     ensure_app()
@@ -27,6 +27,8 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(
         "素材",
         "歌词与标签",
         "音频编辑",
+        "音频下载",
+        "批量任务",
         "导出与传输",
     ]
     assert window.workspace_stack.currentWidget() is window.workspace_pages["materials"]
@@ -35,19 +37,19 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(
         "本地识别编辑",
         "歌词核对",
     ]
-    assert [window.audio_tabs.tabText(index) for index in range(2)] == [
-        "音频编辑",
-        "人声分离",
+    assert "人声分离" in [
+        button.text() for button in window.audio_editor_panel.tool_buttons.values()
     ]
-    assert [window.transfer_tabs.tabText(index) for index in range(4)] == [
+    assert [window.transfer_tabs.tabText(index) for index in range(3)] == [
         "发送",
         "接收",
-        "批量任务",
         "高级文件夹同步",
     ]
     assert window.transfer_tabs.widget(0) is window.sync_panel.send_page
     assert window.transfer_tabs.widget(1) is window.sync_panel.receive_page
-    assert window.transfer_tabs.widget(3) is window.sync_panel.advanced_sync_page
+    assert window.transfer_tabs.widget(2) is window.sync_panel.advanced_sync_page
+    assert window.workspace_pages["batch"] is window.batch_operations_panel
+    assert window.workspace_pages["download"] is window.audio_download_panel
     assert window.outer_splitter.widget(1) is window.ai_chat_panel
     assert window.outer_splitter.widget(0) is window.body
     shell_layout = window.centralWidget().layout()
@@ -61,7 +63,7 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(
     assert window.menuBar().isHidden()
     assert window.global_search.placeholderText() == "搜索素材、歌词、标签或功能"
     assert window.top_settings_button.text() == "设置"
-    assert window.navigation_lyrics_card.height() == 224
+    assert window.navigation_lyrics_card.height() == 264
     assert window.navigation.isAncestorOf(window.navigation_lyrics_card)
     assert not hasattr(window, "batch_shortcut_button")
     assert all(not button.isEnabled() for button in window.material_action_buttons)
@@ -77,17 +79,24 @@ def test_main_window_uses_four_task_workspaces_and_right_ai_drawer(
     assert "在线匹配歌词" in window.online_comparison_panel.online_editor.parent().title()
 
     window._switch_workspace("audio")
-    window.audio_tabs.setCurrentIndex(1)
+    window.audio_editor_panel._open_tool("vocal_separation")
     assert window.workspace_stack.currentWidget() is window.workspace_pages["audio"]
+    assert (
+        window.audio_editor_panel.stack.currentWidget()
+        is window.audio_editor_panel._special_pages["vocal_separation"]
+    )
     assert window.vocal_lyrics_panel.title_label.text() == "实时歌词"
+    assert not window.audio_save_button.isHidden()
 
     window.global_search.setText("音频降噪")
     window._submit_global_search()
     assert window.workspace_stack.currentWidget() is window.workspace_pages["audio"]
     window.global_search.setText("批量")
     window._submit_global_search()
-    assert window.workspace_stack.currentWidget() is window.workspace_pages["transfer"]
-    assert window.transfer_tabs.currentWidget() is window.batch_operations_panel
+    assert window.workspace_stack.currentWidget() is window.workspace_pages["batch"]
+    window.global_search.setText("音频下载")
+    window._submit_global_search()
+    assert window.workspace_stack.currentWidget() is window.workspace_pages["download"]
     window.global_search.setText("手机接收")
     window._submit_global_search()
     assert window.transfer_tabs.currentWidget() is window.sync_panel.receive_page
@@ -191,6 +200,8 @@ def test_main_window_merges_materials_from_selected_folders(monkeypatch, tmp_pat
     window = keep_widget(MainWindow())
 
     window._on_folders_selected([str(first), str(second)])
+    window._material_scan_worker.wait()
+    ensure_app().processEvents()
 
     assert [song["name"] for song in window.song_list_panel.get_all_songs()] == [
         "first.mp3",
@@ -253,6 +264,8 @@ def test_online_catalog_includes_music_and_video(monkeypatch, tmp_path):
     window.config.video_dirs = [str(video_dir)]
 
     window._refresh_online_catalog(force=True)
+    window._catalog_scan_worker.wait()
+    ensure_app().processEvents()
 
     assert {song["material_type"] for song in window._online_catalog} == {
         "music",

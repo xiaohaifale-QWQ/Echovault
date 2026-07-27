@@ -79,6 +79,31 @@ def test_audio_editor_trims_and_splits_real_wave(monkeypatch, tmp_path):
     assert all(Path(path).is_file() for path in split_result.outputs)
     assert len(registered) == 1 + len(split_result.outputs)
 
+    preview = tmp_path / "preview.wav"
+    process_audio(
+        "volume",
+        [str(source)],
+        str(preview),
+        {"gain_db": -6, "_preview": True},
+    )
+    assert preview.is_file()
+    assert len(registered) == 1 + len(split_result.outputs)
+
+    mix_preview = tmp_path / "mix-preview.wav"
+    process_audio(
+        "mix",
+        [str(source), str(source)],
+        str(mix_preview),
+        {
+            "volumes": [0.5, 0.5],
+            "selection_start": 0.2,
+            "selection_end": 0.7,
+            "_preview": True,
+        },
+    )
+    assert 0.45 <= get_audio_info(str(mix_preview))["duration"] <= 0.55
+    assert len(registered) == 1 + len(split_result.outputs)
+
 
 def test_wav_common_tags_round_trip(tmp_path):
     source = tmp_path / "tagged.wav"
@@ -267,6 +292,51 @@ def test_audio_editor_only_updates_the_visible_workspace(monkeypatch, tmp_path):
     panel._preview_position_changed(5000)
     assert volume_page.timeline.playhead_seconds == 5.0
     assert trim_page.timeline.playhead_seconds == 0.0
+
+
+def test_audio_editor_controls_schedule_live_audible_preview(monkeypatch, tmp_path):
+    ensure_app()
+    panel = keep_widget(AudioEditorPanel())
+    source = tmp_path / "song.wav"
+    source.write_bytes(b"audio")
+    monkeypatch.setattr(panel, "_start_waveform_load", lambda _path: None)
+    monkeypatch.setattr(panel._playback_session, "play", lambda _player: None)
+    panel.show_song({"name": source.name, "path": str(source)})
+    panel._duration = 30.0
+    page = panel.tool_pages["speed_pitch"]
+    panel._open_tool("speed_pitch")
+
+    page.fields["speed"].setValue(1.25)
+
+    assert panel._preview_page is page
+    assert panel._preview_timer.isActive()
+    assert panel._player.playbackRate() == pytest.approx(1.25)
+
+
+def test_live_preview_position_maps_back_to_original_timeline(monkeypatch, tmp_path):
+    ensure_app()
+    panel = keep_widget(AudioEditorPanel())
+    source = tmp_path / "song.wav"
+    preview = tmp_path / "preview.wav"
+    source.write_bytes(b"audio")
+    preview.write_bytes(b"preview")
+    monkeypatch.setattr(panel, "_start_waveform_load", lambda _path: None)
+    panel.show_song({"name": source.name, "path": str(source)})
+    panel._duration = 30.0
+    page = panel.tool_pages["speed_pitch"]
+    panel._open_tool("speed_pitch")
+    panel._preview_page = page
+    panel._live_preview_path = str(preview)
+    panel._live_preview_start = 10.0
+    panel._live_preview_rate = 1.5
+    panel._playing_path = str(preview)
+    positions = []
+    panel.position_changed_ms.connect(positions.append)
+
+    panel._preview_position_changed(2000)
+
+    assert page.timeline.playhead_seconds == pytest.approx(13.0)
+    assert positions[-1] == 13_000
 
 
 def test_audio_editor_panel_exposes_detailed_pages_for_every_processing_tool(

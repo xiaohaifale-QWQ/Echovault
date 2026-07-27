@@ -48,9 +48,9 @@ def _configure_utf8_stream(stream, *, capture_cli_output=False):
 sys.stdout = _configure_utf8_stream(sys.stdout, capture_cli_output=True)
 sys.stderr = _configure_utf8_stream(sys.stderr)
 
-from core.config import config_manager, AppConfig, update_config_value
-from core.asr.router import ASRRouter, get_router
-from core.audio_utils import is_supported, SUPPORTED_FORMATS
+from core.config import config_manager, update_config_value
+from core.asr.router import get_router
+from core.audio_utils import is_supported
 from core.lrc_writer import transcribe_and_save_lrc
 from core.lrc_parser import parse_lrc_file
 from core.environment import build_environment_report
@@ -780,7 +780,7 @@ def cmd_sync(args):
             logger.error("Please specify folder")
             sys.exit(1)
         from server.http_server import start_http_server
-        print(f"Starting HTTP file server...")
+        print("Starting HTTP file server...")
         print(f"Folder: {folder}")
         start_http_server(folder)
 
@@ -842,7 +842,7 @@ def cmd_serve(args):
         config = config_manager.load()
         folder = config.music_dirs[0] if config.music_dirs else os.getcwd()
         from server.http_server import start_http_server
-        print(f"Starting HTTP server...")
+        print("Starting HTTP server...")
         print(f"Folder: {folder}")
         start_http_server(folder)
     elif args.serve_action == "localsend":

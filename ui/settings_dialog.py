@@ -1,6 +1,4 @@
 """设置对话框"""
-import subprocess
-import sys
 
 from PyQt6.QtCore import QThread, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QKeySequence
@@ -25,7 +23,6 @@ from PyQt6.QtWidgets import (
 )
 
 from core.config import AppConfig, config_manager
-from core.process_utils import hidden_window_kwargs
 from core.runtime_detection import detect_hardware, select_runtime
 from core.runtime_manager import RuntimeInstallCancelled, RuntimeManagerError
 from core.runtime_setup import RuntimeSetupResult, RuntimeSetupService
@@ -36,6 +33,7 @@ from core.voice_cache import (
     sent_transfer_cache_dir,
     voice_cache_dir,
 )
+from ui.audio_source_manager import AudioSourceManagerWidget
 from ui.theme import polish_widget_tree
 
 
@@ -49,127 +47,6 @@ class _CurrentPageStack(QStackedWidget):
     def minimumSizeHint(self):
         current = self.currentWidget()
         return current.minimumSizeHint() if current else super().minimumSizeHint()
-
-
-class _GPUDetectWorker(QThread):
-    """后台扫描显卡"""
-    result_ready = pyqtSignal(str)  # GPU 名称 或 错误信息
-
-    def run(self):
-        try:
-            # 先试 nvidia-smi
-            import subprocess as sp
-            r = sp.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                       capture_output=True, text=True, timeout=10,
-                       **hidden_window_kwargs())
-            if r.returncode == 0 and r.stdout.strip():
-                name = r.stdout.strip().split("\n")[0].strip()
-                self.result_ready.emit(f"✅ {name}")
-                return
-        except Exception:
-            pass
-
-        # 回退：检查 torch.cuda
-        try:
-            import torch
-            if torch.cuda.is_available():
-                name = torch.cuda.get_device_name(0)
-                self.result_ready.emit(f"✅ {name} (CUDA 已就绪)")
-                return
-        except ImportError:
-            pass
-
-        self.result_ready.emit("❌ 未检测到 NVIDIA 显卡")
-
-
-class _GPUInstallWorker(QThread):
-    """后台安装 PyTorch CUDA 版本 — 双源 + 可取消"""
-    progress = pyqtSignal(int, str)  # percent, message
-    finished = pyqtSignal(bool, str)
-
-    def __init__(self):
-        super().__init__()
-        self._cancelled = False
-        self._proc = None
-
-    def cancel(self):
-        self._cancelled = True
-        self.requestInterruption()
-        if self._proc:
-            try: self._proc.terminate()
-            except: pass
-
-    def run(self):
-        try:
-            import re
-            self.progress.emit(0, "正在解析 PyTorch CUDA 12.1 依赖...")
-
-            # 只用 PyTorch CDN（不用清华镜像，它会优先给 CPU 版 torch）
-            self._proc = subprocess.Popen(
-                [sys.executable, "-m", "pip", "install", "torch", "torchvision", "torchaudio",
-                 "--index-url", "https://download.pytorch.org/whl/cu121"],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1, universal_newlines=True,
-                **hidden_window_kwargs(),
-            )
-
-            pkg_name = ""
-            for line in iter(self._proc.stdout.readline, ""):
-                if self._cancelled or self.isInterruptionRequested():
-                    self._proc.terminate()
-                    self.finished.emit(False, "安装已取消")
-                    return
-                line = line.strip()
-                if not line:
-                    continue
-
-                # "Downloading <url> (<size>)"
-                m = re.search(r'Downloading\s+(\S+)\s+\(([\d.]+\s*\w+)\)', line)
-                if m:
-                    pkg_name = m.group(1).split("/")[-1][:50]
-                    size_str = m.group(2)
-                    self.progress.emit(0, f"⬇ {pkg_name} ({size_str})")
-                    continue
-
-                # " 1.2/2.5 GB 5.2 MB/s eta 0:04:01"
-                m2 = re.search(r'(\d+\.?\d*)\s*/\s*(\d+\.?\d*)\s*(\w+)', line)
-                if m2:
-                    try:
-                        done = float(m2.group(1))
-                        total = float(m2.group(2))
-                        pct = int(done / total * 100) if total > 0 else 0
-                        speed_match = re.search(r'(\d+\.?\d*\s*\w+/s)', line)
-                        speed = speed_match.group(1) if speed_match else ""
-                        self.progress.emit(pct, f"⬇ {pkg_name} — {speed} ({pct}%)")
-                    except: pass
-                    continue
-
-                # pip 百分比: "━━━━━ 45%"
-                m3 = re.search(r'(\d+)%', line)
-                if m3 and pkg_name:
-                    pct = int(m3.group(1))
-                    speed_match = re.search(r'(\d+\.?\d*\s*\w+/s)', line)
-                    speed = speed_match.group(1) if speed_match else ""
-                    self.progress.emit(pct, f"⬇ {pkg_name} — {speed} ({pct}%)")
-                    continue
-
-                if "already satisfied" in line.lower():
-                    self.progress.emit(100, "已安装，跳过")
-                elif any(kw in line.lower() for kw in ['installing', 'successfully installed', 'collecting']):
-                    self.progress.emit(-1, line[:100])
-
-            self._proc.wait()
-            if self._cancelled or self.isInterruptionRequested():
-                self.finished.emit(False, "安装已取消")
-                return
-            if self._proc.returncode == 0:
-                self.finished.emit(True, "GPU 加速安装完成！重启后生效。")
-            else:
-                self.finished.emit(False, f"pip 返回错误码 {self._proc.returncode}\n请重试或检查网络")
-        except FileNotFoundError:
-            self.finished.emit(False, "找不到 pip，请确认 Python 安装正确")
-        except Exception as e:
-            self.finished.emit(False, str(e))
 
 
 class _RuntimeDetectWorker(QThread):
@@ -252,8 +129,16 @@ class SettingsDialog(QDialog):
             "shortcuts": 2,
             "cache": 3,
             "local_ai": 4,
+            "audio_sources": 5,
         }.get(self.section, 0)
-        section_title = ("语音识别", "歌词输出", "快捷键", "缓存", "本地部署 AI")[section_index]
+        section_title = (
+            "语音识别",
+            "歌词输出",
+            "快捷键",
+            "缓存",
+            "本地部署 AI",
+            "音源管理",
+        )[section_index]
         self.setWindowTitle(f"偏好设置 - {section_title}")
         self.setMinimumWidth(620)
         section_heights = {
@@ -262,10 +147,11 @@ class SettingsDialog(QDialog):
             "shortcuts": 350,
             "cache": 430,
             "local_ai": 500,
+            "audio_sources": 600,
         }
         self._preferred_height = section_heights.get(self.section, 520)
         self.resize(720, self._preferred_height)
-        l = QVBoxLayout(self)
+        layout = QVBoxLayout(self)
 
         # 设置分类由顶栏“设置”菜单选择；对话框仅展示被选中的单个分类。
         self.settings_stack = _CurrentPageStack()
@@ -274,9 +160,17 @@ class SettingsDialog(QDialog):
         shortcut_page, shortcut_layout = self._create_settings_section("快捷键")
         cache_page, cache_layout = self._create_settings_section("缓存")
         local_ai_page, local_ai_layout = self._create_settings_section("本地部署 AI")
-        for page in (recognition_page, lyrics_page, shortcut_page, cache_page, local_ai_page):
+        audio_sources_page, audio_sources_layout = self._create_settings_section("音源管理")
+        for page in (
+            recognition_page,
+            lyrics_page,
+            shortcut_page,
+            cache_page,
+            local_ai_page,
+            audio_sources_page,
+        ):
             self.settings_stack.addWidget(page)
-        l.addWidget(self.settings_stack)
+        layout.addWidget(self.settings_stack)
         self.settings_stack.setCurrentIndex(section_index)
 
         ag = QGroupBox("语音识别 (ASR)"); af = QFormLayout(ag)
@@ -291,7 +185,13 @@ class SettingsDialog(QDialog):
         af.addRow("", self.open_model_library_button)
 
         self.lang_combo = QComboBox()
-        for t, v in [("自动检测", None), ("中文", "zh"), ("英语", "en"), ("日语", "ja"), ("韩语", "ko")]:
+        for t, v in [
+            ("自动检测", None),
+            ("中文", "zh"),
+            ("英语", "en"),
+            ("日语", "ja"),
+            ("韩语", "ko"),
+        ]:
             self.lang_combo.addItem(t, v)
         af.addRow("默认语言:", self.lang_combo)
 
@@ -307,7 +207,8 @@ class SettingsDialog(QDialog):
         self.btn_scan_gpu = QPushButton("重新检测"); self.btn_scan_gpu.setMaximumWidth(80)
         self.btn_scan_gpu.clicked.connect(self._on_scan_gpu)
         gpu_scan_row.addWidget(self.btn_scan_gpu)
-        self.gpu_info_label = QLabel("检测当前电脑的推荐运行时"); self.gpu_info_label.setStyleSheet("font-size:11px;color:#666")
+        self.gpu_info_label = QLabel("检测当前电脑的推荐运行时")
+        self.gpu_info_label.setStyleSheet("font-size:11px;color:#666")
         gpu_scan_row.addWidget(self.gpu_info_label)
         gpu_scan_row.addStretch()
         gf.addRow("", gpu_scan_row)
@@ -324,9 +225,12 @@ class SettingsDialog(QDialog):
         gpu_install_row.addStretch()
         gf.addRow("", gpu_install_row)
 
-        self.gpu_progress = QProgressBar(); self.gpu_progress.setVisible(False); self.gpu_progress.setMaximum(100)
+        self.gpu_progress = QProgressBar()
+        self.gpu_progress.setVisible(False)
+        self.gpu_progress.setMaximum(100)
         gf.addRow("", self.gpu_progress)
-        self.gpu_progress_label = QLabel(""); self.gpu_progress_label.setStyleSheet("font-size:11px;color:#666")
+        self.gpu_progress_label = QLabel("")
+        self.gpu_progress_label.setStyleSheet("font-size:11px;color:#666")
         self.gpu_progress_label.setVisible(False)
         gf.addRow("", self.gpu_progress_label)
 
@@ -338,7 +242,9 @@ class SettingsDialog(QDialog):
         lg = QGroupBox("歌词输出"); lf = QFormLayout(lg)
         dr = QHBoxLayout(); self.lrc_input = QLineEdit()
         self.lrc_input.setPlaceholderText("留空 = 与音频文件同目录"); dr.addWidget(self.lrc_input)
-        bb = QPushButton("浏览"); bb.clicked.connect(lambda: self._browse(self.lrc_input)); dr.addWidget(bb)
+        bb = QPushButton("浏览")
+        bb.clicked.connect(lambda: self._browse(self.lrc_input))
+        dr.addWidget(bb)
         lf.addRow("LRC 目录:", dr); lyrics_layout.addWidget(lg)
 
         translation_group = QGroupBox("歌词翻译")
@@ -455,10 +361,40 @@ class SettingsDialog(QDialog):
         local_ai_layout.addWidget(local_ai_group)
         local_ai_layout.addStretch()
 
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        download_group = QGroupBox("音频下载")
+        download_layout = QVBoxLayout(download_group)
+        download_directory_row = QHBoxLayout()
+        self.audio_download_dir_edit = QLineEdit(self.config.audio_download_dir)
+        self.audio_download_dir_edit.setPlaceholderText(
+            "留空 = 首个音乐素材目录或系统 Music 目录"
+        )
+        download_directory_row.addWidget(self.audio_download_dir_edit, 1)
+        download_browse_button = QPushButton("浏览")
+        download_browse_button.clicked.connect(
+            lambda: self._browse(self.audio_download_dir_edit)
+        )
+        download_directory_row.addWidget(download_browse_button)
+        download_layout.addWidget(QLabel("默认下载目录"))
+        download_layout.addLayout(download_directory_row)
+        self.audio_source_manager = AudioSourceManagerWidget(
+            self.config.audio_sources,
+            self,
+        )
+        self.audio_source_manager.sources_changed.connect(
+            self._persist_audio_sources
+        )
+        download_layout.addWidget(self.audio_source_manager, 1)
+        audio_sources_layout.addWidget(download_group, 1)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
         btns.button(QDialogButtonBox.StandardButton.Ok).setText("保存")
         btns.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-        btns.accepted.connect(self._save); btns.rejected.connect(self.reject); l.addWidget(btns)
+        btns.accepted.connect(self._save)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
 
     def _create_settings_section(self, title_text: str) -> tuple[QWidget, QVBoxLayout]:
         """创建只显示单一设置分类的页面。"""
@@ -472,7 +408,11 @@ class SettingsDialog(QDialog):
     def _load_config(self):
         c = self.config
         self.active_asr_label.setText(self._active_asr_name())
-        li = [j for j in range(self.lang_combo.count()) if self.lang_combo.itemData(j) == c.asr.language]
+        li = [
+            j
+            for j in range(self.lang_combo.count())
+            if self.lang_combo.itemData(j) == c.asr.language
+        ]
         self.lang_combo.setCurrentIndex(li[0] if li else 0)
         self.vocal_check.setChecked(c.asr.use_vocal_separation)
         self.gpu_check.setChecked(c.asr.use_gpu)
@@ -548,74 +488,12 @@ class SettingsDialog(QDialog):
         self.translation_download_button.setEnabled(True)
         QMessageBox.warning(self, "本地翻译库", message)
 
-    def _on_scan_gpu(self):
-        self.btn_scan_gpu.setEnabled(False)
-        self.gpu_info_label.setText("扫描中...")
-        self._gpu_detector = _GPUDetectWorker()
-        self._gpu_detector.result_ready.connect(self._on_gpu_detected)
-        self._gpu_detector.start()
-
-    def _on_gpu_detected(self, info: str):
-        self.btn_scan_gpu.setEnabled(True)
-        self.gpu_info_label.setText(info)
-        has_gpu = info.startswith("✅")
-        cuda_ready = "CUDA 已就绪" in info
-        if getattr(sys, "frozen", False):
-            self.btn_install_gpu.setText("打包版内置 CPU 推理运行时")
-            self.btn_install_gpu.setEnabled(False)
-            return
-        if cuda_ready:
-            self.btn_install_gpu.setText("CUDA 已安装 ✓")
-            self.btn_install_gpu.setEnabled(False)
-        else:
-            self.btn_install_gpu.setEnabled(has_gpu)
-            self.btn_install_gpu.setText("安装 GPU 加速 (PyTorch CUDA ~2.5GB)")
-
-    def _on_install_gpu(self):
-        self.btn_install_gpu.setVisible(False)
-        self.btn_cancel_gpu.setVisible(True)
-        self.gpu_progress.setVisible(True); self.gpu_progress.setValue(0)
-        self.gpu_progress_label.setVisible(True); self.gpu_progress_label.setText("")
-        self._gpu_installer = _GPUInstallWorker()
-        self._gpu_installer.progress.connect(self._on_gpu_dl_progress)
-        self._gpu_installer.finished.connect(self._on_gpu_installed)
-        self._gpu_installer.start()
-
-    def _on_cancel_gpu(self):
-        if hasattr(self, '_gpu_installer') and self._gpu_installer.isRunning():
-            self._gpu_installer.cancel()
-            self.gpu_progress_label.setText("正在取消...")
-            self.btn_cancel_gpu.setEnabled(False)
-
     def _on_gpu_dl_progress(self, pct: int, msg: str):
         if pct >= 0:
             self.gpu_progress.setValue(pct)
         self.gpu_progress_label.setText(msg)
 
-    def _on_gpu_installed(self, ok: bool, msg: str):
-        self.btn_install_gpu.setVisible(True)
-        self.btn_cancel_gpu.setVisible(False)
-        self.btn_cancel_gpu.setEnabled(True)
-        self.gpu_progress.setVisible(False)
-        self.gpu_progress_label.setVisible(False)
-        if "取消" in msg:
-            self.btn_install_gpu.setEnabled(True)
-            return  # 用户主动取消，不弹框
-        if ok:
-            self.gpu_check.setChecked(True)
-            # 直接保存配置（不用 _save() 因为它内部会 accept 导致 done(42) 无效）
-            c = self.config
-            c.asr.use_gpu = True
-            config_manager.config = c
-            config_manager.save()
-            QMessageBox.information(self, "安装完成", msg + "\n\n点击确定后将重启应用。")
-            self.done(42)  # 特殊返回码：请求重启
-        else:
-            self.btn_install_gpu.setEnabled(True)
-            QMessageBox.critical(self, "安装失败", msg)
-
-    # The following handlers supersede the legacy bundled-Python pip installer above.
-    # A packaged app now installs only signed external runtime bundles.
+    # Packaged and source builds install only signed external runtime bundles.
     def _on_scan_gpu(self):
         self.btn_scan_gpu.setEnabled(False)
         self.gpu_info_label.setText("正在检测硬件与驱动...")
@@ -730,6 +608,27 @@ class SettingsDialog(QDialog):
             f"释放 {_format_cache_size(removed['total_size'])}。"
         )
 
+    def _persist_audio_sources(self):
+        """Audio-source changes are durable immediately, even if the dialog closes."""
+
+        self.config.audio_sources = self.audio_source_manager.sources()
+        config_manager.config = self.config
+        try:
+            config_manager.save()
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                "保存音源失败",
+                f"音源已经添加到当前界面，但无法写入本机配置：\n{exc}",
+            )
+            return
+        if not self.audio_source_manager.import_status.isHidden():
+            current = self.audio_source_manager.import_status.text().rstrip("。")
+            if "已保存到本机" not in current:
+                self.audio_source_manager.import_status.setText(
+                    f"{current} · 已保存到本机。"
+                )
+
     def _save(self):
         c = self.config
         c.asr.language = self.lang_combo.currentData()
@@ -745,6 +644,8 @@ class SettingsDialog(QDialog):
         c.translation_engine = self.translation_engine_combo.currentData()
         c.translation_source_language = self.translation_source_combo.currentData()
         c.translation_target_language = self.translation_target_combo.currentData()
+        c.audio_sources = self.audio_source_manager.sources()
+        c.audio_download_dir = self.audio_download_dir_edit.text().strip()
         config_manager.config = c; config_manager.save()
         self.accept()
 

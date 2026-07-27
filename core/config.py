@@ -5,11 +5,12 @@
 
 import json
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-CONFIG_SCHEMA_VERSION = 8
+CONFIG_SCHEMA_VERSION = 9
 SUPPORTED_AI_PROVIDERS = {"online", "local"}
 SUPPORTED_TRANSLATION_ENGINES = {"ai", "local"}
 SUPPORTED_PROVIDERS = {"groq", "local", "xunfei"}
@@ -83,6 +84,8 @@ class AppConfig:
     translation_source_language: str = "auto"
     translation_target_language: str = "zh"
     voice_input_shortcut: str = "Ctrl+Shift+Space"
+    audio_sources: list[dict] = field(default_factory=list)
+    audio_download_dir: str = ""
 
     def __post_init__(self):
         # 从环境变量读取 API Key
@@ -115,21 +118,46 @@ class ConfigManager:
     """配置管理器：加载/保存 JSON 配置文件"""
 
     DEFAULT_CONFIG_PATH = Path.home() / ".music-lyrics-sync" / "config.json"
+    BACKUP_COUNT = 3
 
     def __init__(self, config_path: Optional[Path] = None):
-        self.config_path = config_path or self.DEFAULT_CONFIG_PATH
+        environment_path = os.environ.get("ECHOVAULT_CONFIG_PATH", "").strip()
+        self.config_path = Path(
+            config_path or environment_path or self.DEFAULT_CONFIG_PATH
+        )
         self.config = AppConfig()
         self._loaded = False
+        self.recovered_from_backup: Path | None = None
+
+    def _backup_path(self, index: int = 0) -> Path:
+        suffix = ".bak" if index == 0 else f".bak.{index}"
+        return self.config_path.with_suffix(self.config_path.suffix + suffix)
+
+    def _candidate_paths(self) -> list[Path]:
+        return [
+            self.config_path,
+            *(self._backup_path(index) for index in range(self.BACKUP_COUNT)),
+        ]
 
     def load(self) -> AppConfig:
         """加载配置，如果文件不存在则使用默认值"""
-        if self.config_path.exists():
+        self.config = AppConfig()
+        self.recovered_from_backup = None
+        for candidate in self._candidate_paths():
+            if not candidate.exists():
+                continue
             try:
-                with open(self.config_path, "r", encoding="utf-8") as f:
+                with open(candidate, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                if not isinstance(data, dict):
+                    raise TypeError("config root must be an object")
+                self.config = AppConfig()
                 self._deserialize(data)
-            except (json.JSONDecodeError, KeyError):
-                pass  # 配置损坏，使用默认值
+            except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+                continue
+            if candidate != self.config_path:
+                self.recovered_from_backup = candidate
+            break
         self._loaded = True
         return self.config
 
@@ -143,10 +171,22 @@ class ConfigManager:
                 json.dump(data, f, indent=2, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
+            self._rotate_backups()
             temp_path.replace(self.config_path)
+            self.recovered_from_backup = None
         finally:
             if temp_path.exists():
                 temp_path.unlink()
+
+    def _rotate_backups(self) -> None:
+        if not self.config_path.exists():
+            return
+        for index in range(self.BACKUP_COUNT - 1, 0, -1):
+            previous = self._backup_path(index - 1)
+            current = self._backup_path(index)
+            if previous.exists():
+                previous.replace(current)
+        shutil.copy2(self.config_path, self._backup_path())
 
     def _serialize(self) -> dict:
         c = self.config
@@ -174,6 +214,8 @@ class ConfigManager:
             "translation_source_language": c.translation_source_language,
             "translation_target_language": c.translation_target_language,
             "voice_input_shortcut": c.voice_input_shortcut,
+            "audio_sources": c.audio_sources,
+            "audio_download_dir": c.audio_download_dir,
             "asr": {
                 "provider": c.asr.provider,
                 "local_model": c.asr.local_model,
@@ -252,6 +294,18 @@ class ConfigManager:
         )
         shortcut = data.get("voice_input_shortcut", "Ctrl+Shift+Space")
         c.voice_input_shortcut = shortcut if isinstance(shortcut, str) else "Ctrl+Shift+Space"
+        from core.audio_sources import validate_source_config
+
+        c.audio_sources = []
+        raw_sources = data.get("audio_sources", [])
+        if isinstance(raw_sources, list):
+            for source in raw_sources:
+                try:
+                    c.audio_sources.append(validate_source_config(source))
+                except ValueError:
+                    continue
+        download_dir = data.get("audio_download_dir", "")
+        c.audio_download_dir = download_dir if isinstance(download_dir, str) else ""
         asr_data = data.get("asr", {})
         c.asr.provider = asr_data.get("provider", "groq")
         c.asr.local_model = asr_data.get("local_model", "base")

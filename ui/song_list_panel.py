@@ -312,7 +312,7 @@ class SongListPanel(QWidget):
             break
 
     def get_selected_songs(self):
-        s = []; 
+        s = []
         for i in self.table.selectedItems():
             d = i.data(Qt.ItemDataRole.UserRole)
             if d and d not in s: s.append(d)

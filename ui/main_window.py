@@ -2,7 +2,7 @@
 琳琅乐府 主窗口
 
 工作区布局：
-- 左侧：素材 / 歌词与标签 / 音频编辑 / 导出与传输
+- 左侧：素材 / 歌词与标签 / 音频编辑 / 音频下载 / 批量任务 / 导出与传输
 - 中间：当前工作区
 - 右侧：仅在启动 AI 后显示 AI 助手
 
@@ -15,7 +15,7 @@ import os
 import re
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QButtonGroup,
@@ -40,6 +40,7 @@ from core.ai_control import validate_cli_command
 from core.asr.router import get_router
 from core.config import config_manager
 from core.environment import build_environment_report
+from core.lyrics_translation import detect_lyrics_language, timed_text_positions
 from core.metadata import write_cover_art, write_tags
 from core.resource_monitor import format_resource_usage, sample_resource_usage
 from core.transfer_session import register_artifact
@@ -47,8 +48,14 @@ from core.video_aggregation import write_video_transcript_timeline
 from core.video_library import scan_video_catalog, scan_videos
 from services.library_service import scan_audio
 from ui.ai_chat_panel import AIChatPanel, CLICommandWorker
+from ui.audio_download_panel import AudioDownloadPanel
 from ui.audio_editor_panel import AudioEditorPanel
-from ui.batch_operations_panel import BatchOnlineLyricsWorker, BatchOperationsPanel
+from ui.batch_operations_panel import (
+    BatchEmbedLyricsWorker,
+    BatchOnlineLyricsWorker,
+    BatchOperationsPanel,
+    BatchPreparationWorker,
+)
 from ui.detail_panel import DetailPanel
 from ui.help_dialog import HelpDialog
 from ui.key_manager_dialog import KeyManagerDialog
@@ -72,6 +79,114 @@ from ui.title_bar import ApplicationTitleBar, FramelessResizeHandles
 from ui.vocal_separation_panel import VocalSeparationPanel
 
 
+class MaterialFolderScanWorker(QThread):
+    """Scan selected folders without blocking the Qt event loop."""
+
+    completed = pyqtSignal(object)
+
+    def __init__(
+        self,
+        mode: str,
+        directories: list[str],
+        video_time_offsets: dict[str, int],
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.mode = mode
+        self.directories = list(directories)
+        self.video_time_offsets = dict(video_time_offsets)
+
+    def run(self):
+        primary = self.directories[-1]
+        materials: list[dict] = []
+        selected_materials: list[dict] = []
+        failures: list[str] = []
+        primary_offset = self.video_time_offsets.get(
+            str(Path(primary).resolve()), 0
+        )
+        for directory in self.directories:
+            if self.isInterruptionRequested():
+                return
+            try:
+                if self.mode == "video":
+                    offset = self.video_time_offsets.get(
+                        str(Path(directory).resolve()), 0
+                    )
+                    scanned = scan_videos(directory, offset_seconds=offset)
+                    if directory == primary:
+                        selected_materials = scanned
+                else:
+                    scanned = scan_audio(directory)
+                materials.extend(scanned)
+            except (OSError, ValueError) as exc:
+                failures.append(str(exc))
+
+        unique_materials: dict[str, dict] = {}
+        for material in materials:
+            material_path = str(material.get("path", ""))
+            key = (
+                os.path.normcase(os.path.abspath(material_path))
+                if material_path
+                else ""
+            )
+            if key and key not in unique_materials:
+                unique_materials[key] = material
+        self.completed.emit(
+            {
+                "mode": self.mode,
+                "directories": self.directories,
+                "primary": primary,
+                "primary_offset": primary_offset,
+                "materials": list(unique_materials.values()),
+                "selected_materials": selected_materials,
+                "failures": failures,
+            }
+        )
+
+
+class OnlineCatalogScanWorker(QThread):
+    """Build the online-lyrics catalog in a background thread."""
+
+    completed = pyqtSignal(object)
+
+    def __init__(self, music_dirs: list[str], video_dirs: list[str], parent=None):
+        super().__init__(parent)
+        self.music_dirs = list(music_dirs)
+        self.video_dirs = list(video_dirs)
+
+    def run(self):
+        catalog: list[dict] = []
+        failures: list[str] = []
+        for directory in self.music_dirs:
+            if self.isInterruptionRequested():
+                return
+            try:
+                catalog.extend(scan_audio(directory))
+            except (OSError, ValueError) as exc:
+                failures.append(str(exc))
+        for directory in self.video_dirs:
+            if self.isInterruptionRequested():
+                return
+            try:
+                catalog.extend(scan_video_catalog(directory))
+            except (OSError, ValueError) as exc:
+                failures.append(str(exc))
+        unique = {song["path"]: song for song in catalog}
+        self.completed.emit(
+            {
+                "catalog": sorted(
+                    unique.values(),
+                    key=lambda song: (
+                        song.get("material_type", "music"),
+                        song.get("name", "").casefold(),
+                        song["path"].casefold(),
+                    ),
+                ),
+                "failures": failures,
+            }
+        )
+
+
 class MainWindow(QMainWindow):
     """主窗口"""
 
@@ -87,6 +202,11 @@ class MainWindow(QMainWindow):
         self._online_catalog: list[dict] = []
         self._online_catalog_dirty = True
         self._current_workspace_key = ""
+        self._material_scan_serial = 0
+        self._catalog_scan_serial = 0
+        self._scan_workers: set[QThread] = set()
+        self._material_scan_worker: MaterialFolderScanWorker | None = None
+        self._catalog_scan_worker: OnlineCatalogScanWorker | None = None
 
         self._setup_ui()
         self._setup_menubar()
@@ -121,7 +241,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(QSize(1180, 720))
         self.resize(QSize(1440, 860))
 
-        # 所有业务面板只实例化一次，再按用户任务归入四个工作区。
+        # 所有业务面板只实例化一次，再按用户任务归入六个工作区。
         self.song_list_panel = SongListPanel()
         self.lyrics_preview_panel = LyricsPreviewPanel()
         self.online_comparison_panel = OnlineLyricsComparisonPane()
@@ -135,6 +255,7 @@ class MainWindow(QMainWindow):
         self.vocal_separation_panel = VocalSeparationPanel(self.config)
         self.vocal_separation_panel.model_library_requested.connect(self._on_model_library)
         self.audio_editor_panel = AudioEditorPanel()
+        self.audio_download_panel = AudioDownloadPanel(self.config)
         self.batch_operations_panel = BatchOperationsPanel(self.config)
         self.sync_panel = SyncPanel(self)
 
@@ -169,6 +290,17 @@ class MainWindow(QMainWindow):
         header_text.addWidget(self.workspace_hint)
         header_row.addLayout(header_text)
         header_row.addStretch()
+        self.audio_save_button = QPushButton("保存为新文件")
+        self.audio_save_button.setObjectName("primaryAction")
+        self.audio_save_button.setToolTip(
+            "把当前音频处理结果保存为新文件；不会覆盖源音频或已有结果。"
+        )
+        self.audio_save_button.setEnabled(False)
+        self.audio_save_button.setVisible(False)
+        self.audio_save_button.clicked.connect(
+            self.audio_editor_panel.save_active_as_new_file
+        )
+        header_row.addWidget(self.audio_save_button)
         workspace_layout.addLayout(header_row)
 
         self.workspace_stack = QStackedWidget()
@@ -176,6 +308,8 @@ class MainWindow(QMainWindow):
             "materials": self._build_materials_workspace(),
             "lyrics": self._build_lyrics_workspace(),
             "audio": self._build_audio_workspace(),
+            "download": self.audio_download_panel,
+            "batch": self.batch_operations_panel,
             "transfer": self._build_transfer_workspace(),
         }
         for page in self.workspace_pages.values():
@@ -345,10 +479,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.global_search, 1)
         layout.addStretch()
 
-        top_batch = QPushButton("批量任务")
-        top_batch.setObjectName("topActionButton")
-        top_batch.clicked.connect(self._show_batch_workspace)
-        layout.addWidget(top_batch)
         top_models = QPushButton("模型库")
         top_models.setObjectName("topActionButton")
         top_models.clicked.connect(self._on_model_library)
@@ -365,8 +495,10 @@ class MainWindow(QMainWindow):
             return
         routes = (
             (("歌词", "封面", "标签", "翻译", "核对", "校准", "本地识别"), "lyrics"),
+            (("音频下载", "歌曲下载", "音乐下载", "下载", "音源"), "download"),
             (("音频", "剪辑", "裁剪", "降噪", "均衡", "人声", "混音"), "audio"),
-            (("传输", "手机", "回传", "导出", "批量", "接收", "发送", "同步"), "transfer"),
+            (("批量",), "batch"),
+            (("传输", "手机", "回传", "导出", "接收", "发送", "同步"), "transfer"),
             (("素材", "音乐", "视频", "文件"), "materials"),
         )
         for keywords, workspace in routes:
@@ -379,9 +511,11 @@ class MainWindow(QMainWindow):
                         self.lyrics_tabs.setCurrentIndex(1)
                     else:
                         self.lyrics_tabs.setCurrentIndex(0)
-                if workspace == "transfer" and "批量" in query:
-                    self.transfer_tabs.setCurrentWidget(self.batch_operations_panel)
-                elif workspace == "transfer" and "接收" in query:
+                if workspace == "audio" and any(
+                    word in query for word in ("人声", "分离")
+                ):
+                    self.audio_editor_panel._open_tool("vocal_separation")
+                if workspace == "transfer" and "接收" in query:
                     self.transfer_tabs.setCurrentWidget(self.sync_panel.receive_page)
                 elif workspace == "transfer" and any(
                     word in query for word in ("同步", "文件夹")
@@ -405,6 +539,7 @@ class MainWindow(QMainWindow):
         menu.addAction("快捷键设置", lambda: self._on_settings("shortcuts"))
         menu.addAction("缓存设置", lambda: self._on_settings("cache"))
         menu.addAction("本地部署 AI", lambda: self._on_settings("local_ai"))
+        menu.addAction("音源管理", lambda: self._on_settings("audio_sources"))
         menu.addSeparator()
         menu.addAction("添加素材文件夹", self._on_open_folder)
         menu.addAction("使用帮助", self._on_help_guide)
@@ -429,13 +564,15 @@ class MainWindow(QMainWindow):
             ("materials", "素材"),
             ("lyrics", "歌词与标签"),
             ("audio", "音频编辑"),
+            ("download", "音频下载"),
+            ("batch", "批量任务"),
             ("transfer", "导出与传输"),
         )
         for key, title in entries:
             button = QPushButton(title)
             button.setObjectName("workspaceNavigationButton")
             button.setCheckable(True)
-            button.setMinimumHeight(48)
+            button.setMinimumHeight(44)
             button.clicked.connect(
                 lambda _checked=False, target=key: self._switch_workspace(target)
             )
@@ -537,29 +674,21 @@ class MainWindow(QMainWindow):
         return self.lyrics_tabs
 
     def _build_audio_workspace(self):
-        self.audio_tabs = QTabWidget()
-        self.audio_tabs.setDocumentMode(True)
-        self.audio_tabs.addTab(self.audio_editor_panel, "音频编辑")
-
         separation_page = QWidget()
         separation_layout = QHBoxLayout(separation_page)
         separation_layout.setContentsMargins(0, 0, 0, 0)
-        separation_splitter = QSplitter(Qt.Orientation.Horizontal)
-        separation_splitter.addWidget(self.vocal_lyrics_panel)
-        separation_splitter.addWidget(self.vocal_separation_panel)
-        separation_splitter.setStretchFactor(0, 1)
-        separation_splitter.setStretchFactor(1, 2)
-        separation_splitter.setSizes([390, 830])
-        separation_layout.addWidget(separation_splitter)
-        self.audio_tabs.addTab(separation_page, "人声分离")
-        return self.audio_tabs
+        separation_layout.addWidget(self.vocal_separation_panel)
+        self.audio_editor_panel.attach_vocal_separation_workspace(
+            separation_page,
+            self.vocal_separation_panel,
+        )
+        return self.audio_editor_panel
 
     def _build_transfer_workspace(self):
         self.transfer_tabs = QTabWidget()
         self.transfer_tabs.setDocumentMode(True)
         self.transfer_tabs.addTab(self.sync_panel.send_page, "发送")
         self.transfer_tabs.addTab(self.sync_panel.receive_page, "接收")
-        self.transfer_tabs.addTab(self.batch_operations_panel, "批量任务")
         self.transfer_tabs.addTab(
             self.sync_panel.advanced_sync_page, "高级文件夹同步"
         )
@@ -574,7 +703,9 @@ class MainWindow(QMainWindow):
             "materials": ("素材", "添加文件夹、浏览素材，并选择接下来要执行的任务。"),
             "lyrics": ("歌词与标签", "在线搜索、本地识别编辑、歌词核对和音频标签。"),
             "audio": ("音频编辑", "编辑声音、分离人声，并把结果保存为新文件。"),
-            "transfer": ("导出与传输", "核对处理结果、执行批量任务并发送回手机。"),
+            "download": ("音频下载", "从已授权音源搜索歌曲，选择音质并下载到素材库。"),
+            "batch": ("批量任务", "集中执行批量识别、翻译和在线歌词匹配。"),
+            "transfer": ("导出与传输", "发送、接收或同步文件夹中的处理结果。"),
         }
         title, hint = titles[key]
         self.workspace_title.setText(title)
@@ -582,6 +713,10 @@ class MainWindow(QMainWindow):
         self.workspace_stack.setCurrentWidget(page)
         self.navigation_buttons[key].setChecked(True)
         self._current_workspace_key = key
+        self.audio_save_button.setVisible(key == "audio")
+        self.audio_save_button.setEnabled(
+            key == "audio" and bool(getattr(self, "_selected_song", {}).get("path"))
+        )
         self._move_navigation_indicator(self.navigation_buttons[key], workspace_changed)
         if workspace_changed:
             self.motion.fade_in("workspace-header", (self.workspace_title, self.workspace_hint))
@@ -612,8 +747,7 @@ class MainWindow(QMainWindow):
             self._move_navigation_indicator(button, animate=False)
 
     def _show_batch_workspace(self):
-        self._switch_workspace("transfer")
-        self.transfer_tabs.setCurrentWidget(self.batch_operations_panel)
+        self._switch_workspace("batch")
 
     def _show_selected_lyrics(self):
         self._switch_workspace("lyrics")
@@ -832,7 +966,7 @@ class MainWindow(QMainWindow):
         self.online_lyrics_panel.online_result_pane.player.positionChanged.connect(
             self.navigation_lyrics_card.set_position_ms
         )
-        self.audio_editor_panel._player.positionChanged.connect(
+        self.audio_editor_panel.position_changed_ms.connect(
             self.navigation_lyrics_card.set_position_ms
         )
         self.online_comparison_panel.playback_started.connect(
@@ -855,6 +989,12 @@ class MainWindow(QMainWindow):
         )
         self.ai_chat_panel.command_requested.connect(self._on_ai_command_requested)
         self.audio_editor_panel.output_created.connect(self._on_audio_editor_output_created)
+        self.audio_editor_panel.save_available_changed.connect(
+            self.audio_save_button.setEnabled
+        )
+        self.audio_download_panel.download_completed.connect(
+            self._on_audio_download_completed
+        )
 
         # 详情面板 → 请求识别
         self.detail_panel.transcribe_clicked.connect(self._on_transcribe_single)
@@ -866,6 +1006,9 @@ class MainWindow(QMainWindow):
             self._on_batch_translate_lyrics
         )
         self.batch_operations_panel.batch_online_requested.connect(self._on_batch_online_lyrics)
+        self.batch_operations_panel.batch_pipeline_requested.connect(
+            self._on_batch_pipeline_requested
+        )
 
         # 刷新计数
         self.song_list_panel.model_updated.connect(self._refresh_statusbar)
@@ -898,33 +1041,39 @@ class MainWindow(QMainWindow):
             self._refresh_statusbar()
             self.status_label.setText("请选择一个或多个素材文件夹")
             return
-        primary = selected[-1]
         self.status_label.setText(f"正在扫描 {len(selected)} 个文件夹…")
-        if self.library_panel.mode == "video":
-            offset = self.config.video_time_offsets.get(str(Path(primary).resolve()), 0)
-            materials = []
-            selected_materials = []
-            for directory in selected:
-                directory_offset = self.config.video_time_offsets.get(
-                    str(Path(directory).resolve()), 0
-                )
-                scanned = scan_videos(directory, offset_seconds=directory_offset)
-                materials.extend(scanned)
-                if directory == primary:
-                    selected_materials = scanned
-            self.library_panel.set_video_materials(primary, selected_materials, offset)
+        self._material_scan_serial += 1
+        serial = self._material_scan_serial
+        worker = MaterialFolderScanWorker(
+            self.library_panel.mode,
+            selected,
+            self.config.video_time_offsets,
+            self,
+        )
+        self._material_scan_worker = worker
+        self._scan_workers.add(worker)
+        worker.completed.connect(
+            lambda result, request_serial=serial: self._apply_material_scan(
+                request_serial, result
+            )
+        )
+        worker.finished.connect(lambda target=worker: self._scan_workers.discard(target))
+        worker.start()
+
+    def _apply_material_scan(self, serial: int, result: dict):
+        if serial != self._material_scan_serial:
+            return
+        selected = result["directories"]
+        primary = result["primary"]
+        materials = result["materials"]
+        if result["mode"] == "video":
+            self.library_panel.set_video_materials(
+                primary,
+                result["selected_materials"],
+                result["primary_offset"],
+            )
         else:
-            materials = []
-            for directory in selected:
-                materials.extend(scan_audio(directory))
             self.library_panel.clear_video_materials()
-        unique_materials = {}
-        for material in materials:
-            material_path = str(material.get("path", ""))
-            key = os.path.normcase(os.path.abspath(material_path)) if material_path else ""
-            if key and key not in unique_materials:
-                unique_materials[key] = material
-        materials = list(unique_materials.values())
         self.song_list_panel.load_songs(
             materials, root_dir="" if len(selected) > 1 else primary
         )
@@ -934,6 +1083,11 @@ class MainWindow(QMainWindow):
             self.sync_panel.set_dir_a(primary)
 
         self.status_label.setText(f"已显示 {len(selected)} 个文件夹中的素材")
+        if result["failures"]:
+            self.status_label.setText(
+                f"已显示 {len(selected)} 个文件夹；"
+                f"部分目录扫描失败：{result['failures'][0]}"
+            )
 
     def _start_resource_monitor(self):
         """Show live machine usage only while the local ASR engine is working."""
@@ -982,7 +1136,22 @@ class MainWindow(QMainWindow):
         self.selected_material_path.setText(f"{path.parent}  ·  {status}")
         for button in self.material_action_buttons:
             button.setEnabled(True)
+        self.audio_save_button.setEnabled(True)
         self.navigation_lyrics_card.set_song(song)
+
+    def _on_audio_download_completed(self, output_path: str):
+        self._online_catalog_dirty = True
+        self.status_label.setText(f"音频已下载：{Path(output_path).name}")
+        target_dir = str(Path(output_path).parent)
+        if target_dir not in self.config.music_dirs:
+            self.config.music_dirs.append(target_dir)
+            config_manager.config = self.config
+            config_manager.save()
+            self.library_panel.set_directories(
+                self.config.music_dirs,
+                self.config.video_dirs,
+            )
+        self._on_folder_selected(target_dir)
 
     def _on_audio_editor_output_created(
         self,
@@ -1187,31 +1356,34 @@ class MainWindow(QMainWindow):
         if self._online_catalog and not self._online_catalog_dirty and not force:
             self.online_lyrics_panel.set_songs(self._online_catalog)
             return
-        catalog = []
-        failures = []
-        for directory in self.config.music_dirs:
-            try:
-                catalog.extend(scan_audio(directory))
-            except (OSError, ValueError) as exc:
-                failures.append(str(exc))
-        for directory in self.config.video_dirs:
-            try:
-                catalog.extend(scan_video_catalog(directory))
-            except (OSError, ValueError) as exc:
-                failures.append(str(exc))
-        unique = {song["path"]: song for song in catalog}
-        self._online_catalog = sorted(
-            unique.values(),
-            key=lambda song: (
-                song.get("material_type", "music"),
-                song.get("name", "").casefold(),
-                song["path"].casefold(),
-            ),
+        self._catalog_scan_serial += 1
+        serial = self._catalog_scan_serial
+        self.online_lyrics_panel.status_label.setText("正在后台刷新素材目录…")
+        worker = OnlineCatalogScanWorker(
+            self.config.music_dirs,
+            self.config.video_dirs,
+            self,
         )
+        self._catalog_scan_worker = worker
+        self._scan_workers.add(worker)
+        worker.completed.connect(
+            lambda result, request_serial=serial: self._apply_online_catalog(
+                request_serial, result
+            )
+        )
+        worker.finished.connect(lambda target=worker: self._scan_workers.discard(target))
+        worker.start()
+
+    def _apply_online_catalog(self, serial: int, result: dict):
+        if serial != self._catalog_scan_serial:
+            return
+        self._online_catalog = result["catalog"]
         self._online_catalog_dirty = False
         self.online_lyrics_panel.set_songs(self._online_catalog)
-        if failures:
-            self.online_lyrics_panel.status_label.setText(f"部分素材目录无法读取：{failures[0]}")
+        if result["failures"]:
+            self.online_lyrics_panel.status_label.setText(
+                f"部分素材目录无法读取：{result['failures'][0]}"
+            )
 
     def _on_video_calibration_changed(self, folder_path: str, source, target):
         key = str(Path(folder_path).resolve())
@@ -1272,6 +1444,172 @@ class MainWindow(QMainWindow):
         self, lrc_path: str, engine: str, source_language: str, target_language: str
     ):
         self._run_translation([lrc_path], engine, source_language, target_language)
+
+    def _on_batch_pipeline_requested(self, rules: dict):
+        songs = self.song_list_panel.get_all_songs()
+        if not songs:
+            QMessageBox.information(self, "批量处理", "当前素材列表为空。")
+            return
+        enabled = [
+            label
+            for key, label in (
+                ("match_cover", "匹配封面"),
+                ("match_lyrics", "匹配歌词"),
+                ("local_fallback", "本地识别兜底"),
+                ("translate_english", "翻译英文歌词"),
+                ("embed_lyrics", "写入歌词标签"),
+            )
+            if rules.get(key)
+        ]
+        reply = QMessageBox.question(
+            self,
+            "开始批量处理",
+            f"将对 {len(songs)} 个素材执行：{'、'.join(enabled)}。\n"
+            "在线歌词写入前会备份已有 LRC，是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._batch_pipeline_state = {
+            "rules": dict(rules),
+            "songs": list(songs),
+            "lrc_by_media": {},
+            "translated_outputs": {},
+            "preparation_results": [],
+        }
+        self.batch_operations_panel.begin_task(
+            "pipeline", "批量自动处理", len(songs)
+        )
+        self.batch_prepare_worker = BatchPreparationWorker(songs, rules, self)
+        self.batch_prepare_worker.progress.connect(
+            self.batch_operations_panel.show_task_progress
+        )
+        self.batch_prepare_worker.completed.connect(
+            self._on_batch_preparation_finished
+        )
+        self.batch_prepare_worker.start()
+
+    def _on_batch_preparation_finished(self, payload: dict):
+        state = getattr(self, "_batch_pipeline_state", None)
+        if not state:
+            return
+        state["preparation_results"] = payload.get("results", [])
+        for item in state["preparation_results"]:
+            if item.get("cover") == "已写入":
+                self.song_list_panel.invalidate_cover(item["path"])
+            if item.get("lrc_path"):
+                state["lrc_by_media"][item["path"]] = item["lrc_path"]
+                self.song_list_panel.update_song_status(item["path"], True)
+        covers = sum(
+            item.get("cover") == "已写入"
+            for item in state["preparation_results"]
+        )
+        lyrics = sum(
+            str(item.get("lyrics", "")).startswith("已匹配")
+            for item in state["preparation_results"]
+        )
+        self.batch_operations_panel.append_log(
+            f"\n在线阶段完成 · 写入封面 {covers} 个 · 匹配歌词 {lyrics} 个"
+        )
+        fallback_files = payload.get("fallback_files", [])
+        if state["rules"].get("local_fallback") and fallback_files:
+            self.batch_operations_panel.append_log(
+                f"\n进入本地识别兜底 · {len(fallback_files)} 个文件"
+            )
+            if not self._run_transcription(fallback_files, pipeline=True):
+                self._finish_batch_pipeline("本地识别引擎不可用，任务已停止。")
+            return
+        self._continue_batch_pipeline_after_recognition({})
+
+    def _continue_batch_pipeline_after_recognition(self, results: dict):
+        state = getattr(self, "_batch_pipeline_state", None)
+        if not state:
+            return
+        for media_path, result in results.items():
+            if result.get("success") and result.get("lrc_path"):
+                state["lrc_by_media"][media_path] = result["lrc_path"]
+        for song in state["songs"]:
+            media_path = str(song["path"])
+            lrc_path = Path(media_path).with_suffix(".lrc")
+            if media_path not in state["lrc_by_media"] and lrc_path.is_file():
+                state["lrc_by_media"][media_path] = str(lrc_path)
+
+        if state["rules"].get("translate_english"):
+            english_paths = []
+            for lrc_path in dict.fromkeys(state["lrc_by_media"].values()):
+                try:
+                    content = Path(lrc_path).read_text(encoding="utf-8")
+                    _raw, _positions, texts = timed_text_positions(content)
+                    if texts and detect_lyrics_language(texts) == "en":
+                        english_paths.append(lrc_path)
+                except (OSError, UnicodeError, RuntimeError):
+                    continue
+            if english_paths:
+                self.batch_operations_panel.append_log(
+                    f"\n进入英文歌词翻译 · {len(english_paths)} 份歌词"
+                )
+                if self._run_translation(
+                    english_paths,
+                    state["rules"].get("translation_engine", "ai"),
+                    "en",
+                    "zh",
+                    pipeline=True,
+                ):
+                    return
+            else:
+                self.batch_operations_panel.append_log(
+                    "\n翻译阶段 · 没有检测到英文歌词，已跳过"
+                )
+        self._start_batch_embed_stage()
+
+    def _continue_batch_pipeline_after_translation(self, results: dict):
+        state = getattr(self, "_batch_pipeline_state", None)
+        if not state:
+            return
+        state["translated_outputs"] = {
+            source: result["output"]
+            for source, result in results.items()
+            if result.get("success") and result.get("output")
+        }
+        self._start_batch_embed_stage()
+
+    def _start_batch_embed_stage(self):
+        state = getattr(self, "_batch_pipeline_state", None)
+        if not state:
+            return
+        if not state["rules"].get("embed_lyrics"):
+            self._finish_batch_pipeline("批量处理完成。")
+            return
+        items = []
+        for media_path, lrc_path in state["lrc_by_media"].items():
+            final_lrc = state["translated_outputs"].get(lrc_path, lrc_path)
+            if Path(final_lrc).is_file():
+                items.append((media_path, final_lrc))
+        if not items:
+            self._finish_batch_pipeline("批量处理完成，没有可写入标签的歌词。")
+            return
+        self.batch_operations_panel.append_log(
+            f"\n进入音频标签写入 · {len(items)} 个文件"
+        )
+        self.batch_embed_worker = BatchEmbedLyricsWorker(items, self)
+        self.batch_embed_worker.progress.connect(
+            self.batch_operations_panel.show_task_progress
+        )
+        self.batch_embed_worker.completed.connect(self._on_batch_embed_finished)
+        self.batch_embed_worker.start()
+
+    def _on_batch_embed_finished(self, results: list[dict]):
+        success = sum(item.get("success") for item in results)
+        failed = len(results) - success
+        self._finish_batch_pipeline(
+            f"批量处理完成 · 标签写入成功 {success} 个 · 失败 {failed} 个。"
+        )
+
+    def _finish_batch_pipeline(self, summary: str):
+        self.batch_operations_panel.finish_task(summary)
+        self._batch_pipeline_state = None
+        self._refresh_statusbar()
+        self.status_label.setText(summary)
 
     def _on_batch_translate_lyrics(self, engine: str, source_language: str, target_language: str):
         lrc_paths = [
@@ -1345,10 +1683,12 @@ class MainWindow(QMainWindow):
         engine: str,
         source_language: str,
         target_language: str,
+        *,
+        pipeline: bool = False,
     ):
         if source_language == target_language:
             QMessageBox.information(self, "歌词翻译", "源语言和目标语言不能相同。")
-            return
+            return False
         self.config.translation_engine = engine
         self.config.translation_source_language = source_language
         self.config.translation_target_language = target_language
@@ -1368,12 +1708,14 @@ class MainWindow(QMainWindow):
                 f"翻译中 {current}/{total}：{name}"
             )
         )
-        self._translation_is_batch = len(lrc_paths) > 1
-        if self._translation_is_batch:
+        self._translation_pipeline = pipeline
+        self._translation_is_batch = len(lrc_paths) > 1 or pipeline
+        if self._translation_is_batch and not pipeline:
             self.batch_operations_panel.begin_task("translation", "批量翻译", len(lrc_paths))
         self.translation_worker.stage.connect(self._on_translation_stage)
         self.translation_worker.finished.connect(self._on_translation_finished)
         self.translation_worker.start()
+        return True
 
     def _on_translation_stage(
         self,
@@ -1403,6 +1745,14 @@ class MainWindow(QMainWindow):
         for source_path, translated_path in successes:
             self.detail_panel.translation_completed(source_path, translated_path)
         self.status_label.setText(f"翻译完成：成功 {len(successes)}，失败 {len(failures)}")
+        if getattr(self, "_translation_pipeline", False):
+            self.batch_operations_panel.append_log(
+                f"翻译阶段完成 · 成功 {len(successes)} 份 · 失败 {len(failures)} 份"
+            )
+            self._translation_pipeline = False
+            self._translation_is_batch = False
+            self._continue_batch_pipeline_after_translation(results)
+            return
         if getattr(self, "_translation_is_batch", False):
             self.batch_operations_panel.finish_task(
                 f"批量翻译完成：成功 {len(successes)} 个，失败 {len(failures)} 个。"
@@ -1446,7 +1796,7 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.StandardButton.Yes:
             self._run_transcription(files)
 
-    def _run_transcription(self, files: list[str]):
+    def _run_transcription(self, files: list[str], *, pipeline: bool = False):
         """执行批量识别"""
         from ui.transcribe_worker import TranscribeWorker
 
@@ -1473,7 +1823,7 @@ class MainWindow(QMainWindow):
                 msg = f"引擎 '{provider_name}' 不可用。"
             QMessageBox.warning(self, "引擎不可用", msg)
             self._on_settings()
-            return
+            return False
 
         self.worker = TranscribeWorker(files, self.router, self.config)
         self.worker.progress.connect(self._on_transcribe_progress)
@@ -1492,7 +1842,8 @@ class MainWindow(QMainWindow):
         self.total_trans_progress.setValue(0)
         self._transcription_total = len(files)
         self._batch_completed = 0
-        if len(files) > 1:
+        self._transcription_pipeline = pipeline
+        if len(files) > 1 and not pipeline:
             self.batch_operations_panel.begin_task("recognition", "批量识别", len(files))
         self.status_label.setText(f"识别中... 0/{len(files)}")
         if provider_name == "local":
@@ -1500,9 +1851,10 @@ class MainWindow(QMainWindow):
         else:
             self._stop_resource_monitor()
         self.worker.start()
+        return True
 
     def _on_transcribe_progress(self, current: int, total: int, filename: str):
-        if total > 1:
+        if total > 1 or getattr(self, "_transcription_pipeline", False):
             self.total_trans_progress.setValue(current - 1)
         self.status_label.setText(f"识别中... {current}/{total} - {filename}")
 
@@ -1533,10 +1885,14 @@ class MainWindow(QMainWindow):
 
     def _on_song_done(self, file_path: str, lrc_path: str, success: bool):
         self._batch_completed += 1
-        if self._transcription_total > 1:
+        if self._transcription_total > 1 or getattr(
+            self, "_transcription_pipeline", False
+        ):
             self.total_trans_progress.setValue(self._batch_completed)
         self.song_list_panel.update_song_status(file_path, success)
-        if self._transcription_total > 1:
+        if self._transcription_total > 1 or getattr(
+            self, "_transcription_pipeline", False
+        ):
             result = getattr(self.worker, "_results", {}).get(file_path, {})
             message = (
                 f"已写入 {Path(lrc_path).name}"
@@ -1587,6 +1943,14 @@ class MainWindow(QMainWindow):
         success = sum(1 for v in results.values() if v["success"])
         failed = len(results) - success
         self.status_label.setText(f"识别完成: 成功 {success}, 失败 {failed}")
+        if getattr(self, "_transcription_pipeline", False):
+            self.batch_operations_panel.append_log(
+                f"本地识别完成 · 成功 {success} 个 · 失败 {failed} 个"
+            )
+            self._transcription_pipeline = False
+            self._refresh_statusbar()
+            self._continue_batch_pipeline_after_recognition(results)
+            return
         if self._transcription_total > 1:
             self.batch_operations_panel.finish_task(
                 f"批量识别完成：成功 {success} 个，失败 {failed} 个。"
@@ -1654,6 +2018,7 @@ class MainWindow(QMainWindow):
             self.detail_panel.reload_translation_settings()
             self.batch_operations_panel.reload_translation_settings()
             self.vocal_separation_panel.reload_settings()
+            self.audio_download_panel.reload_config(self.config)
             self._refresh_statusbar()
 
     def _on_key_manager(self):
