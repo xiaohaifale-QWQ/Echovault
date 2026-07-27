@@ -8,17 +8,13 @@ from datetime import timedelta
 from PyQt6.QtCore import (
     QDate,
     QDateTime,
-    QEasingCurve,
-    QPropertyAnimation,
-    QSize,
     Qt,
     QTime,
     QTimer,
-    pyqtProperty,
     pyqtSignal,
 )
-from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QComboBox,
     QDateTimeEdit,
     QFileDialog,
@@ -37,81 +33,50 @@ from PyQt6.QtWidgets import (
 from ui.folder_columns import FolderColumnsBrowser
 
 
-class MaterialModeSwitch(QWidget):
-    """Compact segmented switch for music and video libraries."""
+class MaterialModeBar(QFrame):
+    """Reusable single-level navigation for every material source."""
 
-    toggled = pyqtSignal(bool)
+    mode_changed = pyqtSignal(str)
+    MODES = (
+        ("music", "音乐素材"),
+        ("download", "音频下载"),
+        ("video", "视频素材"),
+    )
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._checked = False
-        self._knob_position = 0.0
-        self._animation = QPropertyAnimation(self, b"knob_position", self)
-        self._animation.setDuration(180)
-        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("滑动切换音乐模式与视频模式")
-        self.setMinimumHeight(40)
-        self.setMaximumHeight(40)
+        self.setObjectName("materialModeBar")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 7, 10, 7)
+        layout.setSpacing(4)
+        title = QLabel("素材视图")
+        title.setObjectName("materialModeTitle")
+        layout.addWidget(title)
+        layout.addSpacing(8)
 
-    def sizeHint(self):
-        return QSize(220, 40)
+        self.group = QButtonGroup(self)
+        self.group.setExclusive(True)
+        self.buttons: dict[str, QPushButton] = {}
+        for mode, text in self.MODES:
+            button = QPushButton(text)
+            button.setObjectName("materialModeButton")
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(
+                lambda checked=False, value=mode: (
+                    self.mode_changed.emit(value) if checked else None
+                )
+            )
+            self.group.addButton(button)
+            self.buttons[mode] = button
+            layout.addWidget(button)
+        layout.addStretch()
+        self.set_mode("music")
 
-    def setChecked(self, checked: bool):
-        checked = bool(checked)
-        if self._checked == checked:
-            return
-        self._checked = checked
-        self._animation.stop()
-        self._animation.setStartValue(self._knob_position)
-        self._animation.setEndValue(1.0 if checked else 0.0)
-        self._animation.start()
-        self.toggled.emit(checked)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.setChecked(not self._checked)
-        super().mouseReleaseEvent(event)
-
-    @pyqtProperty(float)
-    def knob_position(self):
-        return self._knob_position
-
-    @knob_position.setter
-    def knob_position(self, value):
-        self._knob_position = value
-        self.update()
-
-    def paintEvent(self, _event):
-        painter = QPainter(self)
-        track = self.rect().adjusted(1, 1, -1, -1)
-        painter.setPen(QColor("#D3DCE7"))
-        painter.setBrush(QColor("#EEF3F8"))
-        painter.drawRoundedRect(track, 10, 10)
-
-        half_width = track.width() // 2
-        knob_width = max(32, half_width - 4)
-        knob_x = track.x() + 2 + (track.width() - knob_width - 4) * self._knob_position
-        painter.setBrush(QColor("#FFFFFF"))
-        painter.setPen(QColor("#9DC0E3"))
-        painter.drawRoundedRect(
-            int(knob_x),
-            track.y() + 2,
-            knob_width,
-            track.height() - 4,
-            8,
-            8,
-        )
-
-        font = painter.font()
-        font.setBold(True)
-        painter.setFont(font)
-        left_rect = track.adjusted(0, 0, -half_width, 0)
-        right_rect = track.adjusted(half_width, 0, 0, 0)
-        painter.setPen(QColor("#1F6FBB") if not self._checked else QColor("#667386"))
-        painter.drawText(left_rect, Qt.AlignmentFlag.AlignCenter, "音乐模式")
-        painter.setPen(QColor("#1F6FBB") if self._checked else QColor("#667386"))
-        painter.drawText(right_rect, Qt.AlignmentFlag.AlignCenter, "视频模式")
+    def set_mode(self, mode: str):
+        if mode not in self.buttons:
+            raise ValueError(f"unsupported material mode: {mode}")
+        self.buttons[mode].setChecked(True)
 
 
 class TimeOffsetDash(QLabel):
@@ -186,10 +151,6 @@ class LibraryPanel(QWidget):
         self.title = QLabel("素材文件夹")
         self.title.setStyleSheet("font-weight:700;font-size:14px;padding:2px 0")
         header.addWidget(self.title)
-        self.mode_switch = MaterialModeSwitch()
-        self.mode_switch.setFixedWidth(220)
-        self.mode_switch.toggled.connect(self._switch_mode)
-        header.addWidget(self.mode_switch)
         header.addStretch()
         self.btn_add = QPushButton("＋")
         self.btn_add.setObjectName("addMaterialFolderButton")
@@ -289,26 +250,20 @@ class LibraryPanel(QWidget):
     def open_directory_picker(self):
         self._add_directory()
 
-    def set_mode(self, mode: str):
+    def set_mode(self, mode: str, *, select_first: bool = True):
         """Switch the local library without exposing a second navigation layer."""
         if mode not in {"music", "video"}:
             raise ValueError(f"unsupported material mode: {mode}")
-        self.mode_switch.blockSignals(True)
-        self.mode_switch.setChecked(mode == "video")
-        self.mode_switch.blockSignals(False)
         if self._mode == mode:
             return
         self._mode = mode
         self._refresh_folders()
         self.mode_changed.emit(mode)
-        if self._directories[mode]:
+        if select_first and self._directories[mode]:
             self.folders_selected.emit([self._directories[mode][0]])
 
     def _existing_directories(self, directories: list[str]) -> list[str]:
         return [path for path in directories if os.path.isdir(path)]
-
-    def _switch_mode(self, video_mode: bool):
-        self.set_mode("video" if video_mode else "music")
 
     def _refresh_folders(self):
         is_video = self._mode == "video"

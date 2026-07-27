@@ -3,7 +3,7 @@ from datetime import datetime
 from PyQt6.QtCore import QDateTime
 
 from tests.qt_test_app import ensure_app, keep_widget
-from ui.library_panel import LibraryPanel
+from ui.library_panel import LibraryPanel, MaterialModeBar
 
 
 def test_inline_video_calibration_uses_empty_right_time_as_no_calibration(tmp_path):
@@ -84,7 +84,7 @@ def test_hour_offset_fills_right_time_and_tracks_left_time(tmp_path):
     assert panel.calibration_right.dateTime().toPyDateTime() == datetime(2026, 7, 14, 13, 30, 0)
 
 
-def test_header_uses_compact_plus_button_and_mode_switch():
+def test_header_uses_compact_plus_button_without_duplicate_mode_switch():
     ensure_app()
     panel = keep_widget(LibraryPanel())
 
@@ -92,7 +92,25 @@ def test_header_uses_compact_plus_button_and_mode_switch():
     assert panel.btn_add.objectName() == "addMaterialFolderButton"
     assert panel.btn_add.size().width() == 36
     assert not hasattr(panel, "select_all_check")
-    assert panel.mode_switch.minimumHeight() == 40
+    assert not hasattr(panel, "mode_switch")
+
+
+def test_material_mode_bar_owns_all_three_source_modes():
+    ensure_app()
+    bar = keep_widget(MaterialModeBar())
+    emitted = []
+    bar.mode_changed.connect(emitted.append)
+
+    assert list(bar.buttons) == ["music", "download", "video"]
+    assert bar.buttons["music"].isChecked()
+
+    bar.buttons["download"].click()
+    assert emitted == ["download"]
+    assert bar.buttons["download"].isChecked()
+
+    bar.set_mode("video")
+    assert bar.buttons["video"].isChecked()
+    assert emitted == ["download"]
 
 
 def test_folder_tree_supports_ctrl_style_multi_selection(tmp_path):

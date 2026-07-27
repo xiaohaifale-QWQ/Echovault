@@ -38,7 +38,7 @@ def test_main_window_uses_five_task_workspaces_and_right_ai_drawer(
     ]
     assert window.material_mode_buttons["music"].isChecked()
     assert window.material_content_stack.currentWidget() is window.material_local_page
-    assert window.library_panel.mode_switch.isHidden()
+    assert window.material_mode_bar.objectName() == "materialModeBar"
     assert [window.lyrics_tabs.tabText(index) for index in range(3)] == [
         "在线歌词与封面",
         "本地识别编辑",
@@ -101,6 +101,7 @@ def test_main_window_uses_five_task_workspaces_and_right_ai_drawer(
     window._submit_global_search()
     assert window.workspace_stack.currentWidget() is window.workspace_pages["batch"]
     window.global_search.setText("音频下载")
+    assert window.song_list_panel.search_box.text() == ""
     window._submit_global_search()
     assert window.workspace_stack.currentWidget() is window.workspace_pages["materials"]
     assert window.material_content_stack.currentWidget() is window.audio_download_panel
@@ -123,6 +124,11 @@ def test_main_window_uses_five_task_workspaces_and_right_ai_drawer(
     window.global_search.setText("在线封面")
     window._submit_global_search()
     assert window.lyrics_tabs.currentIndex() == 0
+    window.global_search.setText("needle")
+    window._submit_global_search()
+    assert window.workspace_stack.currentWidget() is window.workspace_pages["materials"]
+    assert window.material_mode_buttons["music"].isChecked()
+    assert window.song_list_panel.search_box.text() == "needle"
 
     window._on_ai_ui_action_requested("open lyrics-review")
     assert window.workspace_stack.currentWidget() is window.workspace_pages["lyrics"]
@@ -315,6 +321,39 @@ def test_video_mode_exposes_one_processing_action_and_review_workspace(monkeypat
     assert window.material_cover_action.isHidden() is True
     assert window.material_audio_action.isHidden() is True
     assert window.library_panel.video_controls.isHidden() is True
+
+
+def test_download_after_video_mode_refreshes_music_only_when_opened(
+    monkeypatch, tmp_path
+):
+    ensure_app()
+    monkeypatch.setattr("ui.main_window.config_manager.load", AppConfig)
+    monkeypatch.setattr("ui.main_window.config_manager.save", lambda: None)
+    monkeypatch.setattr(
+        "ui.main_window.build_environment_report",
+        lambda _config: {"ffmpeg": {"available": True}},
+    )
+    window = keep_widget(MainWindow())
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir()
+    output_path = download_dir / "song.mp3"
+    output_path.write_bytes(b"audio")
+    scans = []
+    monkeypatch.setattr(window, "_on_folder_selected", scans.append)
+
+    window._set_material_mode("video")
+    window._set_material_mode("download")
+    window._on_audio_download_completed(str(output_path))
+
+    assert scans == []
+    assert window._pending_music_folder == str(download_dir)
+    assert str(download_dir) in window.config.music_dirs
+
+    window._set_material_mode("music")
+
+    assert scans == [str(download_dir)]
+    assert window._pending_music_folder == ""
+    assert window.library_panel.mode == "music"
 
 
 def test_main_window_writes_selected_cover_and_refreshes_thumbnail(monkeypatch, tmp_path):

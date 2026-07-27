@@ -59,7 +59,7 @@ from ui.batch_operations_panel import (
 from ui.detail_panel import DetailPanel
 from ui.help_dialog import HelpDialog
 from ui.key_manager_dialog import KeyManagerDialog
-from ui.library_panel import LibraryPanel
+from ui.library_panel import LibraryPanel, MaterialModeBar
 from ui.lyrics_preview_panel import LyricsPreviewPanel
 from ui.model_library_dialog import ModelLibraryDialog
 from ui.motion import MotionController
@@ -208,6 +208,7 @@ class MainWindow(QMainWindow):
         self._scan_workers: set[QThread] = set()
         self._material_scan_worker: MaterialFolderScanWorker | None = None
         self._catalog_scan_worker: OnlineCatalogScanWorker | None = None
+        self._pending_music_folder = ""
 
         self._setup_ui()
         self._setup_menubar()
@@ -501,9 +502,6 @@ class MainWindow(QMainWindow):
         self.global_search.setClearButtonEnabled(True)
         self.global_search.setMinimumWidth(320)
         self.global_search.setMaximumWidth(520)
-        self.global_search.textChanged.connect(
-            lambda text: self.song_list_panel.search_box.setText(text)
-        )
         self.global_search.returnPressed.connect(self._submit_global_search)
         layout.addWidget(self.global_search, 1)
         layout.addStretch()
@@ -561,6 +559,8 @@ class MainWindow(QMainWindow):
                         self._set_material_mode("music")
                 return
         self._switch_workspace("materials")
+        self._set_material_mode("music")
+        self.song_list_panel.search_box.setText(self.global_search.text().strip())
 
     def _show_top_settings_menu(self):
         menu = QMenu(self)
@@ -633,37 +633,10 @@ class MainWindow(QMainWindow):
         workspace_layout.setContentsMargins(0, 0, 0, 0)
         workspace_layout.setSpacing(10)
 
-        mode_bar = QFrame()
-        mode_bar.setObjectName("materialModeBar")
-        mode_layout = QHBoxLayout(mode_bar)
-        mode_layout.setContentsMargins(10, 7, 10, 7)
-        mode_layout.setSpacing(4)
-        mode_title = QLabel("素材视图")
-        mode_title.setObjectName("materialModeTitle")
-        mode_layout.addWidget(mode_title)
-        mode_layout.addSpacing(8)
-        self.material_mode_group = QButtonGroup(self)
-        self.material_mode_group.setExclusive(True)
-        self.material_mode_buttons: dict[str, QPushButton] = {}
-        for mode, text in (
-            ("music", "音乐素材"),
-            ("download", "音频下载"),
-            ("video", "视频素材"),
-        ):
-            button = QPushButton(text)
-            button.setObjectName("materialModeButton")
-            button.setCheckable(True)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.clicked.connect(
-                lambda _checked=False, selected_mode=mode: self._set_material_mode(
-                    selected_mode
-                )
-            )
-            self.material_mode_group.addButton(button)
-            self.material_mode_buttons[mode] = button
-            mode_layout.addWidget(button)
-        mode_layout.addStretch()
-        workspace_layout.addWidget(mode_bar)
+        self.material_mode_bar = MaterialModeBar()
+        self.material_mode_bar.mode_changed.connect(self._set_material_mode)
+        self.material_mode_buttons = self.material_mode_bar.buttons
+        workspace_layout.addWidget(self.material_mode_bar)
 
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -721,14 +694,13 @@ class MainWindow(QMainWindow):
         self.materials_vertical_splitter = vertical_splitter
         self.video_review_panel.hide()
         layout.addWidget(vertical_splitter, 1)
-        self.library_panel.mode_switch.hide()
         self.material_content_stack = QStackedWidget()
         self.material_local_page = page
         self.material_content_stack.addWidget(self.material_local_page)
         self.material_content_stack.addWidget(self.audio_download_panel)
         workspace_layout.addWidget(self.material_content_stack, 1)
         self._material_mode = "music"
-        self.material_mode_buttons["music"].setChecked(True)
+        self.material_mode_bar.set_mode("music")
         return workspace
 
     def _build_lyrics_workspace(self):
@@ -825,12 +797,16 @@ class MainWindow(QMainWindow):
         if mode not in {"music", "download", "video"}:
             return
         self._material_mode = mode
-        self.material_mode_buttons[mode].setChecked(True)
+        self.material_mode_bar.set_mode(mode)
         if mode == "download":
             self.material_content_stack.setCurrentWidget(self.audio_download_panel)
         else:
             self.material_content_stack.setCurrentWidget(self.material_local_page)
-            self.library_panel.set_mode(mode)
+            pending_folder = self._pending_music_folder if mode == "music" else ""
+            self.library_panel.set_mode(mode, select_first=not bool(pending_folder))
+            if pending_folder:
+                self._pending_music_folder = ""
+                self._on_folder_selected(pending_folder)
         if self._current_workspace_key == "materials":
             self._sync_material_workspace_header()
 
@@ -1241,7 +1217,7 @@ class MainWindow(QMainWindow):
     def _on_material_mode_changed(self, mode: str):
         self._material_mode = mode
         if hasattr(self, "material_mode_buttons"):
-            self.material_mode_buttons[mode].setChecked(True)
+            self.material_mode_bar.set_mode(mode)
             self.material_content_stack.setCurrentWidget(self.material_local_page)
             if self._current_workspace_key == "materials":
                 self._sync_material_workspace_header()
@@ -1320,7 +1296,10 @@ class MainWindow(QMainWindow):
                 self.config.music_dirs,
                 self.config.video_dirs,
             )
-        self._on_folder_selected(target_dir)
+        if self._material_mode == "music":
+            self._on_folder_selected(target_dir)
+        else:
+            self._pending_music_folder = target_dir
 
     def _on_audio_editor_output_created(
         self,
