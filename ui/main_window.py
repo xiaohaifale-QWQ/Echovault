@@ -2,7 +2,7 @@
 琳琅乐府 主窗口
 
 工作区布局：
-- 左侧：素材 / 歌词与标签 / 音频编辑 / 音频下载 / 批量任务 / 导出与传输
+- 左侧：素材 / 歌词与标签 / 音频编辑 / 批量任务 / 导出与传输
 - 中间：当前工作区
 - 右侧：仅在启动 AI 后显示 AI 助手
 
@@ -310,7 +310,6 @@ class MainWindow(QMainWindow):
             "materials": self._build_materials_workspace(),
             "lyrics": self._build_lyrics_workspace(),
             "audio": self._build_audio_workspace(),
-            "download": self.audio_download_panel,
             "batch": self.batch_operations_panel,
             "transfer": self._build_transfer_workspace(),
         }
@@ -566,7 +565,6 @@ class MainWindow(QMainWindow):
             ("materials", "素材"),
             ("lyrics", "歌词与标签"),
             ("audio", "音频编辑"),
-            ("download", "音频下载"),
             ("batch", "批量任务"),
             ("transfer", "导出与传输"),
         )
@@ -653,7 +651,12 @@ class MainWindow(QMainWindow):
         self.materials_vertical_splitter = vertical_splitter
         self.video_review_panel.hide()
         layout.addWidget(vertical_splitter, 1)
-        return page
+        self.material_tabs = QTabWidget()
+        self.material_tabs.setDocumentMode(True)
+        self.material_tabs.addTab(page, "本地素材")
+        self.material_tabs.addTab(self.audio_download_panel, "音频下载")
+        self.material_tabs.currentChanged.connect(self._on_material_tab_changed)
+        return self.material_tabs
 
     def _build_lyrics_workspace(self):
         self.lyrics_tabs = QTabWidget()
@@ -709,6 +712,9 @@ class MainWindow(QMainWindow):
         return self.transfer_tabs
 
     def _switch_workspace(self, key: str):
+        material_tab = 1 if key == "download" else None
+        if material_tab is not None:
+            key = "materials"
         page = self.workspace_pages.get(key)
         if page is None:
             return
@@ -717,7 +723,6 @@ class MainWindow(QMainWindow):
             "materials": ("素材", "添加文件夹、浏览素材，并选择接下来要执行的任务。"),
             "lyrics": ("歌词与标签", "在线搜索、本地识别编辑、歌词核对和音频标签。"),
             "audio": ("音频编辑", "编辑声音、分离人声，并把结果保存为新文件。"),
-            "download": ("音频下载", "从已授权音源搜索歌曲，选择音质并下载到素材库。"),
             "batch": ("批量任务", "集中执行批量识别、翻译和在线歌词匹配。"),
             "transfer": ("导出与传输", "发送、接收或同步文件夹中的处理结果。"),
         }
@@ -725,8 +730,12 @@ class MainWindow(QMainWindow):
         self.workspace_title.setText(title)
         self.workspace_hint.setText(hint)
         self.workspace_stack.setCurrentWidget(page)
+        if material_tab is not None:
+            self.material_tabs.setCurrentIndex(material_tab)
         self.navigation_buttons[key].setChecked(True)
         self._current_workspace_key = key
+        if key == "materials":
+            self._sync_material_workspace_header()
         self.audio_save_button.setVisible(key == "audio")
         self.audio_save_button.setEnabled(
             key == "audio" and bool(getattr(self, "_selected_song", {}).get("path"))
@@ -738,6 +747,22 @@ class MainWindow(QMainWindow):
             self._refresh_online_catalog()
         if key == "transfer":
             self.sync_panel.refresh_transfer_results()
+
+    def _on_material_tab_changed(self, _index: int):
+        if self._current_workspace_key == "materials":
+            self._sync_material_workspace_header()
+
+    def _sync_material_workspace_header(self):
+        if self.material_tabs.currentIndex() == 1:
+            self.workspace_title.setText("素材")
+            self.workspace_hint.setText(
+                "从已授权音源搜索并下载歌曲；完成后自动加入本地音乐素材库。"
+            )
+        else:
+            self.workspace_title.setText("素材")
+            self.workspace_hint.setText(
+                "添加文件夹、浏览素材，并选择接下来要执行的任务。"
+            )
 
     def _move_navigation_indicator(self, button: QPushButton, animate: bool) -> None:
         if not self.isVisible():

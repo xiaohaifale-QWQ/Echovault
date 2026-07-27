@@ -11,7 +11,7 @@ from ui.online_lyrics_panel import CoverApplyAction, OnlineLyricsAction, TagAppl
 from ui.theme import polish_widget_tree
 
 
-def test_main_window_uses_six_task_workspaces_and_right_ai_drawer(
+def test_main_window_uses_five_task_workspaces_and_right_ai_drawer(
     monkeypatch, tmp_path
 ):
     ensure_app()
@@ -27,11 +27,15 @@ def test_main_window_uses_six_task_workspaces_and_right_ai_drawer(
         "素材",
         "歌词与标签",
         "音频编辑",
-        "音频下载",
         "批量任务",
         "导出与传输",
     ]
     assert window.workspace_stack.currentWidget() is window.workspace_pages["materials"]
+    assert [window.material_tabs.tabText(index) for index in range(2)] == [
+        "本地素材",
+        "音频下载",
+    ]
+    assert window.material_tabs.widget(1) is window.audio_download_panel
     assert [window.lyrics_tabs.tabText(index) for index in range(3)] == [
         "在线歌词与封面",
         "本地识别编辑",
@@ -49,7 +53,6 @@ def test_main_window_uses_six_task_workspaces_and_right_ai_drawer(
     assert window.transfer_tabs.widget(1) is window.sync_panel.receive_page
     assert window.transfer_tabs.widget(2) is window.sync_panel.advanced_sync_page
     assert window.workspace_pages["batch"] is window.batch_operations_panel
-    assert window.workspace_pages["download"] is window.audio_download_panel
     assert window.outer_splitter.widget(1) is window.ai_chat_panel
     assert window.outer_splitter.widget(0) is window.body
     shell_layout = window.centralWidget().layout()
@@ -96,7 +99,8 @@ def test_main_window_uses_six_task_workspaces_and_right_ai_drawer(
     assert window.workspace_stack.currentWidget() is window.workspace_pages["batch"]
     window.global_search.setText("音频下载")
     window._submit_global_search()
-    assert window.workspace_stack.currentWidget() is window.workspace_pages["download"]
+    assert window.workspace_stack.currentWidget() is window.workspace_pages["materials"]
+    assert window.material_tabs.currentWidget() is window.audio_download_panel
     window.global_search.setText("手机接收")
     window._submit_global_search()
     assert window.transfer_tabs.currentWidget() is window.sync_panel.receive_page
@@ -125,6 +129,9 @@ def test_main_window_uses_six_task_workspaces_and_right_ai_drawer(
         window.audio_editor_panel.stack.currentWidget()
         is window.audio_editor_panel._special_pages["vocal_separation"]
     )
+    window._on_ai_ui_action_requested("open download")
+    assert window.workspace_stack.currentWidget() is window.workspace_pages["materials"]
+    assert window.material_tabs.currentWidget() is window.audio_download_panel
 
     polish_widget_tree(window)
     assert window.statusbar.minimumHeight() >= 30
