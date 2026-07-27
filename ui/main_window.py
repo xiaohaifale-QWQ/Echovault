@@ -76,6 +76,7 @@ from ui.song_list_panel import SongListPanel
 from ui.sync_panel import SyncPanel
 from ui.theme import polish_widget_tree
 from ui.title_bar import ApplicationTitleBar, FramelessResizeHandles
+from ui.video_review_panel import VideoReviewPanel
 from ui.vocal_separation_panel import VocalSeparationPanel
 
 
@@ -250,6 +251,7 @@ class MainWindow(QMainWindow):
         self.vocal_lyrics_panel.song_label.setText("选择素材后显示本地识别歌词")
         self.detail_panel = DetailPanel(self.config)
         self.library_panel = LibraryPanel()
+        self.video_review_panel = VideoReviewPanel()
         self.online_lyrics_panel = OnlineLyricsPanel()
         self.online_lyrics_panel.bind_comparison_pane(self.online_comparison_panel)
         self.vocal_separation_panel = VocalSeparationPanel(self.config)
@@ -613,22 +615,26 @@ class MainWindow(QMainWindow):
         text_layout.addWidget(self.selected_material_name)
         text_layout.addWidget(self.selected_material_path)
         selected_layout.addLayout(text_layout, 1)
-        lyrics_action = QPushButton("识别或匹配歌词")
-        lyrics_action.setObjectName("secondaryAction")
-        lyrics_action.setEnabled(False)
-        lyrics_action.clicked.connect(self._show_selected_lyrics)
-        selected_layout.addWidget(lyrics_action)
-        cover_action = QPushButton("封面与标签")
-        cover_action.setObjectName("secondaryAction")
-        cover_action.setEnabled(False)
-        cover_action.clicked.connect(self._show_cover_workspace)
-        selected_layout.addWidget(cover_action)
-        audio_action = QPushButton("编辑音频")
-        audio_action.setObjectName("primaryAction")
-        audio_action.setEnabled(False)
-        audio_action.clicked.connect(lambda: self._switch_workspace("audio"))
-        selected_layout.addWidget(audio_action)
-        self.material_action_buttons = (lyrics_action, cover_action, audio_action)
+        self.material_lyrics_action = QPushButton("识别或匹配歌词")
+        self.material_lyrics_action.setObjectName("secondaryAction")
+        self.material_lyrics_action.setEnabled(False)
+        self.material_lyrics_action.clicked.connect(self._run_selected_material_action)
+        selected_layout.addWidget(self.material_lyrics_action)
+        self.material_cover_action = QPushButton("封面与标签")
+        self.material_cover_action.setObjectName("secondaryAction")
+        self.material_cover_action.setEnabled(False)
+        self.material_cover_action.clicked.connect(self._show_cover_workspace)
+        selected_layout.addWidget(self.material_cover_action)
+        self.material_audio_action = QPushButton("编辑音频")
+        self.material_audio_action.setObjectName("primaryAction")
+        self.material_audio_action.setEnabled(False)
+        self.material_audio_action.clicked.connect(lambda: self._switch_workspace("audio"))
+        selected_layout.addWidget(self.material_audio_action)
+        self.material_action_buttons = (
+            self.material_lyrics_action,
+            self.material_cover_action,
+            self.material_audio_action,
+        )
         layout.addWidget(selected_card)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -638,7 +644,15 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 3)
         splitter.setSizes([520, 760])
         self.materials_splitter = splitter
-        layout.addWidget(splitter, 1)
+        vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+        vertical_splitter.addWidget(splitter)
+        vertical_splitter.addWidget(self.video_review_panel)
+        vertical_splitter.setStretchFactor(0, 3)
+        vertical_splitter.setStretchFactor(1, 2)
+        vertical_splitter.setSizes([520, 330])
+        self.materials_vertical_splitter = vertical_splitter
+        self.video_review_panel.hide()
+        layout.addWidget(vertical_splitter, 1)
         return page
 
     def _build_lyrics_workspace(self):
@@ -752,6 +766,16 @@ class MainWindow(QMainWindow):
     def _show_selected_lyrics(self):
         self._switch_workspace("lyrics")
         self.lyrics_tabs.setCurrentIndex(0)
+
+    def _run_selected_material_action(self):
+        song = getattr(self, "_selected_song", {})
+        path = song.get("path")
+        if not path:
+            return
+        if self.library_panel.mode == "video":
+            self._on_transcribe_single(path)
+            return
+        self._show_selected_lyrics()
 
     def _show_cover_workspace(self):
         self._switch_workspace("lyrics")
@@ -1106,6 +1130,29 @@ class MainWindow(QMainWindow):
 
     def _on_material_mode_changed(self, mode: str):
         self.song_list_panel.set_material_mode(mode)
+        is_video = mode == "video"
+        self._selected_song = {}
+        self.selected_material_name.setText("尚未选择素材")
+        self.selected_material_path.setText(
+            "请选择要提取音频和识别文字的视频。"
+            if is_video
+            else "从下方素材列表选择音乐。"
+        )
+        for button in self.material_action_buttons:
+            button.setEnabled(False)
+        self.video_review_panel.setVisible(is_video)
+        if is_video:
+            self.video_review_panel.set_results("", "", "")
+        self.material_lyrics_action.setText(
+            "提取音频与识别文字" if is_video else "识别或匹配歌词"
+        )
+        self.material_lyrics_action.setObjectName(
+            "primaryAction" if is_video else "secondaryAction"
+        )
+        self.material_cover_action.setVisible(not is_video)
+        self.material_audio_action.setVisible(not is_video)
+        self.material_lyrics_action.style().unpolish(self.material_lyrics_action)
+        self.material_lyrics_action.style().polish(self.material_lyrics_action)
         self._refresh_statusbar()
 
     def _on_material_selected(self, material_path: str):
@@ -1126,6 +1173,8 @@ class MainWindow(QMainWindow):
         self.online_lyrics_panel.show_song(song)
         self.audio_editor_panel.show_song(song)
         self.vocal_separation_panel.select_song(str(path))
+        if self.library_panel.mode == "video":
+            self.video_review_panel.set_video(song)
 
     def _on_song_selected(self, song: dict):
         if not song or not song.get("path"):
@@ -1140,6 +1189,8 @@ class MainWindow(QMainWindow):
         self.audio_save_button.setEnabled(True)
         self.navigation_lyrics_card.set_song(song)
         self.ai_chat_panel.set_current_material(str(path))
+        if self.library_panel.mode == "video":
+            self.video_review_panel.set_video(song)
 
     def _on_audio_download_completed(self, output_path: str):
         self._online_catalog_dirty = True
@@ -1911,9 +1962,22 @@ class MainWindow(QMainWindow):
         # 识别成功后立即刷新右侧详情面板
         if success:
             self.navigation_lyrics_card.reload_lyrics(lrc_path)
+            result = getattr(self.worker, "_results", {}).get(file_path, {})
+            audio_path = result.get("audio_path")
+            if audio_path:
+                self.video_review_panel.set_results(
+                    file_path,
+                    audio_path,
+                    lrc_path,
+                )
             songs = self.song_list_panel.get_all_songs()
             for s in songs:
                 if s["path"] == file_path:
+                    if audio_path:
+                        s["output_audio_path"] = audio_path
+                        s["output_text_path"] = lrc_path
+                        s["lrc_path"] = lrc_path
+                        s["has_lrc"] = True
                     self.detail_panel.show_song(s)
                     break
             if self.online_lyrics_panel._song.get("path") == file_path:

@@ -4,13 +4,17 @@
 在 QThread 中执行 ASR 识别，避免阻塞 UI。
 """
 
+from pathlib import Path
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from core.asr.router import ASRRouter
+from core.audio_editor import process_audio
 from core.audio_utils import get_audio_info
 from core.config import AppConfig
 from core.lrc_writer import transcribe_and_save_lrc
 from core.recognition_progress import RecognitionProgress
+from core.video_library import VIDEO_FORMATS, video_processing_outputs
 from core.vocal_separation import recommended_device
 
 
@@ -81,11 +85,27 @@ class TranscribeWorker(QThread):
                 self.stage_progress.emit(f"{prefix}{message}")
 
             try:
+                recognition_path = file_path
+                output_dir = self.config.output_lrc_dir
+                audio_output = None
+                if Path(file_path).suffix.lower() in VIDEO_FORMATS:
+                    audio_path, text_path = video_processing_outputs(file_path)
+                    audio_path.parent.mkdir(parents=True, exist_ok=True)
+                    self.stage_progress.emit(f"{prefix}正在提取完整音频… {filename}")
+                    process_audio(
+                        "extract",
+                        [file_path],
+                        str(audio_path),
+                        {"_preview": True},
+                    )
+                    recognition_path = str(audio_path)
+                    output_dir = str(text_path.parent)
+                    audio_output = str(audio_path)
                 lrc_path = transcribe_and_save_lrc(
-                    audio_path=file_path,
+                    audio_path=recognition_path,
                     router=self.router,
                     language=self.config.asr.language,
-                    output_dir=self.config.output_lrc_dir,
+                    output_dir=output_dir,
                     overwrite=True,
                     progress_callback=on_stage,
                     use_vocal_separation=self.config.asr.use_vocal_separation,
@@ -96,7 +116,12 @@ class TranscribeWorker(QThread):
                         else "cpu"
                     ),
                 )
-                self._results[file_path] = {"success": True, "lrc_path": lrc_path, "error": None}
+                self._results[file_path] = {
+                    "success": True,
+                    "lrc_path": lrc_path,
+                    "audio_path": audio_output,
+                    "error": None,
+                }
                 self.song_done.emit(file_path, lrc_path, True)
 
             except Exception as e:

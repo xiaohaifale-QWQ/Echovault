@@ -306,7 +306,9 @@ class LibraryPanel(QWidget):
         is_video = self._mode == "video"
         self.title.setText(f"{'视频' if is_video else '音乐'}素材文件夹")
         self.btn_add.setToolTip(f"添加{'视频' if is_video else '音乐'}素材文件夹")
-        self.video_controls.setVisible(is_video)
+        # The legacy capture-time calibration card was removed from video mode.
+        # Playback/subtitle synchronization now lives in the dedicated review panel.
+        self.video_controls.setVisible(False)
         self.folder_browser.set_roots(self._directories[self._mode])
 
     def _add_directory(self):

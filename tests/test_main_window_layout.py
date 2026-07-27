@@ -284,6 +284,24 @@ def test_online_catalog_includes_music_and_video(monkeypatch, tmp_path):
     assert window.online_lyrics_panel.song_selector.count() == 2
 
 
+def test_video_mode_exposes_one_processing_action_and_review_workspace(monkeypatch):
+    ensure_app()
+    monkeypatch.setattr("ui.main_window.config_manager.load", AppConfig)
+    monkeypatch.setattr(
+        "ui.main_window.build_environment_report",
+        lambda _config: {"ffmpeg": {"available": True}},
+    )
+    window = keep_widget(MainWindow())
+
+    window._on_material_mode_changed("video")
+
+    assert window.material_lyrics_action.text() == "提取音频与识别文字"
+    assert window.video_review_panel.isHidden() is False
+    assert window.material_cover_action.isHidden() is True
+    assert window.material_audio_action.isHidden() is True
+    assert window.library_panel.video_controls.isHidden() is True
+
+
 def test_main_window_writes_selected_cover_and_refreshes_thumbnail(monkeypatch, tmp_path):
     ensure_app()
     monkeypatch.setattr("ui.main_window.config_manager.load", AppConfig)

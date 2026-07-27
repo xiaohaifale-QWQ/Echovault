@@ -21,6 +21,15 @@ VIDEO_FORMATS = {
     ".wmv",
 }
 AGGREGATE_DIRECTORY_PREFIX = "视频汇总_"
+VIDEO_PROCESS_DIRECTORY = "Echovault视频处理"
+
+
+def video_processing_outputs(path: str | Path) -> tuple[Path, Path]:
+    """Return the persistent extracted-audio and synchronized-text paths."""
+
+    source = Path(path).expanduser().resolve()
+    output_dir = source.parent / VIDEO_PROCESS_DIRECTORY / source.stem
+    return output_dir / f"{source.stem}.flac", output_dir / f"{source.stem}.lrc"
 
 
 def _parse_creation_time(value: object) -> datetime | None:
@@ -108,7 +117,9 @@ def scan_video_catalog(folder: str | Path) -> list[dict]:
         ):
             continue
         resolved = path.resolve()
-        lrc_path = resolved.with_suffix(".lrc")
+        audio_output, text_output = video_processing_outputs(resolved)
+        legacy_lrc_path = resolved.with_suffix(".lrc")
+        lrc_path = text_output if text_output.exists() else legacy_lrc_path
         videos.append(
             {
                 "path": str(resolved),
@@ -122,6 +133,8 @@ def scan_video_catalog(folder: str | Path) -> list[dict]:
                 "size": resolved.stat().st_size,
                 "has_lrc": lrc_path.exists(),
                 "lrc_path": str(lrc_path) if lrc_path.exists() else None,
+                "output_audio_path": str(audio_output) if audio_output.exists() else None,
+                "output_text_path": str(lrc_path) if lrc_path.exists() else None,
             }
         )
     return sorted(
@@ -144,7 +157,9 @@ def scan_videos(folder: str | Path, offset_seconds: int = 0) -> list[dict]:
             continue
         captured_at, source = video_timestamp(path, offset_seconds)
         resolved = path.resolve()
-        lrc_path = resolved.with_suffix(".lrc")
+        audio_output, text_output = video_processing_outputs(resolved)
+        legacy_lrc_path = resolved.with_suffix(".lrc")
+        lrc_path = text_output if text_output.exists() else legacy_lrc_path
         videos.append(
             {
                 "path": str(resolved),
@@ -156,6 +171,8 @@ def scan_videos(folder: str | Path, offset_seconds: int = 0) -> list[dict]:
                 "timestamp_source": source,
                 "has_lrc": lrc_path.exists(),
                 "lrc_path": str(lrc_path) if lrc_path.exists() else None,
+                "output_audio_path": str(audio_output) if audio_output.exists() else None,
+                "output_text_path": str(lrc_path) if lrc_path.exists() else None,
             }
         )
     return sorted(videos, key=lambda video: (video["captured_at"], video["name"].casefold()))
