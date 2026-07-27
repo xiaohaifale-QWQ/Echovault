@@ -10,16 +10,19 @@ CLI 命令: list | info | transcribe | lyrics | config | model | gpu | sync | re
 详细文档: CLI.md
 """
 
-import sys
-import os
-import json as _json
+# ruff: noqa: E402
+
 import argparse
+import json as _json
 import logging
+import os
+import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 CLI_OUTPUT_PATH_ENV = "ECHOVAULT_CLI_OUTPUT_PATH"
+
 
 def _configure_utf8_stream(stream, *, capture_cli_output=False):
     """Return a writable UTF-8 stream, including in windowed executables."""
@@ -48,12 +51,12 @@ def _configure_utf8_stream(stream, *, capture_cli_output=False):
 sys.stdout = _configure_utf8_stream(sys.stdout, capture_cli_output=True)
 sys.stderr = _configure_utf8_stream(sys.stderr)
 
-from core.config import config_manager, update_config_value
 from core.asr.router import get_router
 from core.audio_utils import is_supported
-from core.lrc_writer import transcribe_and_save_lrc
-from core.lrc_parser import parse_lrc_file
+from core.config import config_manager, update_config_value
 from core.environment import build_environment_report
+from core.lrc_parser import parse_lrc_file
+from core.lrc_writer import transcribe_and_save_lrc
 from core.voice_cache import app_cache_dir, clear_app_cache
 from services.library_service import InstrumentalStore, scan_audio
 
@@ -587,6 +590,7 @@ def cmd_model(args):
             logger.error(f"Unknown model: {name}")
             sys.exit(1)
         from PyQt6.QtCore import QCoreApplication
+
         from ui.settings_dialog import _DownloadWorker
         app = QCoreApplication(sys.argv)
         worker = _DownloadWorker(name)
@@ -615,7 +619,9 @@ def cmd_gpu(args):
         selection = select_runtime(report)
         cuda_ok = False
         try:
-            import torch; cuda_ok = torch.cuda.is_available()
+            import torch
+
+            cuda_ok = torch.cuda.is_available()
         except ImportError:
             pass
         result = {
@@ -876,7 +882,9 @@ def cmd_doctor(args):
 
 def cmd_gui(args):
     import traceback
+
     from PyQt6.QtWidgets import QApplication, QMessageBox
+
     from ui.main_window import MainWindow
     from ui.theme import apply_application_theme
 

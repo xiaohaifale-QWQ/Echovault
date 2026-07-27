@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Iterable
 
-
 VOICE_INPUT_PRIORITY = ("groq", "xunfei", "local")
 
 

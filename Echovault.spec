@@ -13,6 +13,11 @@ from PyInstaller.utils.hooks import (
 
 
 project_root = Path(SPECPATH)
+build_profile = os.environ.get("ECHOVAULT_BUILD_PROFILE", "lite").strip().lower()
+if build_profile not in {"lite", "full"}:
+    raise SystemExit("ECHOVAULT_BUILD_PROFILE must be either 'lite' or 'full'.")
+full_build = build_profile == "full"
+
 ffmpeg_path = os.environ.get("ECHOVAULT_FFMPEG", "")
 if not ffmpeg_path or not Path(ffmpeg_path).is_file():
     raise SystemExit(
@@ -27,33 +32,80 @@ if not ffprobe_path or not Path(ffprobe_path).is_file():
     )
 
 hidden_imports = [
+    "demucs.api",
     "groq",
     "opencc",
     "pydub",
     "psutil",
     "PyQt6.QtMultimedia",
-    "scipy._external.array_api_compat.numpy.fft",
-    "torch",
-    "torchaudio",
     "zeroconf",
-] + collect_submodules("argostranslate") + collect_submodules("audio_separator") + collect_submodules("demucs") + collect_submodules("groq") + collect_submodules("samplerate") + collect_submodules("torchaudio") + collect_submodules("whisper") + collect_submodules("tiktoken_ext")
+] + collect_submodules("groq") + collect_submodules("tiktoken_ext")
+
+if full_build:
+    hidden_imports += (
+        [
+            "scipy._external.array_api_compat.numpy.fft",
+            "torch",
+        ]
+        + collect_submodules("argostranslate")
+        + collect_submodules("audio_separator")
+        + collect_submodules("samplerate")
+        + collect_submodules("whisper")
+    )
 
 datas = (
     [(str(project_root / "ui" / "assets" / "slider-handle.svg"), "ui/assets")]
     + [(str(project_root / "ui" / "assets" / "slider-handle-hover.svg"), "ui/assets")]
     + [(str(project_root / "ui" / "assets" / "slider-handle-pressed.svg"), "ui/assets")]
-    + copy_metadata("audio-separator")
-    + collect_data_files("argostranslate")
-    + collect_data_files("audio_separator")
     + collect_data_files("certifi")
     + collect_data_files("demucs")
-    + collect_data_files("whisper")
 )
-binaries = (
-    [(ffmpeg_path, "."), (ffprobe_path, ".")]
-    + collect_dynamic_libs("samplerate")
-    + collect_dynamic_libs("torchaudio")
-)
+if full_build:
+    datas += (
+        copy_metadata("audio-separator")
+        + collect_data_files("argostranslate")
+        + collect_data_files("audio_separator")
+        + collect_data_files("whisper")
+    )
+
+binaries = [(ffmpeg_path, "."), (ffprobe_path, ".")]
+if full_build:
+    binaries += collect_dynamic_libs("samplerate")
+
+excludes = [
+    "matplotlib",
+    "pandas",
+    "PIL",
+    "torchvision",
+]
+if not full_build:
+    excludes += [
+        "argostranslate",
+        "audio_separator",
+        "blis",
+        "ctranslate2",
+        "Cython",
+        "hf_xet",
+        "huggingface_hub",
+        "librosa",
+        "llvmlite",
+        "numba",
+        "onnx",
+        "onnxruntime",
+        "playwright",
+        "sacremoses",
+        "samplerate",
+        "scipy",
+        "sentencepiece",
+        "sklearn",
+        "spacy",
+        "stanza",
+        "thinc",
+        "torch",
+        "torchaudio",
+        "transformers",
+        "whisper",
+    ]
 
 a = Analysis(
     [str(project_root / "main.py")],
@@ -64,12 +116,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[
-        "matplotlib",
-        "pandas",
-        "PIL",
-        "torchvision",
-    ],
+    excludes=excludes,
     noarchive=False,
 )
 

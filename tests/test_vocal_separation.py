@@ -27,6 +27,21 @@ class _Response:
         return False
 
 
+def test_external_gpu_runtime_makes_separation_available(monkeypatch):
+    monkeypatch.setattr(
+        vocal_separation,
+        "active_separation_gpu_runtime",
+        lambda: SimpleNamespace(runtime_id="cuda-test"),
+    )
+    monkeypatch.setattr(
+        vocal_separation.importlib.util,
+        "find_spec",
+        lambda module: object() if module == "demucs" else None,
+    )
+
+    assert vocal_separation.separation_available()
+
+
 def test_download_separation_model_verifies_and_caches(monkeypatch, tmp_path):
     payload = b"valid checkpoint"
     digest = hashlib.sha256(payload).hexdigest()

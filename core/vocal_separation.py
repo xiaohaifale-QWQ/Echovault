@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
 import subprocess
 import time
@@ -13,6 +14,7 @@ from typing import Callable
 
 from .audio_utils import find_ffmpeg
 from .process_utils import hidden_window_kwargs
+from .separation_runtime import active_separation_gpu_runtime
 
 
 class SeparationError(RuntimeError):
@@ -103,6 +105,11 @@ CancelCallback = Callable[[], bool]
 
 
 def separation_available() -> bool:
+    if active_separation_gpu_runtime() is not None:
+        try:
+            return importlib.util.find_spec("demucs") is not None
+        except (ImportError, ModuleNotFoundError, ValueError):
+            return False
     try:
         import demucs.api  # noqa: F401
         import torch  # noqa: F401

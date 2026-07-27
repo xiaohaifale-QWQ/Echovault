@@ -8,7 +8,6 @@ from typing import Iterable
 
 from core.audio_utils import SUPPORTED_FORMATS
 
-
 INSTRUMENTAL_FILE_NAME = ".musicsync_instrumental.json"
 INSTRUMENTAL_SCHEMA_VERSION = 1
 

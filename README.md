@@ -66,12 +66,23 @@ python main.py
 
 ## Windows 打包与启动
 
-构建会自动检查 `ffmpeg`、`ffprobe`、PyInstaller 与 Groq SDK，并把所需的 Groq 子模块一起打入发布目录。
+默认构建轻量主程序，只包含桌面界面、在线识别、音频编辑和传输功能。
+Torch、Whisper、Demucs、UVR 与 Argos 翻译运行库不再重复塞进主程序，
+本地 AI 功能由“模型库”按需安装外置运行时。
 
 ```powershell
-.\build.ps1 -Python "C:\Path\To\python.exe"
+# 推荐发布方式
+.\build.ps1 -Profile Lite -Python "C:\Path\To\python.exe"
+
+# 仅用于离线整合测试，会重新包含全部大型 AI 依赖
+.\build.ps1 -Profile Full -Python "C:\Path\To\python.exe"
+
 .\dist\Echovault\Echovault.exe
 ```
+
+`Lite` 与 `Full` 会分别检查各自需要的依赖，使用
+`-InstallDependencies` 可以安装当前构建配置所需的依赖。构建结束后脚本会报告
+发布目录的实际大小。
 
 ## 使用指南
 

@@ -50,7 +50,8 @@ class SongListPanel(QWidget):
         self.table.customContextMenuRequested.connect(self._on_context_menu)
 
     def _setup_ui(self):
-        l = QVBoxLayout(self); l.setContentsMargins(4,4,4,4)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
         h = QHBoxLayout()
         self.title_label = QLabel("素材文件")
         self.title_label.setStyleSheet("font-weight:700;font-size:14px;padding:2px 0")
@@ -66,7 +67,7 @@ class SongListPanel(QWidget):
         self.fmt_filter.setMinimumWidth(100); self.fmt_filter.setMaximumWidth(120)
         self.fmt_filter.currentIndexChanged.connect(self._do_refresh)
         h.addWidget(self.fmt_filter)
-        l.addLayout(h)
+        layout.addLayout(h)
         self.table = QTableWidget(); self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(["音频名称","格式","状态","大小","来源文件夹","路径"])
         self.table.setColumnHidden(self.COL_PATH, True)
@@ -85,7 +86,7 @@ class SongListPanel(QWidget):
         self.table.verticalHeader().setDefaultSectionSize(42)
         self.table.setShowGrid(False); self.table.itemSelectionChanged.connect(self._on_sel)
         self.table.cellDoubleClicked.connect(self._on_double_click)
-        l.addWidget(self.table)
+        layout.addWidget(self.table)
 
     def _load_instrumental(self, root_dir):
         """Load instrumental markers from JSON file in root directory"""

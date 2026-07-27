@@ -5,7 +5,7 @@ ASR 路由器
 """
 
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 from .base import ASRProvider, TranscriptionResult
 
@@ -38,16 +38,16 @@ except ImportError:
 class ASRRouter:
     """
     ASR 路由器
-    
+
     策略：
     1. 优先使用配置的 provider
     2. 如果不可用，按优先级自动回退
     3. 回退顺序: groq → local → aliyun → xunfei
     """
-    
+
     # Provider 回退优先级
     FALLBACK_ORDER = ["groq", "local", "aliyun", "xunfei"]
-    
+
     def __init__(self, config=None):
         """
         Args:
@@ -55,7 +55,7 @@ class ASRRouter:
         """
         self._providers: dict[str, ASRProvider] = {}
         self._config = config
-        
+
         # 注册内置 Provider
         if GroqWhisperProvider is not None:
             self.register(GroqWhisperProvider(
@@ -64,7 +64,7 @@ class ASRRouter:
             ))
         else:
             logger.warning("Groq SDK 未安装，跳过 Groq Provider。安装: pip install groq")
-        
+
         if LocalWhisperProvider is not None:
             model = config.asr.local_model if config else "base"
             use_gpu = config.asr.use_gpu if config else False
@@ -94,20 +94,20 @@ class ASRRouter:
             )
         else:
             logger.warning("讯飞在线 Provider 依赖未安装，跳过讯飞 Provider。")
-    
+
     def register(self, provider: ASRProvider):
         """注册一个 Provider"""
         self._providers[provider.name] = provider
         logger.info(f"已注册 ASR Provider: {provider.display_name}")
-    
+
     def get(self, name: str) -> Optional[ASRProvider]:
         """获取指定名称的 Provider"""
         return self._providers.get(name)
-    
+
     def list_available(self) -> List[ASRProvider]:
         """列出所有可用的 Provider"""
         return [p for p in self._providers.values() if p.is_available()]
-    
+
     def transcribe(
         self,
         audio_path: str,
@@ -116,15 +116,15 @@ class ASRRouter:
     ) -> TranscriptionResult:
         """
         使用指定的 Provider 转录音频
-        
+
         Args:
             audio_path: 音频文件路径
             provider_name: 指定 Provider，None = 使用配置的默认值
             language: 语言代码
-        
+
         Returns:
             TranscriptionResult
-        
+
         Raises:
             RuntimeError: Provider 不可用或识别失败
         """
@@ -139,7 +139,7 @@ class ASRRouter:
                     break
             if not name:
                 raise RuntimeError("没有可用的 ASR Provider")
-        
+
         provider = self._providers.get(name)
         if provider is None:
             raise RuntimeError(
@@ -151,7 +151,7 @@ class ASRRouter:
                 f"Provider '{provider.display_name}' 不可用。\n"
                 f"请检查配置（API Key、模型文件等）。"
             )
-        
+
         logger.info(f"使用 Provider: {provider.display_name}")
         return provider.transcribe(audio_path, language=language)
 

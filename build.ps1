@@ -1,6 +1,10 @@
 param(
     [switch]$InstallDependencies,
-    [string]$Python = "python"
+    [ValidateSet("Lite", "Full")]
+    [string]$Profile = "Lite",
+    [string]$Python = "python",
+    [string]$DistPath = "dist",
+    [string]$WorkPath = "build"
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,27 +12,29 @@ $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $ProjectRoot
 
 if ($InstallDependencies) {
-    & $Python -m pip install -r requirements-cloud.txt -r requirements-local.txt -r requirements-translation.txt -r requirements-dev.txt
+    $RequirementFiles = @("requirements-cloud.txt", "requirements-dev.txt")
+    if ($Profile -eq "Full") {
+        $RequirementFiles += @("requirements-local.txt", "requirements-translation.txt")
+    }
+    $RequirementArguments = foreach ($RequirementFile in $RequirementFiles) {
+        "-r"
+        $RequirementFile
+    }
+    & $Python -m pip install @RequirementArguments
     if ($LASTEXITCODE -ne 0) {
         throw "Dependency installation failed with exit code $LASTEXITCODE"
     }
 }
 
-$TranslationDependenciesAvailable = & $Python -c "import argostranslate; print('yes')" 2>$null
-if ($LASTEXITCODE -ne 0 -or $TranslationDependenciesAvailable -ne "yes") {
-    Write-Host "Installing offline-translation dependencies..."
-    & $Python -m pip install -r requirements-translation.txt
-    if ($LASTEXITCODE -ne 0) {
-        throw "Unable to install the Argos Translate dependency required by offline translation."
-    }
-}
-
 $CloudDependenciesAvailable = & $Python -c "import groq, requests; print('yes')" 2>$null
 if ($LASTEXITCODE -ne 0 -or $CloudDependenciesAvailable -ne "yes") {
-    Write-Host "Installing cloud-recognition dependencies..."
-    & $Python -m pip install -r requirements-cloud.txt
-    if ($LASTEXITCODE -ne 0) {
-        throw "Unable to install the Groq dependency required by online recognition."
+    throw "Cloud dependencies are missing. Run build.ps1 with -InstallDependencies."
+}
+
+if ($Profile -eq "Full") {
+    $LocalDependenciesAvailable = & $Python -c "import argostranslate, audio_separator, demucs, torch, torchaudio, whisper; print('yes')" 2>$null
+    if ($LASTEXITCODE -ne 0 -or $LocalDependenciesAvailable -ne "yes") {
+        throw "Full-build AI dependencies are missing. Run build.ps1 -Profile Full -InstallDependencies."
     }
 }
 
@@ -48,9 +54,19 @@ if (-not $FfprobeCommand) {
 
 $env:ECHOVAULT_FFMPEG = $FfmpegCommand.Source
 $env:ECHOVAULT_FFPROBE = $FfprobeCommand.Source
-& $Python -m PyInstaller --clean --noconfirm Echovault.spec
+$env:ECHOVAULT_BUILD_PROFILE = $Profile.ToLowerInvariant()
+& $Python -m PyInstaller --clean --noconfirm Echovault.spec `
+    --distpath $DistPath --workpath $WorkPath
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "Build complete: $ProjectRoot\dist\Echovault\Echovault.exe"
+$OutputDirectory = Join-Path (Resolve-Path -LiteralPath $DistPath) "Echovault"
+$OutputBytes = (
+    Get-ChildItem -LiteralPath $OutputDirectory -Recurse -File |
+    Measure-Object -Property Length -Sum
+).Sum
+$OutputMegabytes = [math]::Round($OutputBytes / 1MB, 1)
+Write-Host "Build profile: $Profile"
+Write-Host "Build complete: $OutputDirectory\Echovault.exe"
+Write-Host "Build size: $OutputMegabytes MB"
