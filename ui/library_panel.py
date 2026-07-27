@@ -1,4 +1,4 @@
-"""Two-mode material-library explorer and inline video-time calibration."""
+"""Local music/video material-library explorer."""
 
 from __future__ import annotations
 
@@ -289,11 +289,13 @@ class LibraryPanel(QWidget):
     def open_directory_picker(self):
         self._add_directory()
 
-    def _existing_directories(self, directories: list[str]) -> list[str]:
-        return [path for path in directories if os.path.isdir(path)]
-
-    def _switch_mode(self, video_mode: bool):
-        mode = "video" if video_mode else "music"
+    def set_mode(self, mode: str):
+        """Switch the local library without exposing a second navigation layer."""
+        if mode not in {"music", "video"}:
+            raise ValueError(f"unsupported material mode: {mode}")
+        self.mode_switch.blockSignals(True)
+        self.mode_switch.setChecked(mode == "video")
+        self.mode_switch.blockSignals(False)
         if self._mode == mode:
             return
         self._mode = mode
@@ -301,6 +303,12 @@ class LibraryPanel(QWidget):
         self.mode_changed.emit(mode)
         if self._directories[mode]:
             self.folders_selected.emit([self._directories[mode][0]])
+
+    def _existing_directories(self, directories: list[str]) -> list[str]:
+        return [path for path in directories if os.path.isdir(path)]
+
+    def _switch_mode(self, video_mode: bool):
+        self.set_mode("video" if video_mode else "music")
 
     def _refresh_folders(self):
         is_video = self._mode == "video"

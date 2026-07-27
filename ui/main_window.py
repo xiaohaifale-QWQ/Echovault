@@ -400,6 +400,34 @@ class MainWindow(QMainWindow):
                 border: 1px solid #DDE3EA;
                 border-radius: 12px;
             }
+            QFrame#materialModeBar {
+                background: #FFFFFF;
+                border: 1px solid #DDE3EA;
+                border-radius: 10px;
+            }
+            QLabel#materialModeTitle {
+                color: #14213D;
+                font-size: 14px;
+                font-weight: 700;
+            }
+            QPushButton#materialModeButton {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 7px;
+                color: #5F6D80;
+                font-size: 13px;
+                font-weight: 600;
+                padding: 8px 18px;
+            }
+            QPushButton#materialModeButton:hover {
+                background: #F3F7FC;
+                color: #1F6FBB;
+            }
+            QPushButton#materialModeButton:checked {
+                background: #E8F2FD;
+                border-color: #A9C9EA;
+                color: #1769B0;
+            }
             QPushButton#primaryAction {
                 background: #2F7DD1;
                 border: none;
@@ -526,6 +554,11 @@ class MainWindow(QMainWindow):
                     )
                 elif workspace == "transfer":
                     self.transfer_tabs.setCurrentWidget(self.sync_panel.send_page)
+                if workspace == "materials":
+                    if "视频" in query:
+                        self._set_material_mode("video")
+                    elif any(word in query for word in ("音乐", "歌曲")):
+                        self._set_material_mode("music")
                 return
         self._switch_workspace("materials")
 
@@ -595,6 +628,43 @@ class MainWindow(QMainWindow):
         return navigation
 
     def _build_materials_workspace(self):
+        workspace = QWidget()
+        workspace_layout = QVBoxLayout(workspace)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.setSpacing(10)
+
+        mode_bar = QFrame()
+        mode_bar.setObjectName("materialModeBar")
+        mode_layout = QHBoxLayout(mode_bar)
+        mode_layout.setContentsMargins(10, 7, 10, 7)
+        mode_layout.setSpacing(4)
+        mode_title = QLabel("素材视图")
+        mode_title.setObjectName("materialModeTitle")
+        mode_layout.addWidget(mode_title)
+        mode_layout.addSpacing(8)
+        self.material_mode_group = QButtonGroup(self)
+        self.material_mode_group.setExclusive(True)
+        self.material_mode_buttons: dict[str, QPushButton] = {}
+        for mode, text in (
+            ("music", "音乐素材"),
+            ("download", "音频下载"),
+            ("video", "视频素材"),
+        ):
+            button = QPushButton(text)
+            button.setObjectName("materialModeButton")
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(
+                lambda _checked=False, selected_mode=mode: self._set_material_mode(
+                    selected_mode
+                )
+            )
+            self.material_mode_group.addButton(button)
+            self.material_mode_buttons[mode] = button
+            mode_layout.addWidget(button)
+        mode_layout.addStretch()
+        workspace_layout.addWidget(mode_bar)
+
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -651,12 +721,15 @@ class MainWindow(QMainWindow):
         self.materials_vertical_splitter = vertical_splitter
         self.video_review_panel.hide()
         layout.addWidget(vertical_splitter, 1)
-        self.material_tabs = QTabWidget()
-        self.material_tabs.setDocumentMode(True)
-        self.material_tabs.addTab(page, "本地素材")
-        self.material_tabs.addTab(self.audio_download_panel, "音频下载")
-        self.material_tabs.currentChanged.connect(self._on_material_tab_changed)
-        return self.material_tabs
+        self.library_panel.mode_switch.hide()
+        self.material_content_stack = QStackedWidget()
+        self.material_local_page = page
+        self.material_content_stack.addWidget(self.material_local_page)
+        self.material_content_stack.addWidget(self.audio_download_panel)
+        workspace_layout.addWidget(self.material_content_stack, 1)
+        self._material_mode = "music"
+        self.material_mode_buttons["music"].setChecked(True)
+        return workspace
 
     def _build_lyrics_workspace(self):
         self.lyrics_tabs = QTabWidget()
@@ -712,8 +785,8 @@ class MainWindow(QMainWindow):
         return self.transfer_tabs
 
     def _switch_workspace(self, key: str):
-        material_tab = 1 if key == "download" else None
-        if material_tab is not None:
+        material_mode = "download" if key == "download" else None
+        if material_mode is not None:
             key = "materials"
         page = self.workspace_pages.get(key)
         if page is None:
@@ -730,8 +803,8 @@ class MainWindow(QMainWindow):
         self.workspace_title.setText(title)
         self.workspace_hint.setText(hint)
         self.workspace_stack.setCurrentWidget(page)
-        if material_tab is not None:
-            self.material_tabs.setCurrentIndex(material_tab)
+        if material_mode is not None:
+            self._set_material_mode(material_mode)
         self.navigation_buttons[key].setChecked(True)
         self._current_workspace_key = key
         if key == "materials":
@@ -748,20 +821,32 @@ class MainWindow(QMainWindow):
         if key == "transfer":
             self.sync_panel.refresh_transfer_results()
 
-    def _on_material_tab_changed(self, _index: int):
+    def _set_material_mode(self, mode: str):
+        if mode not in {"music", "download", "video"}:
+            return
+        self._material_mode = mode
+        self.material_mode_buttons[mode].setChecked(True)
+        if mode == "download":
+            self.material_content_stack.setCurrentWidget(self.audio_download_panel)
+        else:
+            self.material_content_stack.setCurrentWidget(self.material_local_page)
+            self.library_panel.set_mode(mode)
         if self._current_workspace_key == "materials":
             self._sync_material_workspace_header()
 
     def _sync_material_workspace_header(self):
-        if self.material_tabs.currentIndex() == 1:
-            self.workspace_title.setText("素材")
+        self.workspace_title.setText("素材")
+        if self._material_mode == "download":
             self.workspace_hint.setText(
                 "从已授权音源搜索并下载歌曲；完成后自动加入本地音乐素材库。"
             )
-        else:
-            self.workspace_title.setText("素材")
+        elif self._material_mode == "video":
             self.workspace_hint.setText(
-                "添加文件夹、浏览素材，并选择接下来要执行的任务。"
+                "管理视频素材，提取完整音频与文字，并校准同步字幕。"
+            )
+        else:
+            self.workspace_hint.setText(
+                "管理本地音乐素材，并继续识别歌词、编辑音频或补全标签。"
             )
 
     def _move_navigation_indicator(self, button: QPushButton, animate: bool) -> None:
@@ -1154,6 +1239,12 @@ class MainWindow(QMainWindow):
         self.resource_label.setText(format_resource_usage(sample_resource_usage()))
 
     def _on_material_mode_changed(self, mode: str):
+        self._material_mode = mode
+        if hasattr(self, "material_mode_buttons"):
+            self.material_mode_buttons[mode].setChecked(True)
+            self.material_content_stack.setCurrentWidget(self.material_local_page)
+            if self._current_workspace_key == "materials":
+                self._sync_material_workspace_header()
         self.song_list_panel.set_material_mode(mode)
         is_video = mode == "video"
         self._selected_song = {}

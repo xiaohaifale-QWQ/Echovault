@@ -31,11 +31,14 @@ def test_main_window_uses_five_task_workspaces_and_right_ai_drawer(
         "导出与传输",
     ]
     assert window.workspace_stack.currentWidget() is window.workspace_pages["materials"]
-    assert [window.material_tabs.tabText(index) for index in range(2)] == [
-        "本地素材",
+    assert [button.text() for button in window.material_mode_buttons.values()] == [
+        "音乐素材",
         "音频下载",
+        "视频素材",
     ]
-    assert window.material_tabs.widget(1) is window.audio_download_panel
+    assert window.material_mode_buttons["music"].isChecked()
+    assert window.material_content_stack.currentWidget() is window.material_local_page
+    assert window.library_panel.mode_switch.isHidden()
     assert [window.lyrics_tabs.tabText(index) for index in range(3)] == [
         "在线歌词与封面",
         "本地识别编辑",
@@ -100,7 +103,8 @@ def test_main_window_uses_five_task_workspaces_and_right_ai_drawer(
     window.global_search.setText("音频下载")
     window._submit_global_search()
     assert window.workspace_stack.currentWidget() is window.workspace_pages["materials"]
-    assert window.material_tabs.currentWidget() is window.audio_download_panel
+    assert window.material_content_stack.currentWidget() is window.audio_download_panel
+    assert window.material_mode_buttons["download"].isChecked()
     window.global_search.setText("手机接收")
     window._submit_global_search()
     assert window.transfer_tabs.currentWidget() is window.sync_panel.receive_page
@@ -131,7 +135,8 @@ def test_main_window_uses_five_task_workspaces_and_right_ai_drawer(
     )
     window._on_ai_ui_action_requested("open download")
     assert window.workspace_stack.currentWidget() is window.workspace_pages["materials"]
-    assert window.material_tabs.currentWidget() is window.audio_download_panel
+    assert window.material_content_stack.currentWidget() is window.audio_download_panel
+    assert window.material_mode_buttons["download"].isChecked()
 
     polish_widget_tree(window)
     assert window.statusbar.minimumHeight() >= 30
@@ -300,9 +305,12 @@ def test_video_mode_exposes_one_processing_action_and_review_workspace(monkeypat
     )
     window = keep_widget(MainWindow())
 
-    window._on_material_mode_changed("video")
+    window._set_material_mode("video")
 
     assert window.material_lyrics_action.text() == "提取音频与识别文字"
+    assert window.material_mode_buttons["video"].isChecked()
+    assert window.material_content_stack.currentWidget() is window.material_local_page
+    assert window.library_panel.mode == "video"
     assert window.video_review_panel.isHidden() is False
     assert window.material_cover_action.isHidden() is True
     assert window.material_audio_action.isHidden() is True
